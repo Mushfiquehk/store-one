@@ -4,12 +4,24 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
 import { queryClient } from "./lib/queryClient";
-import Home from "./pages/home";
+
+import OnboardingPage from "@/pages/onboarding";
+import PosPage from "@/pages/pos";
+import InventoryPage from "@/pages/inventory";
+import RecipesPage from "@/pages/recipes";
+import MenuPage from "@/pages/menu";
+import ReportsPage from "@/pages/reports";
 
 function Router() {
   return (
     <Switch>
-      <Route path="/" component={Home} />
+      <Route path="/" component={OnboardingPage} />
+      <Route path="/pos" component={PosPage} />
+      <Route path="/inventory" component={InventoryPage} />
+      <Route path="/recipes" component={RecipesPage} />
+      <Route path="/menu" component={MenuPage} />
+      <Route path="/reports" component={ReportsPage} />
+
       <Route component={NotFound} />
     </Switch>
   );

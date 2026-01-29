@@ -15,12 +15,12 @@ export default function NotFound() {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground" data-testid="text-404-body">
-            That page doesn’t exist. Head back to the storefront.
+            That page doesn’t exist. Head back to start.
           </p>
           <Link href="/" data-testid="link-home">
             <Button className="w-full rounded-2xl" data-testid="button-back-home">
               <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to CornerPOS
+              Back to Start
             </Button>
           </Link>
         </CardContent>

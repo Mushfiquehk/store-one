@@ -71,6 +71,8 @@ function sumBy<T>(arr: T[], fn: (t: T) => number) {
 }
 
 export default function Home() {
+  // Deprecated: this page was split into dedicated routes.
+  // Keeping this file temporarily to avoid breaking imports during iteration.
   const { toast } = useToast();
 
   const [businessName, setBusinessName] = useState("Corner Store");
