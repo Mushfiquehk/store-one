@@ -2,6 +2,7 @@ import { motion } from "framer-motion";
 import { ArrowRight, ClipboardList, LayoutGrid, Package, Soup } from "lucide-react";
 import { Link } from "wouter";
 import AppShell from "@/components/app-shell";
+import HelpDialog from "@/components/help-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -15,59 +16,71 @@ export default function OnboardingPage() {
               <p className="text-sm font-medium text-muted-foreground" data-testid="text-tagline">
                 Getting started
               </p>
-              <h1 className="mt-2 font-serif text-3xl tracking-[-0.02em] sm:text-4xl" data-testid="text-title">
-                Set up your shop in 5 steps
-              </h1>
-              <p className="mt-2 max-w-2xl text-sm text-muted-foreground" data-testid="text-subtitle">
-                This app is designed for mom-and-pop shops: minimal setup, clear steps, and fast daily use.
-              </p>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                <div className="min-w-0">
+                  <h1 className="mt-2 font-serif text-3xl tracking-[-0.02em] sm:text-4xl" data-testid="text-title">
+                    Setup
+                  </h1>
+                  <p className="mt-2 max-w-2xl text-sm text-muted-foreground" data-testid="text-subtitle">
+                    Quick checklist.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <HelpDialog
+                    title="Setup"
+                    summary="Set up once. Use POS daily."
+                    steps={["Add inventory", "Create recipes", "Create menu", "Link recipes", "Open POS"]}
+                    testid="button-help-setup"
+                  />
+                </div>
+              </div>
 
               <Separator className="my-6" />
 
               <div className="grid gap-4">
                 <StepCard
                   n={1}
-                  title="Add your inventory items"
-                  body="Start with the real things you count (cups, beans, milk, napkins). Keep IDs simple." 
+                  title="Inventory"
+                  body="Add items you count."
                   icon={<Package className="h-4 w-4" />}
                   href="/inventory"
-                  cta="Go to Inventory"
+                  cta="Open"
                   testid="stepcard-inventory"
                 />
                 <StepCard
                   n={2}
-                  title="Create recipes using inventory"
-                  body="A recipe is what gets used when you sell one menu item (e.g., latte uses beans + milk + cup)." 
+                  title="Recipes"
+                  body="Set ingredients per sale."
                   icon={<Soup className="h-4 w-4" />}
                   href="/recipes"
-                  cta="Go to Recipes"
+                  cta="Open"
                   testid="stepcard-recipes"
                 />
                 <StepCard
                   n={3}
-                  title="Add menu items"
-                  body="Create what customers buy (coffee, latte, muffin) and set price and category." 
+                  title="Menu"
+                  body="Add items customers buy."
                   icon={<ClipboardList className="h-4 w-4" />}
                   href="/menu"
-                  cta="Go to Menu"
+                  cta="Open"
                   testid="stepcard-menu"
                 />
                 <StepCard
                   n={4}
-                  title="Link recipes to menu items"
-                  body="Linking is what makes inventory deduct automatically when you record a sale." 
+                  title="Link recipes"
+                  body="Connect Menu \u2192 Recipe."
                   icon={<ArrowRight className="h-4 w-4" />}
                   href="/menu"
-                  cta="Link recipes"
+                  cta="Open"
                   testid="stepcard-link"
                 />
                 <StepCard
                   n={5}
-                  title="Record a sale"
-                  body="Use the POS page daily. It will block sales if a recipe is missing or inventory is too low." 
+                  title="POS"
+                  body="Ring sales. Inventory deducts."
                   icon={<LayoutGrid className="h-4 w-4" />}
-                  href="/pos"
-                  cta="Open POS"
+                  href="/"
+                  cta="Open"
                   testid="stepcard-pos"
                 />
               </div>
@@ -86,7 +99,7 @@ export default function OnboardingPage() {
               </div>
 
               <p className="mt-4 text-xs text-muted-foreground" data-testid="text-prototype-note">
-                Prototype: each page currently uses local demo data. Next step is to centralize the shared data model.
+                Demo only.
               </p>
             </div>
         </header>

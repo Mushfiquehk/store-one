@@ -252,4 +252,12 @@
     transform: translateY(-1px);
     box-shadow: var(--shadow-lg);
   }
+
+  .nav-scroll {
+    scrollbar-width: none;
+  }
+
+  .nav-scroll::-webkit-scrollbar {
+    display: none;
+  }
 }

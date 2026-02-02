@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { BarChart3, FileDown } from "lucide-react";
 import AppShell from "@/components/app-shell";
+import HelpDialog from "@/components/help-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -233,12 +234,24 @@ export default function ReportsPage() {
               <p className="text-sm font-medium text-muted-foreground" data-testid="text-tagline">
                 Back Office
               </p>
-              <h1 className="mt-2 font-serif text-3xl tracking-[-0.02em] sm:text-4xl" data-testid="text-title">
-                Reports + Export
-              </h1>
-              <p className="mt-2 max-w-2xl text-sm text-muted-foreground" data-testid="text-subtitle">
-                Quick KPIs and a single text file export you can paste into any LLM for recommendations.
-              </p>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                <div className="min-w-0">
+                  <h1 className="mt-2 font-serif text-3xl tracking-[-0.02em] sm:text-4xl" data-testid="text-title">
+                    Reports
+                  </h1>
+                  <p className="mt-2 max-w-2xl text-sm text-muted-foreground" data-testid="text-subtitle">
+                    KPIs + one-file export.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <HelpDialog
+                    title="Reports + Export"
+                    summary="Copy or download one text file for any LLM."
+                    steps={["Check KPIs", "Copy export", "Download .txt"]}
+                    testid="button-help-reports"
+                  />
+                </div>
+              </div>
 
               <Separator className="my-6" />
 
@@ -295,7 +308,7 @@ export default function ReportsPage() {
                     </div>
 
                     <p className="mt-3 text-xs text-muted-foreground" data-testid="text-prototype-note">
-                      Prototype: reports here are local to this page for now.
+                      Demo data.
                     </p>
                   </CardContent>
                 </Card>

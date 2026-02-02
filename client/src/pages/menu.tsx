@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { ClipboardList, Link2, Plus, Soup } from "lucide-react";
 import AppShell from "@/components/app-shell";
+import HelpDialog from "@/components/help-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -150,12 +151,24 @@ export default function MenuPage() {
               <p className="text-sm font-medium text-muted-foreground" data-testid="text-tagline">
                 Back Office
               </p>
-              <h1 className="mt-2 font-serif text-3xl tracking-[-0.02em] sm:text-4xl" data-testid="text-title">
-                Menu
-              </h1>
-              <p className="mt-2 max-w-2xl text-sm text-muted-foreground" data-testid="text-subtitle">
-                Step 1: add a menu item. Step 2: link it to a recipe so inventory deducts automatically when you record a sale.
-              </p>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                <div className="min-w-0">
+                  <h1 className="mt-2 font-serif text-3xl tracking-[-0.02em] sm:text-4xl" data-testid="text-title">
+                    Menu
+                  </h1>
+                  <p className="mt-2 max-w-2xl text-sm text-muted-foreground" data-testid="text-subtitle">
+                    Create items. Link recipes.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <HelpDialog
+                    title="Menu"
+                    summary="Menu items are what customers buy."
+                    steps={["Add menu item", "Select it in the list", "Link a recipe (optional)"]}
+                    testid="button-help-menu"
+                  />
+                </div>
+              </div>
 
               <Separator className="my-6" />
 
@@ -168,33 +181,6 @@ export default function MenuPage() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <ol className="grid gap-3 rounded-2xl border bg-background/40 p-4 text-sm" data-testid="list-steps-menu">
-                      <li className="flex gap-3" data-testid="step-menu-1">
-                        <span className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
-                          1
-                        </span>
-                        <span>
-                          Enter <span className="font-medium">Name</span>, <span className="font-medium">Category</span>, and <span className="font-medium">Price</span>.
-                        </span>
-                      </li>
-                      <li className="flex gap-3" data-testid="step-menu-2">
-                        <span className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
-                          2
-                        </span>
-                        <span>
-                          Click <span className="font-medium">Add item</span>. It will appear in the list and become selected.
-                        </span>
-                      </li>
-                      <li className="flex gap-3" data-testid="step-menu-3">
-                        <span className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
-                          3
-                        </span>
-                        <span>
-                          Link a recipe on the right (optional now, required if you want automatic inventory deduction).
-                        </span>
-                      </li>
-                    </ol>
-
                     <div className="mt-4 grid gap-3">
                       <div className="grid gap-2 sm:grid-cols-2">
                         <div>

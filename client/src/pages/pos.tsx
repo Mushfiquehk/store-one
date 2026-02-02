@@ -278,7 +278,7 @@ export default function PosPage() {
                   {businessName}\u00A0POS
                 </h2>
                 <p className="mt-2 max-w-2xl text-sm text-muted-foreground" data-testid="text-subtitle">
-                  Tap to add items. When you record a sale, inventory is deducted using each item’s recipe.
+                  Tap items. Record sale.
                 </p>
               </div>
 
@@ -475,7 +475,7 @@ export default function PosPage() {
                     </div>
 
                     <p className="mt-3 text-xs text-muted-foreground" data-testid="text-sale-note">
-                      Prototype: data resets on refresh.
+                      Demo only.
                     </p>
 
                     <p className="mt-2 text-xs text-muted-foreground" data-testid="text-sales-count">

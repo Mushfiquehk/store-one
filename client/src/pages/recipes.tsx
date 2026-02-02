@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Plus, Soup } from "lucide-react";
 import AppShell from "@/components/app-shell";
+import HelpDialog from "@/components/help-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -144,12 +145,24 @@ export default function RecipesPage() {
               <p className="text-sm font-medium text-muted-foreground" data-testid="text-tagline">
                 Back Office
               </p>
-              <h1 className="mt-2 font-serif text-3xl tracking-[-0.02em] sm:text-4xl" data-testid="text-title">
-                Recipes
-              </h1>
-              <p className="mt-2 max-w-2xl text-sm text-muted-foreground" data-testid="text-subtitle">
-                Recipes are built from inventory items. When a menu item links to a recipe, recording a sale deducts those ingredients.
-              </p>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                <div className="min-w-0">
+                  <h1 className="mt-2 font-serif text-3xl tracking-[-0.02em] sm:text-4xl" data-testid="text-title">
+                    Recipes
+                  </h1>
+                  <p className="mt-2 max-w-2xl text-sm text-muted-foreground" data-testid="text-subtitle">
+                    Ingredients per sale.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <HelpDialog
+                    title="Recipes"
+                    summary="Recipes deduct inventory when sold."
+                    steps={["Create recipe", "Add ingredients + qty", "Link recipe in Menu"]}
+                    testid="button-help-recipes"
+                  />
+                </div>
+              </div>
 
               <Separator className="my-6" />
 
@@ -162,33 +175,6 @@ export default function RecipesPage() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <ol className="grid gap-3 rounded-2xl border bg-background/40 p-4 text-sm" data-testid="list-steps-recipe">
-                      <li className="flex gap-3" data-testid="step-recipe-1">
-                        <span className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
-                          1
-                        </span>
-                        <span>
-                          Enter a <span className="font-medium">recipe name</span> and click <span className="font-medium">Create recipe</span>.
-                        </span>
-                      </li>
-                      <li className="flex gap-3" data-testid="step-recipe-2">
-                        <span className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
-                          2
-                        </span>
-                        <span>
-                          Select the recipe from the list (it will auto-select after creation).
-                        </span>
-                      </li>
-                      <li className="flex gap-3" data-testid="step-recipe-3">
-                        <span className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
-                          3
-                        </span>
-                        <span>
-                          Add ingredients: choose an <span className="font-medium">inventory item</span> and a <span className="font-medium">quantity</span> used per sale.
-                        </span>
-                      </li>
-                    </ol>
-
                     <div className="mt-4 grid gap-3">
                       <div>
                         <Label className="text-xs text-muted-foreground" htmlFor="recipeName">

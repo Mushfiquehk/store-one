@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Package, Plus } from "lucide-react";
 import AppShell from "@/components/app-shell";
+import HelpDialog from "@/components/help-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -108,12 +109,24 @@ export default function InventoryPage() {
               <p className="text-sm font-medium text-muted-foreground" data-testid="text-tagline">
                 Back Office
               </p>
-              <h1 className="mt-2 font-serif text-3xl tracking-[-0.02em] sm:text-4xl" data-testid="text-title">
-                Inventory
-              </h1>
-              <p className="mt-2 max-w-2xl text-sm text-muted-foreground" data-testid="text-subtitle">
-                Step 1: add an inventory item. Step 2: count on-hand. Step 3: use it in recipes so sales deduct automatically.
-              </p>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                <div className="min-w-0">
+                  <h1 className="mt-2 font-serif text-3xl tracking-[-0.02em] sm:text-4xl" data-testid="text-title">
+                    Inventory
+                  </h1>
+                  <p className="mt-2 max-w-2xl text-sm text-muted-foreground" data-testid="text-subtitle">
+                    Add items and update counts.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <HelpDialog
+                    title="Inventory"
+                    summary="Add what you count. Keep IDs simple."
+                    steps={["Add item (name, SKU, unit)", "Set on-hand + reorder", "Adjust counts daily"]}
+                    testid="button-help-inventory"
+                  />
+                </div>
+              </div>
 
               <Separator className="my-6" />
 
@@ -126,33 +139,6 @@ export default function InventoryPage() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <ol className="grid gap-3 rounded-2xl border bg-background/40 p-4 text-sm" data-testid="list-steps-inventory">
-                      <li className="flex gap-3" data-testid="step-inventory-1">
-                        <span className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
-                          1
-                        </span>
-                        <span>
-                          Enter <span className="font-medium">Name</span> and a <span className="font-medium">SKU</span> (SKU becomes the internal ID).
-                        </span>
-                      </li>
-                      <li className="flex gap-3" data-testid="step-inventory-2">
-                        <span className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
-                          2
-                        </span>
-                        <span>
-                          Set <span className="font-medium">Unit</span> (each, g, ml, etc.), plus <span className="font-medium">On hand</span> and <span className="font-medium">Reorder at</span>.
-                        </span>
-                      </li>
-                      <li className="flex gap-3" data-testid="step-inventory-3">
-                        <span className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-xs font-medium text-primary">
-                          3
-                        </span>
-                        <span>
-                          Click <span className="font-medium">Add inventory item</span>. Next: build recipes using these items.
-                        </span>
-                      </li>
-                    </ol>
-
                     <div className="mt-4 grid gap-3">
                       <div>
                         <Label className="text-xs text-muted-foreground" htmlFor="invName">
