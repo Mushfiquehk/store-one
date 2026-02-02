@@ -11,8 +11,8 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
 const nav = [
-  { href: "/", label: "Start", icon: Sparkles, testid: "link-nav-start" },
-  { href: "/pos", label: "POS", icon: LayoutGrid, testid: "link-nav-pos" },
+  { href: "/", label: "POS", icon: LayoutGrid, testid: "link-nav-pos" },
+  { href: "/start", label: "Start", icon: Sparkles, testid: "link-nav-start" },
   { href: "/inventory", label: "Inventory", icon: Package, testid: "link-nav-inventory" },
   { href: "/recipes", label: "Recipes", icon: Soup, testid: "link-nav-recipes" },
   { href: "/menu", label: "Menu", icon: ClipboardList, testid: "link-nav-menu" },

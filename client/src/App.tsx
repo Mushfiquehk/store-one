@@ -15,8 +15,8 @@ import ReportsPage from "@/pages/reports";
 function Router() {
   return (
     <Switch>
-      <Route path="/" component={OnboardingPage} />
-      <Route path="/pos" component={PosPage} />
+      <Route path="/" component={PosPage} />
+      <Route path="/start" component={OnboardingPage} />
       <Route path="/inventory" component={InventoryPage} />
       <Route path="/recipes" component={RecipesPage} />
       <Route path="/menu" component={MenuPage} />
