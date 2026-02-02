@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { BarChart3, FileDown } from "lucide-react";
+import AppShell from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -226,9 +227,8 @@ export default function ReportsPage() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
-      <div className="min-h-screen app-shell">
-        <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
-          <header className="relative overflow-hidden rounded-3xl border bg-card shadow-soft grain">
+      <AppShell title="Reports">
+        <header className="relative overflow-hidden rounded-3xl border bg-card shadow-soft grain">
             <div className="p-6 sm:p-8">
               <p className="text-sm font-medium text-muted-foreground" data-testid="text-tagline">
                 Back Office
@@ -301,9 +301,8 @@ export default function ReportsPage() {
                 </Card>
               </div>
             </div>
-          </header>
-        </div>
-      </div>
+        </header>
+      </AppShell>
     </motion.div>
   );
 }
