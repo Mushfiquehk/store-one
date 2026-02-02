@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { LayoutGrid, Receipt, ShoppingBag } from "lucide-react";
+import AppShell from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -265,46 +266,42 @@ export default function PosPage() {
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
-      <div className="min-h-screen app-shell">
-        <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-          <header className="relative overflow-hidden rounded-3xl border bg-card shadow-soft grain">
-            <div className="p-6 sm:p-8">
-              <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-muted-foreground" data-testid="text-tagline">
-                    Storefront
-                  </p>
-                  <h1
-                    className="mt-2 font-serif text-3xl leading-tight tracking-[-0.02em] sm:text-4xl"
-                    data-testid="text-title"
-                  >
-                    {businessName} POS
-                  </h1>
-                  <p className="mt-2 max-w-2xl text-sm text-muted-foreground" data-testid="text-subtitle">
-                    Tap to add items. When you record a sale, inventory is deducted using each item’s recipe.
-                  </p>
-                </div>
-
-                <div className="grid w-full gap-2 sm:w-auto sm:grid-cols-2">
-                  <Input
-                    value={businessName}
-                    onChange={(e) => setBusinessName(e.target.value)}
-                    className="rounded-2xl"
-                    data-testid="input-business-name"
-                  />
-                  <Input
-                    value={String(taxRatePct)}
-                    onChange={(e) => setTaxRatePct(Number(e.target.value))}
-                    className="rounded-2xl"
-                    inputMode="decimal"
-                    data-testid="input-tax-rate"
-                  />
-                </div>
+      <AppShell title="POS">
+        <header className="relative overflow-hidden rounded-3xl border bg-card shadow-soft grain">
+          <div className="p-6 sm:p-8">
+            <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-muted-foreground" data-testid="text-tagline">
+                  Storefront
+                </p>
+                <h2 className="mt-2 font-serif text-3xl leading-tight tracking-[-0.02em] sm:text-4xl" data-testid="text-title">
+                  {businessName}\u00A0POS
+                </h2>
+                <p className="mt-2 max-w-2xl text-sm text-muted-foreground" data-testid="text-subtitle">
+                  Tap to add items. When you record a sale, inventory is deducted using each item’s recipe.
+                </p>
               </div>
 
-              <Separator className="my-6" />
+              <div className="grid w-full gap-2 sm:w-auto sm:grid-cols-2">
+                <Input
+                  value={businessName}
+                  onChange={(e) => setBusinessName(e.target.value)}
+                  className="rounded-2xl"
+                  data-testid="input-business-name"
+                />
+                <Input
+                  value={String(taxRatePct)}
+                  onChange={(e) => setTaxRatePct(Number(e.target.value))}
+                  className="rounded-2xl"
+                  inputMode="decimal"
+                  data-testid="input-tax-rate"
+                />
+              </div>
+            </div>
 
-              <div className="grid gap-6 lg:grid-cols-12">
+            <Separator className="my-6" />
+
+            <div className="grid gap-6 lg:grid-cols-12">
                 <Card className="border bg-card shadow-soft lg:col-span-7">
                   <CardHeader className="pb-3">
                     <CardTitle className="flex items-center gap-2 font-serif" data-testid="text-pos-title">
@@ -486,11 +483,10 @@ export default function PosPage() {
                     </p>
                   </CardContent>
                 </Card>
-              </div>
             </div>
-          </header>
-        </div>
-      </div>
+          </div>
+        </header>
+      </AppShell>
     </motion.div>
   );
 }

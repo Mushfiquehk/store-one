@@ -41,7 +41,7 @@ export default function AppShell({
             </h1>
           </div>
 
-          <div className="hidden items-center gap-2 sm:flex" data-testid="nav-top">
+          <div className="flex flex-wrap items-center justify-end gap-2" data-testid="nav-top">
             {nav.map((n) => {
               const active = location === n.href;
               const Icon = n.icon;
