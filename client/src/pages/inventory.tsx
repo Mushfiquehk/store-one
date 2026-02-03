@@ -9,17 +9,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-
-type InventoryItem = {
-  id: string;
-  name: string;
-  sku: string;
-  onHand: number;
-  reorderAt: number;
-  unitCostCents: number;
-  unit: string;
-};
+import { useStore, type InventoryItem } from "@/lib/store";
 
 function formatMoney(cents: number) {
   return new Intl.NumberFormat(undefined, {
@@ -28,22 +20,13 @@ function formatMoney(cents: number) {
   }).format(cents / 100);
 }
 
-function uid(prefix: string) {
-  return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`;
-}
-
 export default function InventoryPage() {
   const { toast } = useToast();
-
-  const [inventory, setInventory] = useState<InventoryItem[]>([
-    { id: "beans_g", name: "Coffee Beans", sku: "BEANS", onHand: 2500, reorderAt: 1200, unitCostCents: 2, unit: "g" },
-    { id: "milk_ml", name: "Whole Milk", sku: "MILK", onHand: 6000, reorderAt: 2500, unitCostCents: 1, unit: "ml" },
-    { id: "cup_12oz", name: "Cup 12oz", sku: "CUP-12", onHand: 250, reorderAt: 120, unitCostCents: 9, unit: "each" },
-    { id: "muffin_each", name: "Muffin", sku: "MUFF", onHand: 24, reorderAt: 12, unitCostCents: 150, unit: "each" },
-  ]);
+  const { inventory, inventoryCategories, addInventoryItem, updateInventoryCount } = useStore();
 
   const [draftName, setDraftName] = useState("");
   const [draftSku, setDraftSku] = useState("");
+  const [draftCategory, setDraftCategory] = useState(inventoryCategories[0]?.id ?? "");
   const [draftUnit, setDraftUnit] = useState("each");
   const [draftOnHand, setDraftOnHand] = useState("0");
   const [draftReorderAt, setDraftReorderAt] = useState("0");
@@ -51,7 +34,7 @@ export default function InventoryPage() {
 
   const lowStockCount = useMemo(() => inventory.filter((i) => i.onHand <= i.reorderAt).length, [inventory]);
 
-  function addInventoryItem() {
+  function handleAddItem() {
     const name = draftName.trim();
     const sku = draftSku.trim();
     const unit = draftUnit.trim() || "each";
@@ -79,13 +62,14 @@ export default function InventoryPage() {
       id: sku.replaceAll(/\s+/g, "_").toLowerCase(),
       name,
       sku,
+      categoryId: draftCategory,
       unit,
       onHand: Math.trunc(onHand),
       reorderAt: Math.trunc(reorderAt),
       unitCostCents: Math.round(unitCost * 100),
     };
 
-    setInventory((prev) => [item, ...prev]);
+    addInventoryItem(item);
 
     setDraftName("");
     setDraftSku("");
@@ -98,7 +82,7 @@ export default function InventoryPage() {
   }
 
   function adjustOnHand(id: string, delta: number) {
-    setInventory((prev) => prev.map((i) => (i.id === id ? { ...i, onHand: Math.max(0, i.onHand + delta) } : i)));
+    updateInventoryCount(id, delta);
   }
 
   return (
@@ -169,6 +153,24 @@ export default function InventoryPage() {
                       </div>
 
                       <div>
+                        <Label className="text-xs text-muted-foreground" htmlFor="invCategory">
+                          Category
+                        </Label>
+                        <Select value={draftCategory} onValueChange={setDraftCategory}>
+                          <SelectTrigger className="mt-1 rounded-2xl" id="invCategory" data-testid="select-inventory-category">
+                            <SelectValue placeholder="Select category" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {inventoryCategories.map((c) => (
+                              <SelectItem key={c.id} value={c.id} data-testid={`option-category-${c.id}`}>
+                                {c.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div>
                         <Label className="text-xs text-muted-foreground" htmlFor="invUnit">
                           Unit
                         </Label>
@@ -226,7 +228,7 @@ export default function InventoryPage() {
                         />
                       </div>
 
-                      <Button className="rounded-2xl" onClick={addInventoryItem} data-testid="button-add-inventory-item">
+                      <Button className="rounded-2xl" onClick={handleAddItem} data-testid="button-add-inventory-item">
                         <Plus className="mr-2 h-4 w-4" />
                         Add inventory item
                       </Button>
@@ -267,7 +269,7 @@ export default function InventoryPage() {
                                         {i.name}
                                       </p>
                                       <p className="text-xs text-muted-foreground" data-testid={`text-inventory-sku-${i.id}`}>
-                                        {i.sku} • Unit {i.unit} • Reorder at {i.reorderAt} • Cost {formatMoney(i.unitCostCents)}
+                                        {i.sku} • {inventoryCategories.find((c) => c.id === i.categoryId)?.name ?? "Uncategorized"} • {i.unit} • Cost {formatMoney(i.unitCostCents)}
                                       </p>
                                     </div>
                                     <span
@@ -325,7 +327,7 @@ export default function InventoryPage() {
                     </div>
 
                     <p className="mt-3 text-xs text-muted-foreground" data-testid="text-prototype-note">
-                      Prototype: inventory here is local to this page.
+                      Note: inventory is now centralized in the store.
                     </p>
                   </CardContent>
                 </Card>

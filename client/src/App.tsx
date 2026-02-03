@@ -4,6 +4,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
 import { queryClient } from "./lib/queryClient";
+import { StoreProvider } from "@/lib/store";
 
 import OnboardingPage from "@/pages/onboarding";
 import PosPage from "@/pages/pos";
@@ -30,10 +31,12 @@ function Router() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <Toaster />
-        <Router />
-      </TooltipProvider>
+      <StoreProvider>
+        <TooltipProvider>
+          <Toaster />
+          <Router />
+        </TooltipProvider>
+      </StoreProvider>
     </QueryClientProvider>
   );
 }

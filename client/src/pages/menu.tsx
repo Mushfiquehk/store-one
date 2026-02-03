@@ -9,22 +9,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-
-type MenuItem = {
-  id: string;
-  name: string;
-  priceCents: number;
-  category: string;
-  taxable: boolean;
-  recipeId?: string | null;
-};
-
-type Recipe = {
-  id: string;
-  name: string;
-  ingredients: Array<{ invId: string; qty: number }>;
-};
+import { useStore, type MenuItem } from "@/lib/store";
 
 function formatMoney(cents: number) {
   return new Intl.NumberFormat(undefined, {
@@ -39,69 +26,31 @@ function uid(prefix: string) {
 
 export default function MenuPage() {
   const { toast } = useToast();
-
-  const [menu, setMenu] = useState<MenuItem[]>([
-    {
-      id: "coffee",
-      name: "House Coffee",
-      priceCents: 350,
-      category: "Drinks",
-      taxable: true,
-      recipeId: "recipe_coffee",
-    },
-    {
-      id: "latte",
-      name: "Vanilla Latte",
-      priceCents: 575,
-      category: "Drinks",
-      taxable: true,
-      recipeId: "recipe_latte",
-    },
-    {
-      id: "muffin",
-      name: "Blueberry Muffin",
-      priceCents: 425,
-      category: "Bakery",
-      taxable: true,
-      recipeId: null,
-    },
-  ]);
-
-  const [recipes, setRecipes] = useState<Recipe[]>([
-    {
-      id: "recipe_coffee",
-      name: "Coffee (12oz)",
-      ingredients: [
-        { invId: "beans_g", qty: 18 },
-        { invId: "cup_12oz", qty: 1 },
-      ],
-    },
-    {
-      id: "recipe_latte",
-      name: "Vanilla Latte (12oz)",
-      ingredients: [
-        { invId: "beans_g", qty: 18 },
-        { invId: "milk_ml", qty: 220 },
-        { invId: "cup_12oz", qty: 1 },
-      ],
-    },
-  ]);
-
-  const recipesById = useMemo(() => {
-    const map = new Map<string, Recipe>();
-    for (const r of recipes) map.set(r.id, r);
-    return map;
-  }, [recipes]);
+  const { menu, recipes, menuCategories, addMenuItem, updateMenuItem } = useStore();
 
   const [draftName, setDraftName] = useState("");
-  const [draftCategory, setDraftCategory] = useState("General");
+  const [draftCategory, setDraftCategory] = useState(menuCategories[0]?.id ?? "");
   const [draftPrice, setDraftPrice] = useState("");
   const [draftTaxable, setDraftTaxable] = useState(true);
 
-  const [selectedMenuId, setSelectedMenuId] = useState<string | null>(menu[0]?.id ?? null);
-  const selectedMenu = useMemo(() => menu.find((m) => m.id === selectedMenuId) ?? null, [menu, selectedMenuId]);
+  const [selectedMenuId, setSelectedMenuId] = useState<string | null>(null);
+  
+  // Ensure selectedMenu is valid (store might update)
+  const selectedMenu = useMemo(() => 
+    menu.find((m) => m.id === selectedMenuId) ?? null
+  , [menu, selectedMenuId]);
 
-  function addMenuItem() {
+  // If selectedMenu becomes null (deleted/filtered), clear selection
+  if (selectedMenuId && !selectedMenu && menu.length > 0) {
+      setSelectedMenuId(null);
+  }
+  
+  // Default selection if none
+  if (!selectedMenuId && menu.length > 0) {
+      setSelectedMenuId(menu[0].id);
+  }
+
+  function handleAddItem() {
     const name = draftName.trim();
     if (!name) {
       toast({ title: "Name is required", description: "Enter a menu item name." });
@@ -117,13 +66,13 @@ export default function MenuPage() {
     const item: MenuItem = {
       id: uid("menu"),
       name,
-      category: draftCategory.trim() || "General",
+      categoryIds: [draftCategory],
       priceCents: Math.round(price * 100),
       taxable: draftTaxable,
       recipeId: null,
     };
 
-    setMenu((prev) => [item, ...prev]);
+    addMenuItem(item);
     setSelectedMenuId(item.id);
 
     setDraftName("");
@@ -135,7 +84,7 @@ export default function MenuPage() {
   function assignRecipe(recipeId: string | null) {
     if (!selectedMenu) return;
 
-    setMenu((prev) => prev.map((m) => (m.id === selectedMenu.id ? { ...m, recipeId } : m)));
+    updateMenuItem(selectedMenu.id, { recipeId });
 
     toast({
       title: "Recipe link updated",
@@ -200,14 +149,18 @@ export default function MenuPage() {
                           <Label className="text-xs text-muted-foreground" htmlFor="menuCategory">
                             Category
                           </Label>
-                          <Input
-                            id="menuCategory"
-                            value={draftCategory}
-                            onChange={(e) => setDraftCategory(e.target.value)}
-                            className="mt-1 rounded-2xl"
-                            placeholder="e.g., Drinks"
-                            data-testid="input-menu-category"
-                          />
+                          <Select value={draftCategory} onValueChange={setDraftCategory}>
+                            <SelectTrigger className="mt-1 rounded-2xl" id="menuCategory" data-testid="select-menu-category">
+                              <SelectValue placeholder="Select category" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {menuCategories.map((c) => (
+                                <SelectItem key={c.id} value={c.id} data-testid={`option-menucat-${c.id}`}>
+                                  {c.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </div>
                       </div>
 
@@ -246,7 +199,7 @@ export default function MenuPage() {
                         </div>
                       </div>
 
-                      <Button className="rounded-2xl" onClick={addMenuItem} data-testid="button-add-menu-item">
+                      <Button className="rounded-2xl" onClick={handleAddItem} data-testid="button-add-menu-item">
                         <Plus className="mr-2 h-4 w-4" />
                         Add item
                       </Button>
@@ -290,7 +243,7 @@ export default function MenuPage() {
                                     </div>
                                   </TableCell>
                                   <TableCell className="text-muted-foreground" data-testid={`text-menu-row-category-${m.id}`}>
-                                    {m.category}
+                                    {menuCategories.find(c => c.id === m.categoryIds[0])?.name ?? "Uncategorized"}
                                   </TableCell>
                                   <TableCell className="text-right" data-testid={`text-menu-row-price-${m.id}`}>
                                     {formatMoney(m.priceCents)}
@@ -323,7 +276,7 @@ export default function MenuPage() {
                             {selectedMenu.name}
                           </p>
                           <p className="mt-1 text-sm text-muted-foreground" data-testid="text-selected-menu-meta">
-                            {formatMoney(selectedMenu.priceCents)} • {selectedMenu.category}
+                            {formatMoney(selectedMenu.priceCents)} • {menuCategories.find(c => c.id === selectedMenu.categoryIds[0])?.name ?? "Uncategorized"}
                           </p>
                         </div>
 
@@ -357,7 +310,7 @@ export default function MenuPage() {
                                     {r.name}
                                   </span>
                                   <span className="text-xs text-muted-foreground" data-testid={`text-recipe-ingredient-count-${r.id}`}>
-                                    {r.ingredients.length} ingredients
+                                    {r.components.length} components
                                   </span>
                                 </Button>
                               );
@@ -405,7 +358,7 @@ export default function MenuPage() {
                     </div>
 
                     <p className="mt-3 text-xs text-muted-foreground" data-testid="text-prototype-note">
-                      Prototype: recipes are local to this page for now.
+                      Note: menu is now centralized in the store.
                     </p>
                   </CardContent>
                 </Card>

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Plus, Soup } from "lucide-react";
+import { Plus, Soup, Trash2 } from "lucide-react";
 import AppShell from "@/components/app-shell";
 import HelpDialog from "@/components/help-dialog";
 import { Button } from "@/components/ui/button";
@@ -9,19 +9,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-
-type InventoryItem = {
-  id: string;
-  name: string;
-  unit: string;
-};
-
-type Recipe = {
-  id: string;
-  name: string;
-  ingredients: Array<{ invId: string; qty: number }>;
-};
+import { useStore, type Recipe, type RecipeComponent } from "@/lib/store";
 
 function uid(prefix: string) {
   return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`;
@@ -29,112 +20,103 @@ function uid(prefix: string) {
 
 export default function RecipesPage() {
   const { toast } = useToast();
+  const { recipes, inventory, inventoryCategories, addRecipe, updateRecipe } = useStore();
 
-  const [inventory] = useState<InventoryItem[]>([
-    { id: "beans_g", name: "Coffee Beans", unit: "g" },
-    { id: "milk_ml", name: "Whole Milk", unit: "ml" },
-    { id: "cup_12oz", name: "Cup 12oz", unit: "each" },
-    { id: "muffin_each", name: "Muffin", unit: "each" },
-  ]);
-
-  const invById = useMemo(() => {
-    const map = new Map<string, InventoryItem>();
-    for (const i of inventory) map.set(i.id, i);
-    return map;
-  }, [inventory]);
-
-  const [recipes, setRecipes] = useState<Recipe[]>([
-    {
-      id: "recipe_coffee",
-      name: "Coffee (12oz)",
-      ingredients: [
-        { invId: "beans_g", qty: 18 },
-        { invId: "cup_12oz", qty: 1 },
-      ],
-    },
-    {
-      id: "recipe_latte",
-      name: "Vanilla Latte (12oz)",
-      ingredients: [
-        { invId: "beans_g", qty: 18 },
-        { invId: "milk_ml", qty: 220 },
-        { invId: "cup_12oz", qty: 1 },
-      ],
-    },
-  ]);
-
-  const [selectedRecipeId, setSelectedRecipeId] = useState<string | null>(recipes[0]?.id ?? null);
+  const [selectedRecipeId, setSelectedRecipeId] = useState<string | null>(null);
   const selectedRecipe = useMemo(() => recipes.find((r) => r.id === selectedRecipeId) ?? null, [recipes, selectedRecipeId]);
 
-  const [draftRecipeName, setDraftRecipeName] = useState("");
+  // Ensure selection validity
+  if (selectedRecipeId && !selectedRecipe && recipes.length > 0) {
+     setSelectedRecipeId(null);
+  }
+  if (!selectedRecipeId && recipes.length > 0) {
+     setSelectedRecipeId(recipes[0].id);
+  }
 
-  const [draftInvId, setDraftInvId] = useState(inventory[0]?.id ?? "");
-  const [draftQty, setDraftQty] = useState("1");
+  // --- Create Recipe Dialog State ---
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [createName, setCreateName] = useState("");
 
-  function createRecipe() {
-    const name = draftRecipeName.trim();
-    if (!name) {
-      toast({ title: "Recipe name required", description: "Enter a recipe name (e.g., Latte 12oz)." });
-      return;
-    }
+  function handleCreateRecipe() {
+    const name = createName.trim();
+    if (!name) return;
 
-    const recipe: Recipe = {
+    const newRecipe: Recipe = {
       id: uid("recipe"),
       name,
-      ingredients: [],
+      components: [],
+    };
+    addRecipe(newRecipe);
+    setSelectedRecipeId(newRecipe.id);
+    setCreateName("");
+    setIsCreateOpen(false);
+    toast({ title: "Recipe created", description: "Now add components." });
+  }
+
+  // --- Add Component Dialog State ---
+  const [isAddCompOpen, setIsAddCompOpen] = useState(false);
+  const [compName, setCompName] = useState("");
+  const [compCatId, setCompCatId] = useState("");
+  const [compDefaultItemId, setCompDefaultItemId] = useState("");
+  const [compQty, setCompQty] = useState("");
+
+  // Filter items based on selected category
+  const availableItems = useMemo(() => 
+    inventory.filter(i => i.categoryId === compCatId)
+  , [inventory, compCatId]);
+
+  function handleAddComponent() {
+    if (!selectedRecipe) return;
+    
+    const name = compName.trim();
+    const qty = Number(compQty);
+
+    if (!name) {
+      toast({ title: "Slot name required", description: "e.g., 'Milk Choice'" });
+      return;
+    }
+    if (!compCatId) {
+      toast({ title: "Category required", description: "Select an inventory category." });
+      return;
+    }
+    if (!compDefaultItemId) {
+      toast({ title: "Default item required", description: "Select the default item." });
+      return;
+    }
+    if (!Number.isFinite(qty) || qty <= 0) {
+      toast({ title: "Quantity required", description: "Must be > 0." });
+      return;
+    }
+
+    const defaultItem = inventory.find(i => i.id === compDefaultItemId);
+
+    const component: RecipeComponent = {
+      id: uid("comp"),
+      type: "ingredient",
+      name,
+      inventoryCategoryId: compCatId,
+      defaultInventoryItemId: compDefaultItemId,
+      qty,
+      unit: defaultItem?.unit ?? "each"
     };
 
-    setRecipes((prev) => [recipe, ...prev]);
-    setSelectedRecipeId(recipe.id);
-    setDraftRecipeName("");
+    const updatedComponents = [...selectedRecipe.components, component];
+    updateRecipe(selectedRecipe.id, { components: updatedComponents });
 
-    toast({ title: "Recipe created", description: "Next: add ingredients from inventory." });
+    setCompName("");
+    setCompCatId("");
+    setCompDefaultItemId("");
+    setCompQty("");
+    setIsAddCompOpen(false);
+    
+    toast({ title: "Component added", description: "Inventory will deduct based on selection." });
   }
 
-  function addIngredient() {
+  function removeComponent(compId: string) {
     if (!selectedRecipe) return;
-
-    const invId = draftInvId.trim();
-    const qty = Number(draftQty);
-
-    if (!invById.get(invId)) {
-      toast({ title: "Pick a valid inventory item", description: "Choose an item from the inventory list." });
-      return;
-    }
-
-    if (!Number.isFinite(qty) || qty <= 0) {
-      toast({ title: "Quantity must be valid", description: "Use a number greater than 0." });
-      return;
-    }
-
-    setRecipes((prev) =>
-      prev.map((r) => {
-        if (r.id !== selectedRecipe.id) return r;
-
-        const existing = r.ingredients.find((i) => i.invId === invId);
-        if (existing) {
-          return {
-            ...r,
-            ingredients: r.ingredients.map((i) => (i.invId === invId ? { ...i, qty: i.qty + qty } : i)),
-          };
-        }
-
-        return {
-          ...r,
-          ingredients: [...r.ingredients, { invId, qty }],
-        };
-      }),
-    );
-
-    toast({ title: "Ingredient added", description: "This will deduct from inventory when the linked menu item is sold." });
-    setDraftQty("1");
-  }
-
-  function removeIngredient(invId: string) {
-    if (!selectedRecipe) return;
-    setRecipes((prev) =>
-      prev.map((r) => (r.id === selectedRecipe.id ? { ...r, ingredients: r.ingredients.filter((i) => i.invId !== invId) } : r)),
-    );
+    updateRecipe(selectedRecipe.id, {
+      components: selectedRecipe.components.filter(c => c.id !== compId)
+    });
   }
 
   return (
@@ -151,14 +133,14 @@ export default function RecipesPage() {
                     Recipes
                   </h1>
                   <p className="mt-2 max-w-2xl text-sm text-muted-foreground" data-testid="text-subtitle">
-                    Ingredients per sale.
+                    Define ingredients and options.
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
                   <HelpDialog
                     title="Recipes"
-                    summary="Recipes deduct inventory when sold."
-                    steps={["Create recipe", "Add ingredients + qty", "Link recipe in Menu"]}
+                    summary="Recipes define what is used."
+                    steps={["Create recipe", "Add components (Category + Default Item)", "Link to Menu"]}
                     testid="button-help-recipes"
                   />
                 </div>
@@ -167,214 +149,188 @@ export default function RecipesPage() {
               <Separator className="my-6" />
 
               <div className="grid gap-6 lg:grid-cols-12">
-                <Card className="border bg-card shadow-soft lg:col-span-5">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="flex items-center gap-2 font-serif" data-testid="text-recipe-create-title">
-                      <Soup className="h-5 w-5" />
-                      Create a recipe
-                    </CardTitle>
+                {/* List Column */}
+                <Card className="border bg-card shadow-soft lg:col-span-4 h-fit">
+                  <CardHeader className="pb-3 flex flex-row items-center justify-between space-y-0">
+                    <CardTitle className="font-serif text-lg">Recipes</CardTitle>
+                    <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+                      <DialogTrigger asChild>
+                        <Button size="sm" className="rounded-xl h-8" data-testid="button-open-create-recipe">
+                          <Plus className="h-4 w-4 mr-1" /> New
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent>
+                        <DialogHeader>
+                          <DialogTitle>Create Recipe</DialogTitle>
+                        </DialogHeader>
+                        <div className="grid gap-4 py-4">
+                          <div className="grid gap-2">
+                            <Label htmlFor="name">Recipe Name</Label>
+                            <Input
+                              id="name"
+                              value={createName}
+                              onChange={(e) => setCreateName(e.target.value)}
+                              placeholder="e.g. Latte 16oz"
+                              data-testid="input-create-recipe-name"
+                            />
+                          </div>
+                        </div>
+                        <DialogFooter>
+                          <Button onClick={handleCreateRecipe} className="rounded-xl" data-testid="button-confirm-create-recipe">Create</Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
                   </CardHeader>
                   <CardContent>
-                    <div className="mt-4 grid gap-3">
-                      <div>
-                        <Label className="text-xs text-muted-foreground" htmlFor="recipeName">
-                          Recipe name
-                        </Label>
-                        <Input
-                          id="recipeName"
-                          value={draftRecipeName}
-                          onChange={(e) => setDraftRecipeName(e.target.value)}
-                          className="mt-1 rounded-2xl"
-                          placeholder="e.g., Iced Latte 16oz"
-                          data-testid="input-recipe-name"
-                        />
-                      </div>
-
-                      <Button className="rounded-2xl" onClick={createRecipe} data-testid="button-create-recipe">
-                        <Plus className="mr-2 h-4 w-4" />
-                        Create recipe
-                      </Button>
-
-                      <Separator />
-
-                      <div className="rounded-2xl border bg-background/40 p-3" data-testid="card-recipes">
-                        <p className="text-xs font-medium text-muted-foreground" data-testid="text-recipes-list-title">
-                          Recipes
-                        </p>
-                        <div className="mt-2 grid gap-2">
-                          {recipes.map((r) => {
-                            const selected = r.id === selectedRecipeId;
-                            return (
-                              <Button
-                                key={r.id}
-                                variant={selected ? "default" : "secondary"}
-                                className="justify-between rounded-2xl"
-                                onClick={() => setSelectedRecipeId(r.id)}
-                                data-testid={`button-select-recipe-${r.id}`}
-                              >
-                                <span className="truncate">{r.name}</span>
-                                <span className="text-xs text-muted-foreground" data-testid={`text-recipe-ingredients-${r.id}`}>
-                                  {r.ingredients.length} items
-                                </span>
-                              </Button>
-                            );
-                          })}
-                        </div>
-                      </div>
+                    <div className="flex flex-col gap-2 max-h-[500px] overflow-y-auto pr-1">
+                      {recipes.map((r) => (
+                        <Button
+                          key={r.id}
+                          variant={selectedRecipeId === r.id ? "default" : "secondary"}
+                          className="justify-between rounded-xl h-auto py-3 px-4 text-left whitespace-normal"
+                          onClick={() => setSelectedRecipeId(r.id)}
+                          data-testid={`select-recipe-${r.id}`}
+                        >
+                          <span className="font-medium">{r.name}</span>
+                          <span className="text-xs opacity-70 ml-2 shrink-0">{r.components.length} parts</span>
+                        </Button>
+                      ))}
                     </div>
                   </CardContent>
                 </Card>
 
-                <Card className="border bg-card shadow-soft lg:col-span-7">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="flex items-center gap-2 font-serif" data-testid="text-recipe-edit-title">
-                      <Soup className="h-5 w-5" />
-                      Add ingredients
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    {selectedRecipe ? (
-                      <div className="space-y-4">
-                        <div className="rounded-2xl border bg-background/40 p-4" data-testid="card-selected-recipe">
-                          <p className="text-xs font-medium text-muted-foreground" data-testid="text-selected-recipe-label">
-                            Selected recipe
-                          </p>
-                          <p className="mt-1 font-serif text-2xl" data-testid="text-selected-recipe-name">
-                            {selectedRecipe.name}
-                          </p>
-                          <p className="mt-1 text-xs text-muted-foreground" data-testid="text-selected-recipe-id">
-                            ID: {selectedRecipe.id}
-                          </p>
-                        </div>
-
-                        <div className="grid gap-3 rounded-2xl border bg-background/40 p-4" data-testid="card-add-ingredient">
-                          <p className="text-xs font-medium text-muted-foreground" data-testid="text-add-ingredient-title">
-                            Add an ingredient (per 1 menu item sold)
-                          </p>
-
-                          <div className="grid gap-2 sm:grid-cols-2">
-                            <div>
-                              <Label className="text-xs text-muted-foreground" htmlFor="invId">
-                                Inventory item
-                              </Label>
-                              <Input
-                                id="invId"
-                                value={draftInvId}
-                                onChange={(e) => setDraftInvId(e.target.value)}
-                                className="mt-1 rounded-2xl"
-                                placeholder="beans_g"
-                                data-testid="input-ingredient-invid"
-                              />
-                              <p className="mt-1 text-xs text-muted-foreground" data-testid="text-inventory-hint">
-                                Tip: copy an ID from the inventory list below.
-                              </p>
-                            </div>
-
-                            <div>
-                              <Label className="text-xs text-muted-foreground" htmlFor="qty">
-                                Quantity
-                              </Label>
-                              <Input
-                                id="qty"
-                                value={draftQty}
-                                onChange={(e) => setDraftQty(e.target.value)}
-                                className="mt-1 rounded-2xl"
-                                inputMode="decimal"
-                                placeholder="e.g., 18"
-                                data-testid="input-ingredient-qty"
-                              />
-                              <p className="mt-1 text-xs text-muted-foreground" data-testid="text-unit-preview">
-                                Unit: {invById.get(draftInvId)?.unit ?? "—"}
-                              </p>
-                            </div>
+                {/* Editor Column */}
+                <Card className="border bg-card shadow-soft lg:col-span-8 min-h-[500px]">
+                  {selectedRecipe ? (
+                    <>
+                      <CardHeader className="pb-3 border-b bg-muted/20">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                          <div>
+                            <CardTitle className="font-serif text-2xl" data-testid="text-selected-recipe-name">{selectedRecipe.name}</CardTitle>
+                            <p className="text-xs text-muted-foreground mt-1">ID: {selectedRecipe.id}</p>
                           </div>
+                          
+                          <Dialog open={isAddCompOpen} onOpenChange={setIsAddCompOpen}>
+                            <DialogTrigger asChild>
+                              <Button className="rounded-xl" data-testid="button-open-add-component">
+                                <Plus className="h-4 w-4 mr-2" /> Add Component
+                              </Button>
+                            </DialogTrigger>
+                            <DialogContent className="sm:max-w-[425px]">
+                              <DialogHeader>
+                                <DialogTitle>Add Recipe Component</DialogTitle>
+                              </DialogHeader>
+                              <div className="grid gap-4 py-4">
+                                <div className="grid gap-2">
+                                  <Label>Slot Name</Label>
+                                  <Input 
+                                    value={compName} 
+                                    onChange={e => setCompName(e.target.value)} 
+                                    placeholder="e.g. Milk Choice"
+                                    data-testid="input-comp-name"
+                                  />
+                                  <p className="text-[11px] text-muted-foreground">Label shown when customizing.</p>
+                                </div>
+                                
+                                <div className="grid gap-2">
+                                  <Label>Category (Options Pool)</Label>
+                                  <Select value={compCatId} onValueChange={setCompCatId}>
+                                    <SelectTrigger data-testid="select-comp-category">
+                                      <SelectValue placeholder="Select inventory category" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {inventoryCategories.map(c => (
+                                        <SelectItem key={c.id} value={c.id} data-testid={`option-comp-cat-${c.id}`}>{c.name}</SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
 
-                          <Button className="rounded-2xl" onClick={addIngredient} data-testid="button-add-ingredient">
-                            <Plus className="mr-2 h-4 w-4" />
-                            Add ingredient
-                          </Button>
+                                <div className="grid gap-2">
+                                  <Label>Default Item</Label>
+                                  <Select value={compDefaultItemId} onValueChange={setCompDefaultItemId} disabled={!compCatId}>
+                                    <SelectTrigger data-testid="select-comp-default">
+                                      <SelectValue placeholder={compCatId ? "Select default item" : "Choose category first"} />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {availableItems.map(i => (
+                                        <SelectItem key={i.id} value={i.id} data-testid={`option-comp-item-${i.id}`}>{i.name} ({i.unit})</SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+
+                                <div className="grid gap-2">
+                                  <Label>Quantity</Label>
+                                  <Input 
+                                    type="number" 
+                                    value={compQty} 
+                                    onChange={e => setCompQty(e.target.value)}
+                                    placeholder="e.g. 200"
+                                    data-testid="input-comp-qty"
+                                  />
+                                </div>
+                              </div>
+                              <DialogFooter>
+                                <Button onClick={handleAddComponent} className="rounded-xl" data-testid="button-confirm-add-component">Add Component</Button>
+                              </DialogFooter>
+                            </DialogContent>
+                          </Dialog>
                         </div>
-
-                        <div className="rounded-2xl border bg-background/40" data-testid="table-ingredients">
+                      </CardHeader>
+                      <CardContent className="pt-6">
+                        <div className="rounded-2xl border overflow-hidden">
                           <Table>
                             <TableHeader>
-                              <TableRow>
-                                <TableHead>Ingredient</TableHead>
-                                <TableHead className="w-[140px] text-right">Qty</TableHead>
-                                <TableHead className="w-[120px] text-right">Action</TableHead>
+                              <TableRow className="bg-muted/50">
+                                <TableHead>Slot Name</TableHead>
+                                <TableHead>Category (Pool)</TableHead>
+                                <TableHead>Default Selection</TableHead>
+                                <TableHead className="text-right">Qty</TableHead>
+                                <TableHead className="w-[80px]"></TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
-                              {selectedRecipe.ingredients.length ? (
-                                selectedRecipe.ingredients.map((i) => (
-                                  <TableRow key={i.invId} data-testid={`row-ingredient-${i.invId}`}>
-                                    <TableCell>
-                                      <p className="font-medium" data-testid={`text-ingredient-name-${i.invId}`}>
-                                        {invById.get(i.invId)?.name ?? i.invId}
-                                      </p>
-                                      <p className="text-xs text-muted-foreground" data-testid={`text-ingredient-id-${i.invId}`}>
-                                        ID: {i.invId}
-                                      </p>
-                                    </TableCell>
-                                    <TableCell className="text-right" data-testid={`text-ingredient-qty-${i.invId}`}>
-                                      {i.qty} {invById.get(i.invId)?.unit ?? ""}
-                                    </TableCell>
-                                    <TableCell className="text-right">
-                                      <Button
-                                        variant="secondary"
-                                        size="sm"
-                                        className="rounded-xl"
-                                        onClick={() => removeIngredient(i.invId)}
-                                        data-testid={`button-remove-ingredient-${i.invId}`}
-                                      >
-                                        Remove
-                                      </Button>
-                                    </TableCell>
-                                  </TableRow>
-                                ))
+                              {selectedRecipe.components.length > 0 ? (
+                                selectedRecipe.components.map(c => {
+                                  const cat = inventoryCategories.find(cat => cat.id === c.inventoryCategoryId);
+                                  const item = inventory.find(i => i.id === c.defaultInventoryItemId);
+                                  
+                                  return (
+                                    <TableRow key={c.id} data-testid={`row-comp-${c.id}`}>
+                                      <TableCell className="font-medium">{c.name}</TableCell>
+                                      <TableCell>{cat?.name ?? "Unknown"}</TableCell>
+                                      <TableCell className="text-muted-foreground">{item?.name ?? "Unknown"}</TableCell>
+                                      <TableCell className="text-right">{c.qty} {c.unit}</TableCell>
+                                      <TableCell>
+                                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive/70 hover:text-destructive" onClick={() => removeComponent(c.id)}>
+                                          <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                      </TableCell>
+                                    </TableRow>
+                                  );
+                                })
                               ) : (
                                 <TableRow>
-                                  <TableCell colSpan={3} className="py-10 text-center text-sm text-muted-foreground" data-testid="empty-ingredients">
-                                    No ingredients yet. Add your first ingredient above.
+                                  <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">
+                                    No components defined yet.
                                   </TableCell>
                                 </TableRow>
                               )}
                             </TableBody>
                           </Table>
                         </div>
-
-                        <Separator />
-
-                        <div className="rounded-2xl border bg-background/40 p-4" data-testid="card-inventory-reference">
-                          <p className="text-xs font-medium text-muted-foreground" data-testid="text-inventory-reference-title">
-                            Inventory reference
-                          </p>
-                          <ul className="mt-2 grid gap-2 text-sm">
-                            {inventory.map((i) => (
-                              <li key={i.id} className="flex items-center justify-between" data-testid={`row-invref-${i.id}`}>
-                                <span className="text-muted-foreground">{i.name}</span>
-                                <span className="font-mono text-xs" data-testid={`text-invref-id-${i.id}`}>
-                                  {i.id} ({i.unit})
-                                </span>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-
-                        <p className="text-xs text-muted-foreground" data-testid="text-next-step">
-                          Next: go to the Menu page and link this recipe to a menu item.
+                        <p className="mt-4 text-xs text-muted-foreground">
+                          Note: In the POS, users can swap the default item for any other item in the same category.
                         </p>
-                      </div>
-                    ) : (
-                      <div className="rounded-2xl border bg-background/40 p-4 text-sm text-muted-foreground" data-testid="empty-selected-recipe">
-                        Select or create a recipe to begin.
-                      </div>
-                    )}
-
-                    <p className="mt-3 text-xs text-muted-foreground" data-testid="text-prototype-note">
-                      Prototype: recipes are local to this page for now.
-                    </p>
-                  </CardContent>
+                      </CardContent>
+                    </>
+                  ) : (
+                    <div className="flex h-full flex-col items-center justify-center p-8 text-center text-muted-foreground">
+                      <Soup className="h-12 w-12 opacity-20 mb-4" />
+                      <p>Select or create a recipe to start editing.</p>
+                    </div>
+                  )}
                 </Card>
               </div>
             </div>
