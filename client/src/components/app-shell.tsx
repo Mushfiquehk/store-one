@@ -3,21 +3,15 @@ import {
   BarChart3,
   ClipboardList,
   LayoutGrid,
+  Menu as MenuIcon,
   Package,
   Sparkles,
   Soup,
+  ArrowRight
 } from "lucide-react";
-import { HamburgerMenuIcon } from "@radix-ui/react-icons";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 
 const nav = [
   { href: "/", label: "POS", icon: LayoutGrid, testid: "link-nav-pos" },
@@ -39,87 +33,53 @@ export default function AppShell({
 
   return (
     <div className="min-h-screen app-shell">
-      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-xs font-medium text-muted-foreground" data-testid="text-app-name">
-              CornerPOS
-            </p>
-            <h1 className="mt-1 truncate font-serif text-2xl" data-testid="text-page-title">
-              {title}
-            </h1>
-          </div>
-
-          <div className="min-w-0" data-testid="nav-top">
-            {/* Small screens: scrollable pill row */}
-            <div className="sm:hidden" data-testid="nav-mobile">
-              <div className="nav-scroll -mr-4 flex max-w-[78vw] items-center gap-2 overflow-x-auto pr-4" data-testid="nav-scroll">
-                {nav.map((n) => {
-                  const active = location === n.href;
-                  const Icon = n.icon;
-                  return (
-                    <Link key={n.href} href={n.href} data-testid={n.testid}>
-                      <Button
-                        variant={active ? "default" : "secondary"}
-                        className={cn("shrink-0 rounded-2xl", !active && "bg-background/60")}
-                        data-testid={`${n.testid}-button`}
-                      >
-                        <Icon className="mr-2 h-4 w-4" />
-                        {n.label}
-                      </Button>
-                    </Link>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Larger screens: visible buttons + optional overflow */}
-            <div className="hidden items-center justify-end gap-2 sm:flex" data-testid="nav-desktop">
-              {nav.slice(0, 4).map((n) => {
-                const active = location === n.href;
-                const Icon = n.icon;
-                return (
-                  <Link key={n.href} href={n.href} data-testid={n.testid}>
-                    <Button
-                      variant={active ? "default" : "secondary"}
-                      className={cn("rounded-2xl", !active && "bg-background/60")}
-                      data-testid={`${n.testid}-button`}
-                    >
-                      <Icon className="mr-2 h-4 w-4" />
-                      {n.label}
-                    </Button>
-                  </Link>
-                );
-              })}
-
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="secondary" className="rounded-2xl bg-background/60" data-testid="button-nav-more">
-                    <HamburgerMenuIcon />
-                    <span className="ml-2">More</span>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56">
-                  <DropdownMenuLabel>Navigate</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
-                  {nav.slice(4).map((n) => {
+      <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <div className="flex items-center gap-3">
+            <Sheet>
+              <SheetTrigger asChild>
+                <Button variant="outline" size="icon" className="shrink-0 rounded-xl">
+                  <MenuIcon className="h-5 w-5" />
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="left" className="w-[280px] sm:w-[320px]">
+                <SheetHeader>
+                  <SheetTitle className="font-serif text-xl text-left">CornerPOS</SheetTitle>
+                </SheetHeader>
+                <div className="mt-6 flex flex-col gap-2">
+                  {nav.map((n) => {
+                    const active = location === n.href;
                     const Icon = n.icon;
                     return (
-                      <Link key={n.href} href={n.href} data-testid={`${n.testid}-more`}>
-                        <DropdownMenuItem className="gap-2" data-testid={`${n.testid}-item`}>
-                          <Icon className="h-4 w-4" />
+                      <Link key={n.href} href={n.href}>
+                        <Button
+                          variant={active ? "default" : "ghost"}
+                          className={cn("w-full justify-start rounded-xl text-base h-12", active ? "" : "text-muted-foreground")}
+                        >
+                          <Icon className="mr-3 h-5 w-5" />
                           {n.label}
-                        </DropdownMenuItem>
+                          {active && <ArrowRight className="ml-auto h-4 w-4 opacity-50" />}
+                        </Button>
                       </Link>
                     );
                   })}
-                </DropdownMenuContent>
-              </DropdownMenu>
+                </div>
+              </SheetContent>
+            </Sheet>
+
+            <div>
+              <h1 className="font-serif text-xl leading-none" data-testid="text-page-title">
+                {title}
+              </h1>
             </div>
+          </div>
+          
+          <div className="text-xs font-medium text-muted-foreground hidden sm:block">
+            CornerPOS
           </div>
         </div>
 
-        <div className="mt-6">{children}</div>
+        <div>{children}</div>
       </div>
     </div>
   );

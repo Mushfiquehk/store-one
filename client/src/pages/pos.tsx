@@ -139,6 +139,10 @@ export default function PosPage() {
     toast({ title: "Item updated", description: "Customizations saved." });
   }
 
+  // --- Payment Dialog State ---
+  const [isPaymentOpen, setIsPaymentOpen] = useState(false);
+  const [paymentType, setPaymentType] = useState<"Cash" | "Card">("Card");
+
   // Calculations
   const subtotalCents = cart.reduce((acc, item) => {
     const m = menu.find((x) => x.id === item.menuItemId);
@@ -153,17 +157,18 @@ export default function PosPage() {
 
   const totalCents = subtotalCents + taxCents;
 
-  function recordSale() {
-    if (cart.length === 0) return;
+  function handleConfirmOrder() {
+    if (cart.length === 0) {
+      toast({ title: "Cart is empty", description: "Add items first." });
+      return;
+    }
+    setIsPaymentOpen(true);
+  }
 
-    const paymentMethod = "Cash"; // Simplified for now
-
+  function handleRecordSale() {
     // 1. Deduct Inventory based on customizations
     cart.forEach(line => {
        line.customizations.forEach(cust => {
-          // Deduct: cust.qty * line.qty from cust.inventoryItemId
-          // In a real app, we'd batch this or use a transaction
-          // Here we just fire individual updates
           updateInventoryCount(cust.inventoryItemId, -(cust.qty * line.qty));
        });
     });
@@ -175,56 +180,46 @@ export default function PosPage() {
       subtotalCents,
       taxCents,
       totalCents,
-      paymentMethod,
+      paymentMethod: paymentType,
     };
 
     setSales((prev) => [sale, ...prev]);
 
-    toast({ title: "Sale recorded", description: `${formatMoney(totalCents)} • Inventory deducted based on customizations.` });
+    toast({ title: "Sale recorded", description: `${formatMoney(totalCents)} • ${paymentType}` });
     clearCart();
+    setIsPaymentOpen(false);
   }
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
       <AppShell title="POS">
-        <header className="relative overflow-hidden rounded-3xl border bg-card shadow-soft grain">
-          <div className="p-6 sm:p-8">
-            <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <header className="relative overflow-hidden rounded-3xl border bg-card shadow-soft grain mb-6">
+          <div className="px-6 py-5 flex items-center justify-between gap-4">
               <div className="min-w-0">
-                <p className="text-sm font-medium text-muted-foreground" data-testid="text-tagline">
-                  Storefront
-                </p>
-                <h2 className="mt-2 font-serif text-3xl leading-tight tracking-[-0.02em] sm:text-4xl" data-testid="text-title">
-                  {businessName}&nbsp;POS
+                <h2 className="font-serif text-2xl leading-tight tracking-[-0.02em]" data-testid="text-title">
+                  {businessName}
                 </h2>
-                <p className="mt-2 max-w-2xl text-sm text-muted-foreground" data-testid="text-subtitle">
-                  Tap items. Customize recipes. Record sale.
+                <p className="text-sm text-muted-foreground truncate">
+                  Ready to serve.
                 </p>
               </div>
 
-              <div className="grid w-full gap-2 sm:w-auto sm:grid-cols-2">
-                <Input
-                  value={businessName}
-                  onChange={(e) => setBusinessName(e.target.value)}
-                  className="rounded-2xl"
-                  data-testid="input-business-name"
-                />
+              <div className="flex gap-2">
                 <Input
                   value={String(taxRatePct)}
                   onChange={(e) => setTaxRatePct(Number(e.target.value))}
-                  className="rounded-2xl"
+                  className="w-20 rounded-xl h-9 text-right"
                   inputMode="decimal"
-                  data-testid="input-tax-rate"
+                  placeholder="Tax %"
                 />
               </div>
-            </div>
+          </div>
+        </header>
 
-            <Separator className="my-6" />
-
-            <div className="grid gap-6 lg:grid-cols-12">
+            <div className="grid gap-6 lg:grid-cols-12 h-[calc(100vh-220px)] pb-6">
                 {/* Menu Grid */}
-                <Card className="border bg-card shadow-soft lg:col-span-7 flex flex-col h-full overflow-hidden">
-                  <CardHeader className="pb-3 flex-shrink-0">
+                <Card className="border bg-card shadow-soft lg:col-span-7 flex flex-col overflow-hidden h-full">
+                  <CardHeader className="pb-3 flex-shrink-0 pt-4 px-4">
                     <CardTitle className="flex items-center gap-2 font-serif" data-testid="text-pos-title">
                       <LayoutGrid className="h-5 w-5" />
                       Ring up a sale
@@ -249,8 +244,8 @@ export default function PosPage() {
                     </div>
                   </div>
 
-                  <CardContent className="flex-1 overflow-y-auto min-h-[400px]">
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-3">
+                  <CardContent className="flex-1 overflow-y-auto p-4 bg-muted/10">
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-3 pb-20">
                       {activeMenuItems.length > 0 ? (
                         activeMenuItems.map((m) => (
                           <Button
@@ -279,15 +274,15 @@ export default function PosPage() {
                 </Card>
 
                 {/* Cart / Receipt */}
-                <Card className="border bg-card shadow-soft lg:col-span-5 flex flex-col h-full">
-                  <CardHeader className="pb-3 border-b bg-muted/20">
+                <Card className="border bg-card shadow-soft lg:col-span-5 flex flex-col h-full overflow-hidden">
+                  <CardHeader className="pb-3 border-b bg-muted/20 pt-4 px-4">
                     <CardTitle className="flex items-center gap-2 font-serif" data-testid="text-cart-title">
                       <Receipt className="h-5 w-5" />
                       Current Order
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="flex-1 flex flex-col p-0">
-                    <div className="flex-1 overflow-auto p-4 min-h-[300px]">
+                    <div className="flex-1 overflow-auto p-4">
                       {cart.length > 0 ? (
                         <ul className="space-y-3">
                           {cart.map((item) => {
@@ -355,34 +350,23 @@ export default function PosPage() {
                         </div>
                       </div>
 
-                      <div className="mt-4 grid grid-cols-2 gap-2">
-                        <Button className="w-full rounded-2xl" variant="outline" data-testid="button-payment-card">
-                          Card
-                        </Button>
-                        <Button className="w-full rounded-2xl" variant="outline" data-testid="button-payment-cash">
-                          Cash
-                        </Button>
-                      </div>
-
-                      <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                        <Button className="rounded-2xl" onClick={recordSale} data-testid="button-record-sale">
-                          Record sale
+                      <div className="mt-4">
+                        <Button className="w-full rounded-2xl h-12 text-lg" onClick={handleConfirmOrder} data-testid="button-confirm-order">
+                          Checkout {formatMoney(totalCents)}
                         </Button>
                         <Button
-                          variant="secondary"
-                          className="rounded-2xl"
+                          variant="ghost"
+                          className="w-full mt-2 rounded-xl text-muted-foreground hover:text-destructive"
                           onClick={clearCart}
                           data-testid="button-clear-sale"
                         >
-                          Clear
+                          Clear Order
                         </Button>
                       </div>
                     </div>
                   </CardContent>
                 </Card>
             </div>
-          </div>
-        </header>
 
         {/* Customization Dialog */}
         <Dialog open={!!editingItemInstanceId} onOpenChange={(open) => !open && setEditingItemInstanceId(null)}>
@@ -447,6 +431,61 @@ export default function PosPage() {
                <Button onClick={saveCustomizations}>Save Changes</Button>
              </DialogFooter>
            </DialogContent>
+        </Dialog>
+
+        {/* Payment Popup */}
+        <Dialog open={isPaymentOpen} onOpenChange={setIsPaymentOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Confirm Payment</DialogTitle>
+            </DialogHeader>
+            
+            <div className="py-6 flex flex-col gap-6">
+              <div className="text-center">
+                <p className="text-sm text-muted-foreground uppercase tracking-wider">Total Due</p>
+                <p className="text-4xl font-serif mt-1">{formatMoney(totalCents)}</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <Button 
+                  variant={paymentType === "Card" ? "default" : "outline"} 
+                  className="h-16 rounded-2xl flex flex-col gap-1"
+                  onClick={() => setPaymentType("Card")}
+                >
+                  <span className="font-semibold text-lg">Card</span>
+                </Button>
+                <Button 
+                  variant={paymentType === "Cash" ? "default" : "outline"} 
+                  className="h-16 rounded-2xl flex flex-col gap-1"
+                  onClick={() => setPaymentType("Cash")}
+                >
+                  <span className="font-semibold text-lg">Cash</span>
+                </Button>
+              </div>
+
+              <div className="rounded-xl bg-muted/30 p-4 border border-border/50 text-sm">
+                <div className="flex justify-between mb-1">
+                  <span className="text-muted-foreground">Subtotal</span>
+                  <span>{formatMoney(subtotalCents)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Tax ({taxRatePct}%)</span>
+                  <span>{formatMoney(taxCents)}</span>
+                </div>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <div className="w-full grid gap-2">
+                <Button size="lg" className="w-full rounded-2xl h-12 text-lg" onClick={handleRecordSale}>
+                  Complete Payment
+                </Button>
+                <Button variant="ghost" onClick={() => setIsPaymentOpen(false)}>
+                  Back
+                </Button>
+              </div>
+            </DialogFooter>
+          </DialogContent>
         </Dialog>
 
       </AppShell>
