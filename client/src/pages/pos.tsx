@@ -48,14 +48,26 @@ function uid(prefix: string) {
 
 export default function PosPage() {
   const { toast } = useToast();
-  const { menu, recipes, inventory, inventoryCategories, updateInventoryCount } = useStore();
+  const { menu, recipes, inventory, inventoryCategories, menuCategories, updateInventoryCount } = useStore();
 
   const [businessName, setBusinessName] = useState("Corner Store");
   const [taxRatePct, setTaxRatePct] = useState(8.25);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
+  
+  // Menu Navigation State
+  const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
 
-  // --- Customization Dialog State ---
+  // Initialize active category
+  if (!activeCategoryId && menuCategories.length > 0) {
+    setActiveCategoryId(menuCategories[0].id);
+  }
+
+  // Filter items by category
+  const activeMenuItems = useMemo(() => {
+    if (!activeCategoryId) return [];
+    return menu.filter(m => m.categoryIds.includes(activeCategoryId));
+  }, [menu, activeCategoryId]);
   const [editingItemInstanceId, setEditingItemInstanceId] = useState<string | null>(null);
   const [tempCustomizations, setTempCustomizations] = useState<CartItemCustomization[]>([]);
 
@@ -211,32 +223,57 @@ export default function PosPage() {
 
             <div className="grid gap-6 lg:grid-cols-12">
                 {/* Menu Grid */}
-                <Card className="border bg-card shadow-soft lg:col-span-7">
-                  <CardHeader className="pb-3">
+                <Card className="border bg-card shadow-soft lg:col-span-7 flex flex-col h-full overflow-hidden">
+                  <CardHeader className="pb-3 flex-shrink-0">
                     <CardTitle className="flex items-center gap-2 font-serif" data-testid="text-pos-title">
                       <LayoutGrid className="h-5 w-5" />
                       Ring up a sale
                     </CardTitle>
                   </CardHeader>
-                  <CardContent>
-                    <p className="text-xs font-medium text-muted-foreground" data-testid="text-menu-heading">
-                      Menu
-                    </p>
-                    <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                      {menu.map((m) => (
+                  
+                  {/* Category Navigation */}
+                  <div className="px-6 pb-2">
+                    <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide" data-testid="nav-menu-categories">
+                      {menuCategories.map(cat => (
                         <Button
-                          key={m.id}
-                          variant="secondary"
-                          className="h-auto justify-start gap-2 rounded-2xl px-3 py-3 text-left hover-lift"
-                          onClick={() => addToCart(m.id)}
-                          data-testid={`button-add-menu-${m.id}`}
+                          key={cat.id}
+                          variant={activeCategoryId === cat.id ? "default" : "secondary"}
+                          onClick={() => setActiveCategoryId(cat.id)}
+                          className="rounded-full flex-shrink-0"
+                          size="sm"
+                          data-testid={`tab-category-${cat.id}`}
                         >
-                          <div className="min-w-0 flex-1">
-                            <p className="font-medium leading-tight truncate">{m.name}</p>
-                            <p className="text-xs text-muted-foreground mt-1">{formatMoney(m.priceCents)}</p>
-                          </div>
+                          {cat.name}
                         </Button>
                       ))}
+                    </div>
+                  </div>
+
+                  <CardContent className="flex-1 overflow-y-auto min-h-[400px]">
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-3">
+                      {activeMenuItems.length > 0 ? (
+                        activeMenuItems.map((m) => (
+                          <Button
+                            key={m.id}
+                            variant="secondary"
+                            className="h-auto flex-col items-start gap-2 rounded-2xl p-4 text-left hover-lift transition-all bg-secondary/50 hover:bg-secondary"
+                            onClick={() => addToCart(m.id)}
+                            data-testid={`button-add-menu-${m.id}`}
+                          >
+                            <div className="w-full">
+                              <p className="font-semibold leading-tight line-clamp-2 text-base">{m.name}</p>
+                              {m.description && (
+                                <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{m.description}</p>
+                              )}
+                              <p className="text-sm font-medium text-primary mt-2">{formatMoney(m.priceCents)}</p>
+                            </div>
+                          </Button>
+                        ))
+                      ) : (
+                        <div className="col-span-full py-10 text-center text-muted-foreground">
+                          <p>No items in this category.</p>
+                        </div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
