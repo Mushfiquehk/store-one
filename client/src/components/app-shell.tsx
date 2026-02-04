@@ -15,11 +15,11 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 
 const nav = [
   { href: "/", label: "POS", icon: LayoutGrid, testid: "link-nav-pos" },
-  { href: "/start", label: "Start", icon: Sparkles, testid: "link-nav-start" },
   { href: "/inventory", label: "Inventory", icon: Package, testid: "link-nav-inventory" },
   { href: "/recipes", label: "Recipes", icon: Soup, testid: "link-nav-recipes" },
   { href: "/menu", label: "Menu", icon: ClipboardList, testid: "link-nav-menu" },
   { href: "/reports", label: "Reports", icon: BarChart3, testid: "link-nav-reports" },
+  { href: "/start", label: "Getting Started", icon: Sparkles, testid: "link-nav-start" },
 ];
 
 export default function AppShell({
