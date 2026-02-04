@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useStore, type InventoryItem } from "@/lib/store";
 
@@ -22,7 +23,7 @@ function formatMoney(cents: number) {
 
 export default function InventoryPage() {
   const { toast } = useToast();
-  const { inventory, inventoryCategories, addInventoryItem, updateInventoryCount } = useStore();
+  const { inventory, inventoryCategories, addInventoryItem, updateInventoryCount, addInventoryCategory } = useStore();
 
   const [draftName, setDraftName] = useState("");
   const [draftSku, setDraftSku] = useState("");
@@ -31,6 +32,9 @@ export default function InventoryPage() {
   const [draftOnHand, setDraftOnHand] = useState("0");
   const [draftReorderAt, setDraftReorderAt] = useState("0");
   const [draftUnitCost, setDraftUnitCost] = useState("");
+
+  const [isNewCategoryOpen, setIsNewCategoryOpen] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
 
   const lowStockCount = useMemo(() => inventory.filter((i) => i.onHand <= i.reorderAt).length, [inventory]);
 
@@ -79,6 +83,16 @@ export default function InventoryPage() {
     setDraftUnitCost("");
 
     toast({ title: "Inventory updated", description: `Added “${name}”. Next: use this item in a recipe.` });
+  }
+
+  function handleCreateCategory() {
+     const name = newCategoryName.trim();
+     if (!name) return;
+
+     addInventoryCategory(name);
+     setNewCategoryName("");
+     setIsNewCategoryOpen(false);
+     toast({ title: "Category added", description: `Created category: ${name}` });
   }
 
   function adjustOnHand(id: string, delta: number) {
@@ -156,18 +170,28 @@ export default function InventoryPage() {
                         <Label className="text-xs text-muted-foreground" htmlFor="invCategory">
                           Category
                         </Label>
-                        <Select value={draftCategory} onValueChange={setDraftCategory}>
-                          <SelectTrigger className="mt-1 rounded-2xl" id="invCategory" data-testid="select-inventory-category">
-                            <SelectValue placeholder="Select category" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {inventoryCategories.map((c) => (
-                              <SelectItem key={c.id} value={c.id} data-testid={`option-category-${c.id}`}>
-                                {c.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <div className="flex gap-2">
+                          <Select value={draftCategory} onValueChange={setDraftCategory}>
+                            <SelectTrigger className="mt-1 rounded-2xl flex-1" id="invCategory" data-testid="select-inventory-category">
+                              <SelectValue placeholder="Select category" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {inventoryCategories.map((c) => (
+                                <SelectItem key={c.id} value={c.id} data-testid={`option-category-${c.id}`}>
+                                  {c.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Button 
+                            variant="secondary" 
+                            className="mt-1 h-10 w-10 p-0 rounded-xl flex-shrink-0"
+                            onClick={() => setIsNewCategoryOpen(true)}
+                            title="Create new category"
+                          >
+                            <Plus className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
 
                       <div>
@@ -334,6 +358,29 @@ export default function InventoryPage() {
               </div>
             </div>
         </header>
+
+        {/* Create Category Dialog */}
+        <Dialog open={isNewCategoryOpen} onOpenChange={setIsNewCategoryOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Create New Category</DialogTitle>
+            </DialogHeader>
+            <div className="py-4">
+               <Label htmlFor="newCategoryName">Category Name</Label>
+               <Input 
+                 id="newCategoryName"
+                 value={newCategoryName}
+                 onChange={(e) => setNewCategoryName(e.target.value)}
+                 placeholder="e.g. Syrups, Dairy, Bakery"
+                 className="mt-2 rounded-xl"
+               />
+            </div>
+            <DialogFooter>
+               <Button variant="secondary" onClick={() => setIsNewCategoryOpen(false)}>Cancel</Button>
+               <Button onClick={handleCreateCategory}>Create Category</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </AppShell>
     </motion.div>
   );
