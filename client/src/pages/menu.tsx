@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { ClipboardList, Link2, Plus, Soup } from "lucide-react";
+import { ClipboardList, Link2, Plus, Soup, Check, ChevronsUpDown, Info } from "lucide-react";
 import AppShell from "@/components/app-shell";
 import HelpDialog from "@/components/help-dialog";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,10 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useStore, type MenuItem } from "@/lib/store";
 
@@ -32,6 +36,8 @@ export default function MenuPage() {
   const [draftCategory, setDraftCategory] = useState(menuCategories[0]?.id ?? "");
   const [draftPrice, setDraftPrice] = useState("");
   const [draftTaxable, setDraftTaxable] = useState(true);
+  const [draftRecipeId, setDraftRecipeId] = useState<string | null>(null);
+  const [openRecipe, setOpenRecipe] = useState(false);
 
   const [selectedMenuId, setSelectedMenuId] = useState<string | null>(null);
   
@@ -69,7 +75,7 @@ export default function MenuPage() {
       categoryIds: [draftCategory],
       priceCents: Math.round(price * 100),
       taxable: draftTaxable,
-      recipeId: null,
+      recipeId: draftRecipeId,
     };
 
     addMenuItem(item);
@@ -77,19 +83,9 @@ export default function MenuPage() {
 
     setDraftName("");
     setDraftPrice("");
+    setDraftRecipeId(null);
 
-    toast({ title: "Menu updated", description: `Added “${name}”. Next: assign a recipe (optional).` });
-  }
-
-  function assignRecipe(recipeId: string | null) {
-    if (!selectedMenu) return;
-
-    updateMenuItem(selectedMenu.id, { recipeId });
-
-    toast({
-      title: "Recipe link updated",
-      description: recipeId ? "This sale will deduct ingredients automatically." : "No recipe assigned yet.",
-    });
+    toast({ title: "Menu updated", description: `Added “${name}”` + (draftRecipeId ? " linked to recipe." : ".") });
   }
 
   return (
@@ -122,7 +118,7 @@ export default function MenuPage() {
               <Separator className="my-6" />
 
               <div className="grid gap-6 lg:grid-cols-12">
-                <Card className="border bg-card shadow-soft lg:col-span-7">
+                <Card className="border bg-card shadow-soft lg:col-span-12">
                   <CardHeader className="pb-3">
                     <CardTitle className="flex items-center gap-2 font-serif" data-testid="text-menu-admin-title">
                       <ClipboardList className="h-5 w-5" />
@@ -130,8 +126,8 @@ export default function MenuPage() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="mt-4 grid gap-3">
-                      <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="mt-4 grid gap-4">
+                      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                         <div>
                           <Label className="text-xs text-muted-foreground" htmlFor="menuName">
                             Name
@@ -162,56 +158,126 @@ export default function MenuPage() {
                             </SelectContent>
                           </Select>
                         </div>
-                      </div>
-
-                      <div className="grid gap-2 sm:grid-cols-2">
                         <div>
-                          <Label className="text-xs text-muted-foreground" htmlFor="menuPrice">
-                            Price (USD)
-                          </Label>
-                          <Input
-                            id="menuPrice"
-                            value={draftPrice}
-                            onChange={(e) => setDraftPrice(e.target.value)}
-                            className="mt-1 rounded-2xl"
-                            inputMode="decimal"
-                            placeholder="e.g., 4.50"
-                            data-testid="input-menu-price"
-                          />
+                           <div className="flex items-center gap-2">
+                             <Label className="text-xs text-muted-foreground" htmlFor="menuRecipe">
+                               Recipe (Optional)
+                             </Label>
+                             <TooltipProvider>
+                               <Tooltip>
+                                 <TooltipTrigger>
+                                   <Info className="h-3 w-3 text-muted-foreground" />
+                                 </TooltipTrigger>
+                                 <TooltipContent>
+                                   <p className="max-w-xs text-xs">Linking a recipe allows automatic inventory deduction when this item is sold.</p>
+                                 </TooltipContent>
+                               </Tooltip>
+                             </TooltipProvider>
+                           </div>
+                           <Popover open={openRecipe} onOpenChange={setOpenRecipe}>
+                            <PopoverTrigger asChild>
+                              <Button
+                                variant="outline"
+                                role="combobox"
+                                aria-expanded={openRecipe}
+                                className="mt-1 w-full justify-between rounded-2xl font-normal"
+                              >
+                                {draftRecipeId
+                                  ? recipes.find((r) => r.id === draftRecipeId)?.name
+                                  : "Select recipe..."}
+                                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-[200px] p-0" align="start">
+                              <Command>
+                                <CommandInput placeholder="Search recipe..." />
+                                <CommandList>
+                                  <CommandEmpty>No recipe found.</CommandEmpty>
+                                  <CommandGroup>
+                                    <CommandItem
+                                      value="none"
+                                      onSelect={() => {
+                                        setDraftRecipeId(null);
+                                        setOpenRecipe(false);
+                                      }}
+                                    >
+                                      <Check
+                                        className={cn(
+                                          "mr-2 h-4 w-4",
+                                          !draftRecipeId ? "opacity-100" : "opacity-0"
+                                        )}
+                                      />
+                                      None
+                                    </CommandItem>
+                                    {recipes.map((recipe) => (
+                                      <CommandItem
+                                        key={recipe.id}
+                                        value={recipe.name}
+                                        onSelect={() => {
+                                          setDraftRecipeId(recipe.id === draftRecipeId ? null : recipe.id);
+                                          setOpenRecipe(false);
+                                        }}
+                                      >
+                                        <Check
+                                          className={cn(
+                                            "mr-2 h-4 w-4",
+                                            draftRecipeId === recipe.id ? "opacity-100" : "opacity-0"
+                                          )}
+                                        />
+                                        {recipe.name}
+                                      </CommandItem>
+                                    ))}
+                                  </CommandGroup>
+                                </CommandList>
+                              </Command>
+                            </PopoverContent>
+                          </Popover>
                         </div>
-                        <div className="flex items-end justify-between gap-3 rounded-2xl border bg-background/50 px-3 py-2">
-                          <div>
-                            <p className="text-xs font-medium" data-testid="text-taxable-label">
-                              Taxable
-                            </p>
-                            <p className="text-xs text-muted-foreground" data-testid="text-taxable-hint">
-                              Included in tax calculation
-                            </p>
-                          </div>
-                          <Button
-                            variant={draftTaxable ? "default" : "secondary"}
-                            className="rounded-xl"
-                            onClick={() => setDraftTaxable((v) => !v)}
-                            data-testid="button-toggle-taxable"
-                          >
-                            {draftTaxable ? "Yes" : "No"}
-                          </Button>
+                        <div className="flex gap-2">
+                            <div className="flex-1">
+                              <Label className="text-xs text-muted-foreground" htmlFor="menuPrice">
+                                Price
+                              </Label>
+                              <Input
+                                id="menuPrice"
+                                value={draftPrice}
+                                onChange={(e) => setDraftPrice(e.target.value)}
+                                className="mt-1 rounded-2xl"
+                                inputMode="decimal"
+                                placeholder="4.50"
+                                data-testid="input-menu-price"
+                              />
+                            </div>
+                            <div className="flex items-end pb-1">
+                              <Button
+                                variant={draftTaxable ? "default" : "outline"}
+                                size="sm"
+                                className="rounded-xl h-9"
+                                onClick={() => setDraftTaxable((v) => !v)}
+                                title="Toggle Taxable"
+                              >
+                                {draftTaxable ? "Taxable" : "No Tax"}
+                              </Button>
+                            </div>
                         </div>
                       </div>
 
-                      <Button className="rounded-2xl" onClick={handleAddItem} data-testid="button-add-menu-item">
-                        <Plus className="mr-2 h-4 w-4" />
-                        Add item
-                      </Button>
+                      <div className="flex justify-end">
+                        <Button className="rounded-2xl px-6" onClick={handleAddItem} data-testid="button-add-menu-item">
+                          <Plus className="mr-2 h-4 w-4" />
+                          Add Item
+                        </Button>
+                      </div>
 
                       <Separator />
 
-                      <div className="max-h-[360px] overflow-auto rounded-2xl border bg-background/40">
+                      <div className="rounded-2xl border bg-background/40">
                         <Table>
                           <TableHeader>
                             <TableRow>
-                              <TableHead className="w-[44%]">Item</TableHead>
+                              <TableHead className="w-[40%]">Item</TableHead>
                               <TableHead>Category</TableHead>
+                              <TableHead>Recipe</TableHead>
                               <TableHead className="text-right">Price</TableHead>
                             </TableRow>
                           </TableHeader>
@@ -219,6 +285,7 @@ export default function MenuPage() {
                             {menu.map((m) => {
                               const selected = m.id === selectedMenuId;
                               const hasRecipe = Boolean(m.recipeId);
+                              const recipeName = m.recipeId ? recipes.find(r => r.id === m.recipeId)?.name : null;
 
                               return (
                                 <TableRow
@@ -228,22 +295,20 @@ export default function MenuPage() {
                                   data-testid={`row-menu-${m.id}`}
                                 >
                                   <TableCell className="font-medium" data-testid={`text-menu-row-name-${m.id}`}>
-                                    <div className="flex items-center gap-2">
                                       <span className="truncate">{m.name}</span>
-                                      <span
-                                        className={
-                                          hasRecipe
-                                            ? "rounded-full bg-accent/10 px-2 py-0.5 text-[11px] font-medium text-accent"
-                                            : "rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
-                                        }
-                                        data-testid={`status-menu-recipe-${m.id}`}
-                                      >
-                                        {hasRecipe ? "Recipe linked" : "No recipe"}
-                                      </span>
-                                    </div>
                                   </TableCell>
                                   <TableCell className="text-muted-foreground" data-testid={`text-menu-row-category-${m.id}`}>
                                     {menuCategories.find(c => c.id === m.categoryIds[0])?.name ?? "Uncategorized"}
+                                  </TableCell>
+                                  <TableCell>
+                                      {hasRecipe ? (
+                                        <div className="flex items-center gap-1.5 text-xs text-primary font-medium">
+                                           <Soup className="h-3.5 w-3.5" />
+                                           {recipeName ?? "Unknown Recipe"}
+                                        </div>
+                                      ) : (
+                                        <span className="text-xs text-muted-foreground italic">No recipe</span>
+                                      )}
                                   </TableCell>
                                   <TableCell className="text-right" data-testid={`text-menu-row-price-${m.id}`}>
                                     {formatMoney(m.priceCents)}
@@ -255,111 +320,6 @@ export default function MenuPage() {
                         </Table>
                       </div>
                     </div>
-                  </CardContent>
-                </Card>
-
-                <Card className="border bg-card shadow-soft lg:col-span-5">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="flex items-center gap-2 font-serif" data-testid="text-link-recipe-title">
-                      <Link2 className="h-5 w-5" />
-                      Link a recipe
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    {selectedMenu ? (
-                      <div className="space-y-3">
-                        <div className="rounded-2xl border bg-background/40 p-4" data-testid="card-selected-menu">
-                          <p className="text-xs font-medium text-muted-foreground" data-testid="text-selected-menu-label">
-                            Selected menu item
-                          </p>
-                          <p className="mt-1 font-serif text-2xl" data-testid="text-selected-menu-name">
-                            {selectedMenu.name}
-                          </p>
-                          <p className="mt-1 text-sm text-muted-foreground" data-testid="text-selected-menu-meta">
-                            {formatMoney(selectedMenu.priceCents)} • {menuCategories.find(c => c.id === selectedMenu.categoryIds[0])?.name ?? "Uncategorized"}
-                          </p>
-                        </div>
-
-                        <div className="rounded-2xl border bg-background/40 p-4" data-testid="card-recipe-options">
-                          <p className="text-xs font-medium text-muted-foreground" data-testid="text-recipe-options-title">
-                            Choose a recipe
-                          </p>
-
-                          <div className="mt-3 grid gap-2">
-                            <Button
-                              variant={selectedMenu.recipeId ? "secondary" : "default"}
-                              className="justify-start rounded-2xl"
-                              onClick={() => assignRecipe(null)}
-                              data-testid="button-assign-recipe-none"
-                            >
-                              No recipe yet
-                            </Button>
-
-                            {recipes.map((r) => {
-                              const selected = selectedMenu.recipeId === r.id;
-                              return (
-                                <Button
-                                  key={r.id}
-                                  variant={selected ? "default" : "secondary"}
-                                  className="justify-between rounded-2xl"
-                                  onClick={() => assignRecipe(r.id)}
-                                  data-testid={`button-assign-recipe-${r.id}`}
-                                >
-                                  <span className="flex items-center gap-2">
-                                    <Soup className="h-4 w-4" />
-                                    {r.name}
-                                  </span>
-                                  <span className="text-xs text-muted-foreground" data-testid={`text-recipe-ingredient-count-${r.id}`}>
-                                    {r.components.length} components
-                                  </span>
-                                </Button>
-                              );
-                            })}
-                          </div>
-
-                          <p className="mt-3 text-xs text-muted-foreground" data-testid="text-recipe-next-step">
-                            Next: go to the Recipes page to create or edit recipes.
-                          </p>
-                        </div>
-
-                        <Separator />
-
-                        <div className="rounded-2xl border bg-background/40 p-4" data-testid="card-tip">
-                          <p className="text-sm font-medium" data-testid="text-tip-title">
-                            Tip
-                          </p>
-                          <p className="mt-1 text-sm text-muted-foreground" data-testid="text-tip-body">
-                            If a menu item has a recipe, recording a sale can automatically subtract the recipe ingredients from inventory.
-                          </p>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="rounded-2xl border bg-background/40 p-4 text-sm text-muted-foreground" data-testid="empty-selected-menu">
-                        Select a menu item from the list.
-                      </div>
-                    )}
-
-                    <Separator className="my-4" />
-
-                    <div className="rounded-2xl border bg-background/40 p-4" data-testid="card-recipes-list">
-                      <p className="text-xs font-medium text-muted-foreground" data-testid="text-recipes-available">
-                        Recipes available
-                      </p>
-                      <ul className="mt-2 space-y-2 text-sm">
-                        {recipes.map((r) => (
-                          <li key={r.id} className="flex items-center justify-between" data-testid={`row-recipe-${r.id}`}>
-                            <span className="text-muted-foreground">{r.name}</span>
-                            <span className="font-medium" data-testid={`text-recipe-id-${r.id}`}>
-                              {r.id}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-
-                    <p className="mt-3 text-xs text-muted-foreground" data-testid="text-prototype-note">
-                      Note: menu is now centralized in the store.
-                    </p>
                   </CardContent>
                 </Card>
               </div>
