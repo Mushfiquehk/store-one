@@ -153,6 +153,24 @@ export default function InventoryPage() {
                       </div>
 
                       <div>
+                        <Label className="text-xs text-muted-foreground" htmlFor="invCategory">
+                          Category
+                        </Label>
+                        <Select value={draftCategory} onValueChange={setDraftCategory}>
+                          <SelectTrigger className="mt-1 rounded-2xl" id="invCategory" data-testid="select-inventory-category">
+                            <SelectValue placeholder="Select category" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {inventoryCategories.map((c) => (
+                              <SelectItem key={c.id} value={c.id} data-testid={`option-category-${c.id}`}>
+                                {c.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div>
                         <Label className="text-xs text-muted-foreground" htmlFor="invUnit">
                           Unit
                         </Label>
