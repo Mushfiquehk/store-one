@@ -9,9 +9,10 @@ import {
   Package, 
   PieChart,
   ArrowUpRight,
-  ArrowDownRight
+  ArrowDownRight,
+  AlertCircle
 } from "lucide-react";
-import { format, addDays, subDays } from "date-fns";
+import { format, addDays, subDays, differenceInDays } from "date-fns";
 import { 
   LineChart, 
   Line, 
@@ -184,6 +185,18 @@ export default function ReportsPage() {
     });
   }, [inventory]);
 
+  const rangeWarning = useMemo(() => {
+    if (!showCompare || !dateRange?.from || !dateRange?.to || !compareRange?.from || !compareRange?.to) return null;
+    
+    const mainDiff = differenceInDays(dateRange.to, dateRange.from);
+    const compareDiff = differenceInDays(compareRange.to, compareRange.from);
+    
+    if (mainDiff !== compareDiff) {
+      return `Main period (${mainDiff + 1} days) and Comparison period (${compareDiff + 1} days) have different lengths. This may lead to skewed results.`;
+    }
+    return null;
+  }, [showCompare, dateRange, compareRange]);
+
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
       <AppShell title="Reports">
@@ -196,6 +209,12 @@ export default function ReportsPage() {
               </div>
               
               <div className="flex flex-col lg:flex-row gap-4 items-end w-full xl:w-auto">
+                 {rangeWarning && (
+                   <div className="flex items-center gap-2 bg-amber-500/10 text-amber-600 dark:text-amber-400 px-4 py-2 rounded-xl text-xs font-medium border border-amber-500/20 animate-in fade-in slide-in-from-top-2">
+                     <AlertCircle className="h-4 w-4 shrink-0" />
+                     {rangeWarning}
+                   </div>
+                 )}
                  <div className="flex flex-col gap-1.5 w-full lg:w-[300px]">
                     <Label className="text-xs text-muted-foreground">Main Period</Label>
                     <Popover>
