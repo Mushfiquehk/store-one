@@ -112,30 +112,57 @@ const StoreContext = createContext<StoreContextType | null>(null);
 
 const INITIAL_INV_CATS: InventoryCategory[] = [
   { id: "cat_beans", name: "Coffee Beans" },
+  { id: "cat_tea", name: "Tea & Chai" },
   { id: "cat_dairy", name: "Dairy & Alt Milks" },
   { id: "cat_syrups", name: "Syrups" },
+  { id: "cat_produce", name: "Fresh Produce" },
+  { id: "cat_proteins", name: "Proteins" },
   { id: "cat_dry", name: "Dry Goods" },
   { id: "cat_bakery", name: "Bakery Stock" },
 ];
 
 const INITIAL_INVENTORY: InventoryItem[] = [
+  // Coffee
   { id: "beans_house", name: "House Blend Beans", categoryId: "cat_beans", sku: "BEAN-HSE", onHand: 5000, reorderAt: 1000, unitCostCents: 2, unit: "g" },
   { id: "beans_decaf", name: "Decaf Beans", categoryId: "cat_beans", sku: "BEAN-DEC", onHand: 2000, reorderAt: 500, unitCostCents: 2, unit: "g" },
+  
+  // Tea
+  { id: "tea_matcha", name: "Matcha Powder", categoryId: "cat_tea", sku: "TEA-MAT", onHand: 500, reorderAt: 100, unitCostCents: 15, unit: "g" },
+  { id: "tea_chai", name: "Chai Concentrate", categoryId: "cat_tea", sku: "TEA-CHAI", onHand: 3000, reorderAt: 1000, unitCostCents: 1, unit: "ml" },
+  { id: "tea_earl", name: "Earl Grey Bags", categoryId: "cat_tea", sku: "TEA-EARL", onHand: 200, reorderAt: 50, unitCostCents: 15, unit: "each" },
+
+  // Dairy
   { id: "milk_whole", name: "Whole Milk", categoryId: "cat_dairy", sku: "MILK-WHL", onHand: 8000, reorderAt: 2000, unitCostCents: 0.5, unit: "ml" },
   { id: "milk_oat", name: "Oat Milk", categoryId: "cat_dairy", sku: "MILK-OAT", onHand: 4000, reorderAt: 1000, unitCostCents: 0.8, unit: "ml" },
   { id: "milk_almond", name: "Almond Milk", categoryId: "cat_dairy", sku: "MILK-ALM", onHand: 3000, reorderAt: 1000, unitCostCents: 0.7, unit: "ml" },
+  
+  // Syrups
   { id: "syrup_vanilla", name: "Vanilla Syrup", categoryId: "cat_syrups", sku: "SYP-VAN", onHand: 2000, reorderAt: 500, unitCostCents: 1.2, unit: "ml" },
+  { id: "syrup_caramel", name: "Caramel Syrup", categoryId: "cat_syrups", sku: "SYP-CAR", onHand: 1500, reorderAt: 500, unitCostCents: 1.2, unit: "ml" },
+  
+  // Produce & Proteins
+  { id: "prod_avo", name: "Avocado", categoryId: "cat_produce", sku: "PROD-AVO", onHand: 20, reorderAt: 10, unitCostCents: 150, unit: "each" },
+  { id: "bread_sour", name: "Sourdough Slice", categoryId: "cat_bakery", sku: "BAK-SOUR", onHand: 40, reorderAt: 10, unitCostCents: 30, unit: "each" },
+  { id: "prot_egg", name: "Eggs", categoryId: "cat_proteins", sku: "PROT-EGG", onHand: 60, reorderAt: 20, unitCostCents: 25, unit: "each" },
+  { id: "prot_ham", name: "Ham Slice", categoryId: "cat_proteins", sku: "PROT-HAM", onHand: 50, reorderAt: 15, unitCostCents: 40, unit: "each" },
+  { id: "dairy_cheese", name: "Cheddar Slice", categoryId: "cat_proteins", sku: "DAIRY-CHZ", onHand: 50, reorderAt: 15, unitCostCents: 30, unit: "each" },
+
+  // Dry Goods & Bakery
   { id: "cup_12oz", name: "Hot Cup 12oz", categoryId: "cat_dry", sku: "CUP-12", onHand: 500, reorderAt: 100, unitCostCents: 8, unit: "each" },
+  { id: "cup_16oz", name: "Hot Cup 16oz", categoryId: "cat_dry", sku: "CUP-16", onHand: 400, reorderAt: 100, unitCostCents: 10, unit: "each" },
   { id: "muffin_blueberry", name: "Blueberry Muffin", categoryId: "cat_bakery", sku: "MUF-BLU", onHand: 12, reorderAt: 6, unitCostCents: 120, unit: "each" },
+  { id: "cross_butter", name: "Butter Croissant", categoryId: "cat_bakery", sku: "BAK-CROS", onHand: 15, reorderAt: 8, unitCostCents: 90, unit: "each" },
 ];
 
 const INITIAL_MENU_CATS: MenuCategory[] = [
-  { id: "mc_drinks", name: "Drinks" },
-  { id: "mc_food", name: "Food" },
-  { id: "mc_combos", name: "Combos" },
+  { id: "mc_drinks", name: "Coffee" },
+  { id: "mc_tea", name: "Tea" },
+  { id: "mc_breakfast", name: "Breakfast" },
+  { id: "mc_bakery", name: "Bakery" },
 ];
 
 const INITIAL_RECIPES: Recipe[] = [
+  // Coffee
   {
     id: "recipe_latte",
     name: "Latte 12oz",
@@ -149,9 +176,8 @@ const INITIAL_RECIPES: Recipe[] = [
     id: "recipe_vanilla_latte",
     name: "Vanilla Latte 12oz",
     components: [
-      // Re-using same logic manually for now (in a real app, recipes could inherit)
       { id: "comp_beans", type: "ingredient", name: "Espresso", inventoryCategoryId: "cat_beans", defaultInventoryItemId: "beans_house", qty: 18, unit: "g" },
-      { id: "comp_milk", type: "ingredient", name: "Milk", inventoryCategoryId: "cat_dairy", defaultInventoryItemId: "milk_whole", qty: 230, unit: "ml" }, // less milk to fit syrup
+      { id: "comp_milk", type: "ingredient", name: "Milk", inventoryCategoryId: "cat_dairy", defaultInventoryItemId: "milk_whole", qty: 230, unit: "ml" },
       { id: "comp_syrup", type: "ingredient", name: "Flavor", inventoryCategoryId: "cat_syrups", defaultInventoryItemId: "syrup_vanilla", qty: 20, unit: "ml" },
       { id: "comp_cup", type: "ingredient", name: "Cup", inventoryCategoryId: "cat_dry", defaultInventoryItemId: "cup_12oz", qty: 1, unit: "each" },
     ]
@@ -163,14 +189,64 @@ const INITIAL_RECIPES: Recipe[] = [
        { id: "comp_beans", type: "ingredient", name: "Beans", inventoryCategoryId: "cat_beans", defaultInventoryItemId: "beans_house", qty: 20, unit: "g" },
        { id: "comp_cup", type: "ingredient", name: "Cup", inventoryCategoryId: "cat_dry", defaultInventoryItemId: "cup_12oz", qty: 1, unit: "each" },
     ]
+  },
+  // Tea
+  {
+    id: "recipe_matcha",
+    name: "Matcha Latte 12oz",
+    components: [
+      { id: "comp_tea", type: "ingredient", name: "Matcha", inventoryCategoryId: "cat_tea", defaultInventoryItemId: "tea_matcha", qty: 5, unit: "g" },
+      { id: "comp_milk", type: "ingredient", name: "Milk", inventoryCategoryId: "cat_dairy", defaultInventoryItemId: "milk_oat", qty: 250, unit: "ml" },
+      { id: "comp_cup", type: "ingredient", name: "Cup", inventoryCategoryId: "cat_dry", defaultInventoryItemId: "cup_12oz", qty: 1, unit: "each" },
+    ]
+  },
+  {
+    id: "recipe_chai",
+    name: "Chai Latte 12oz",
+    components: [
+      { id: "comp_tea", type: "ingredient", name: "Concentrate", inventoryCategoryId: "cat_tea", defaultInventoryItemId: "tea_chai", qty: 120, unit: "ml" },
+      { id: "comp_milk", type: "ingredient", name: "Milk", inventoryCategoryId: "cat_dairy", defaultInventoryItemId: "milk_whole", qty: 130, unit: "ml" },
+      { id: "comp_cup", type: "ingredient", name: "Cup", inventoryCategoryId: "cat_dry", defaultInventoryItemId: "cup_12oz", qty: 1, unit: "each" },
+    ]
+  },
+  // Food
+  {
+    id: "recipe_avotoast",
+    name: "Avocado Toast",
+    components: [
+      { id: "comp_bread", type: "ingredient", name: "Bread", inventoryCategoryId: "cat_bakery", defaultInventoryItemId: "bread_sour", qty: 1, unit: "each" },
+      { id: "comp_avo", type: "ingredient", name: "Avocado", inventoryCategoryId: "cat_produce", defaultInventoryItemId: "prod_avo", qty: 1, unit: "each" },
+      { id: "comp_egg", type: "ingredient", name: "Add Egg", inventoryCategoryId: "cat_proteins", defaultInventoryItemId: "prot_egg", qty: 0, unit: "each" }, // Optional
+    ]
+  },
+  {
+    id: "recipe_croissant_sand",
+    name: "Ham & Cheese Croissant",
+    components: [
+      { id: "comp_bread", type: "ingredient", name: "Croissant", inventoryCategoryId: "cat_bakery", defaultInventoryItemId: "cross_butter", qty: 1, unit: "each" },
+      { id: "comp_meat", type: "ingredient", name: "Ham", inventoryCategoryId: "cat_proteins", defaultInventoryItemId: "prot_ham", qty: 2, unit: "each" },
+      { id: "comp_cheese", type: "ingredient", name: "Cheese", inventoryCategoryId: "cat_proteins", defaultInventoryItemId: "dairy_cheese", qty: 1, unit: "each" },
+    ]
   }
 ];
 
 const INITIAL_MENU: MenuItem[] = [
+  // Coffee
   { id: "item_latte", name: "Latte", priceCents: 450, categoryIds: ["mc_drinks"], taxable: true, recipeId: "recipe_latte" },
   { id: "item_vanilla_latte", name: "Vanilla Latte", priceCents: 525, categoryIds: ["mc_drinks"], taxable: true, recipeId: "recipe_vanilla_latte" },
   { id: "item_coffee", name: "House Coffee", priceCents: 350, categoryIds: ["mc_drinks"], taxable: true, recipeId: "recipe_coffee" },
-  { id: "item_muffin", name: "Blueberry Muffin", priceCents: 375, categoryIds: ["mc_food"], taxable: true, recipeId: null }, // Simple item, no recipe
+  
+  // Tea
+  { id: "item_matcha", name: "Matcha Latte", priceCents: 550, categoryIds: ["mc_tea"], taxable: true, recipeId: "recipe_matcha" },
+  { id: "item_chai", name: "Chai Latte", priceCents: 500, categoryIds: ["mc_tea"], taxable: true, recipeId: "recipe_chai" },
+  
+  // Breakfast
+  { id: "item_avotoast", name: "Avocado Toast", priceCents: 850, categoryIds: ["mc_breakfast"], taxable: true, recipeId: "recipe_avotoast" },
+  { id: "item_croissant_sand", name: "Ham & Cheese Croissant", priceCents: 750, categoryIds: ["mc_breakfast"], taxable: true, recipeId: "recipe_croissant_sand" },
+  
+  // Bakery
+  { id: "item_muffin", name: "Blueberry Muffin", priceCents: 375, categoryIds: ["mc_bakery", "mc_breakfast"], taxable: true, recipeId: null },
+  { id: "item_croissant", name: "Butter Croissant", priceCents: 350, categoryIds: ["mc_bakery"], taxable: true, recipeId: null },
 ];
 
 // --- Provider ---
