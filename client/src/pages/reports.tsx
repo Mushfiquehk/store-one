@@ -382,32 +382,36 @@ export default function ReportsPage() {
                       </PopoverContent>
                     </Popover>
                  </div>
-
-                 <div className="flex flex-col gap-3 w-full lg:w-[180px]">
-                    <div className="flex justify-between">
-                       <Label className="text-xs text-muted-foreground">Granularity</Label>
-                       <span className="text-xs font-medium capitalize text-primary">{currentGranularity}</span>
-                    </div>
-                    <Slider value={granularityIndex} onValueChange={setGranularityIndex} max={2} step={1} className="cursor-pointer" />
-                 </div>
               </div>
             </div>
           </header>
 
           <Tabs defaultValue="sales" className="space-y-6">
-            <TabsList className="bg-card border shadow-sm rounded-xl h-12 p-1">
-              <TabsTrigger value="sales" className="rounded-lg h-full px-4">
-                <TrendingUp className="h-4 w-4 mr-2" /> Sales Trends
-              </TabsTrigger>
-              <TabsTrigger value="product-mix" className="rounded-lg h-full px-4">
-                <PieChart className="h-4 w-4 mr-2" /> Product Mix
-              </TabsTrigger>
-              <TabsTrigger value="inventory" className="rounded-lg h-full px-4">
-                <Package className="h-4 w-4 mr-2" /> Inventory Log
-              </TabsTrigger>
-            </TabsList>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <TabsList className="bg-card border shadow-sm rounded-xl h-12 p-1 w-fit">
+                <TabsTrigger value="sales" className="rounded-lg h-full px-4">
+                  <TrendingUp className="h-4 w-4 mr-2" /> Sales Trends
+                </TabsTrigger>
+                <TabsTrigger value="product-mix" className="rounded-lg h-full px-4">
+                  <PieChart className="h-4 w-4 mr-2" /> Product Mix
+                </TabsTrigger>
+                <TabsTrigger value="inventory" className="rounded-lg h-full px-4">
+                  <Package className="h-4 w-4 mr-2" /> Inventory Log
+                </TabsTrigger>
+              </TabsList>
 
-            <TabsContent value="sales" className="space-y-6">
+              <TabsContent value="sales" className="mt-0">
+                <div className="flex flex-col gap-3 w-full sm:w-[180px]">
+                  <div className="flex justify-between">
+                    <Label className="text-xs text-muted-foreground">Granularity</Label>
+                    <span className="text-xs font-medium capitalize text-primary">{currentGranularity}</span>
+                  </div>
+                  <Slider value={granularityIndex} onValueChange={setGranularityIndex} max={2} step={1} className="cursor-pointer" />
+                </div>
+              </TabsContent>
+            </div>
+
+            <TabsContent value="sales" className="space-y-6 mt-0">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <KpiCard 
                   title="Total Revenue" 
