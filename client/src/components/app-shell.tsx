@@ -7,11 +7,16 @@ import {
   Package,
   Sparkles,
   Soup,
-  ArrowRight
+  ArrowRight,
+  Settings
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useState } from "react";
 
 const nav = [
   { href: "/", label: "POS", icon: LayoutGrid, testid: "link-nav-pos" },
@@ -30,6 +35,7 @@ export default function AppShell({
   children: React.ReactNode;
 }) {
   const [location] = useLocation();
+  const [taxRate, setTaxRate] = useState(8.25);
 
   return (
     <div className="min-h-screen app-shell">
@@ -74,8 +80,32 @@ export default function AppShell({
             </div>
           </div>
           
-          <div className="text-xs font-medium text-muted-foreground hidden sm:block">
-            CornerPOS
+          <div className="flex items-center gap-4">
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" size="icon" className="rounded-xl h-9 w-9 text-muted-foreground hover:text-primary">
+                  <Settings className="h-5 w-5" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-64 rounded-2xl p-4 shadow-xl border-primary/10">
+                <div className="space-y-4">
+                  <h4 className="font-medium leading-none">Settings</h4>
+                  <div className="space-y-2">
+                    <Label htmlFor="tax-rate" className="text-xs">Global Tax Rate (%)</Label>
+                    <Input 
+                      id="tax-rate"
+                      type="number" 
+                      value={taxRate} 
+                      onChange={(e) => setTaxRate(Number(e.target.value))}
+                      className="rounded-xl h-9"
+                    />
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
+            <div className="text-2xl font-serif font-bold tracking-tight text-primary sm:block">
+              CornerPOS
+            </div>
           </div>
         </div>
 

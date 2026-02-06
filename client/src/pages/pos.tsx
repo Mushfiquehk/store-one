@@ -193,30 +193,7 @@ export default function PosPage() {
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
       <AppShell title="POS">
-        <header className="relative overflow-hidden rounded-3xl border bg-card shadow-soft grain mb-6">
-          <div className="px-6 py-5 flex items-center justify-between gap-4">
-              <div className="min-w-0">
-                <h2 className="font-serif text-2xl leading-tight tracking-[-0.02em]" data-testid="text-title">
-                  {businessName}
-                </h2>
-                <p className="text-sm text-muted-foreground truncate">
-                  Ready to serve.
-                </p>
-              </div>
-
-              <div className="flex gap-2">
-                <Input
-                  value={String(taxRatePct)}
-                  onChange={(e) => setTaxRatePct(Number(e.target.value))}
-                  className="w-20 rounded-xl h-9 text-right"
-                  inputMode="decimal"
-                  placeholder="Tax %"
-                />
-              </div>
-          </div>
-        </header>
-
-            <div className="grid gap-6 lg:grid-cols-12 h-[calc(100vh-220px)] pb-6">
+        <div className="grid gap-6 lg:grid-cols-12 h-[calc(100vh-140px)] pb-6">
                 {/* Menu Grid */}
                 <Card className="border bg-card shadow-soft lg:col-span-7 flex flex-col overflow-hidden h-full">
                   <CardHeader className="pb-3 flex-shrink-0 pt-4 px-4">
