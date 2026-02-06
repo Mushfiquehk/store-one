@@ -10,7 +10,8 @@ import {
   PieChart,
   ArrowUpRight,
   ArrowDownRight,
-  AlertCircle
+  AlertCircle,
+  Share2
 } from "lucide-react";
 import { format, addDays, subDays, differenceInDays } from "date-fns";
 import { 
@@ -38,6 +39,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import type { DateRange } from "react-day-picker";
+import { useToast } from "@/hooks/use-toast";
 
 function formatMoney(cents: number) {
   return new Intl.NumberFormat(undefined, {
@@ -71,15 +73,10 @@ function generateMockSalesData(
       data.push(item);
     }
   } else if (granularity === 'daily') {
-    // Default to last 14 days if no range provided, or use the range
     const end = dateRange?.to || new Date();
     const start = dateRange?.from || subDays(end, 13);
-    
-    // Calculate days difference
     const diffTime = Math.abs(end.getTime() - start.getTime());
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
-    
-    // Limit mock data points to reasonable amount
     const daysToGenerate = Math.max(1, Math.min(diffDays + 1, 60));
 
     for (let i = 0; i < daysToGenerate; i++) {
@@ -100,7 +97,6 @@ function generateMockSalesData(
       data.push(item);
     }
   } else {
-    // Monthly
     const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     months.forEach(m => {
       const transactions = Math.floor(Math.random() * 1000) + 800;
@@ -124,6 +120,7 @@ function generateMockSalesData(
 
 export default function ReportsPage() {
   const { menu, inventory } = useStore();
+  const { toast } = useToast();
 
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
     from: subDays(new Date(), 7),
@@ -200,15 +197,95 @@ export default function ReportsPage() {
     return null;
   }, [showCompare, dateRange, compareRange]);
 
+  const exportData = useMemo(() => {
+    const payload = {
+      reportType: "AI Operational Intelligence",
+      generatedAt: new Date().toISOString(),
+      dateRange: {
+        from: dateRange?.from?.toISOString(),
+        to: dateRange?.to?.toISOString(),
+        granularity: currentGranularity,
+      },
+      kpis: {
+        totalSales: totals.sales,
+        totalTransactions: totals.txns,
+        averageCheck: totals.avgCheck,
+      },
+      salesData: salesData.map(d => ({
+        label: d.label,
+        sales: d.sales,
+        transactions: d.transactions,
+        // @ts-ignore
+        prevSales: d.prevSales,
+      })),
+      productMix: productMixData,
+      inventory: inventoryReportData.map(i => ({
+        name: i.name,
+        onHand: i.ending,
+        wastage: i.wastage,
+        cogs: i.cogs / 100,
+        cogsPercent: totals.sales > 0 ? (i.cogs / (totals.sales * 100)) * 100 : 0,
+      })),
+      context: "This data is optimized for LLM analysis. Please suggest optimizations for product pricing, wastage reduction, and peak hour staffing."
+    };
+    return JSON.stringify(payload, null, 2);
+  }, [dateRange, currentGranularity, totals, salesData, productMixData, inventoryReportData]);
+
+  const copyToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(exportData);
+      toast({ title: "Copied!", description: "AI analysis data copied to clipboard." });
+    } catch {
+      toast({ title: "Failed", description: "Clipboard access denied.", variant: "destructive" });
+    }
+  };
+
+  const downloadFile = () => {
+    const blob = new Blob([exportData], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `report-ai-export-${format(new Date(), "yyyy-MM-dd")}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    toast({ title: "Downloaded", description: "AI analysis file saved." });
+  };
+
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
       <AppShell title="Reports">
         <div className="flex flex-col gap-6">
           <header className="rounded-3xl border bg-card shadow-soft p-6">
             <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6">
-              <div>
-                <h2 className="text-2xl font-serif">Performance</h2>
-                <p className="text-muted-foreground text-sm">Analyze sales, trends, and inventory health.</p>
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center w-full justify-between">
+                <div>
+                  <h2 className="text-2xl font-serif">Performance</h2>
+                  <p className="text-muted-foreground text-sm">Analyze sales, trends, and inventory health.</p>
+                </div>
+                
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" className="rounded-xl border-primary/20 text-primary hover:bg-primary/5">
+                      <Share2 className="mr-2 h-4 w-4" /> Export for AI
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-80 rounded-2xl p-4 shadow-xl border-primary/10">
+                    <div className="grid gap-4">
+                      <div className="space-y-2">
+                        <h4 className="font-medium leading-none">AI Intelligence Export</h4>
+                        <p className="text-sm text-muted-foreground">
+                          Package all report data into a format optimized for analysis by LLMs like Claude or ChatGPT.
+                        </p>
+                      </div>
+                      <div className="grid gap-2">
+                        <Button className="rounded-xl" onClick={copyToClipboard}>Copy to Clipboard</Button>
+                        <Button variant="outline" className="rounded-xl" onClick={downloadFile}>Download .txt</Button>
+                      </div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
               </div>
               
               <div className="flex flex-col lg:flex-row gap-4 items-end w-full xl:w-auto">
