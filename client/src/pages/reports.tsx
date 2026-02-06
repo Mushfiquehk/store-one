@@ -16,6 +16,8 @@ import { format, addDays, subDays, differenceInDays } from "date-fns";
 import { 
   LineChart, 
   Line, 
+  BarChart,
+  Bar,
   XAxis, 
   YAxis, 
   CartesianGrid, 
@@ -169,6 +171,7 @@ export default function ReportsPage() {
   const productMixData = useMemo(() => {
     return menu.slice(0, 8).map(item => ({
       name: item.name,
+      quantity: Math.floor(Math.random() * 100) + 20,
       revenue: (Math.floor(Math.random() * 100) + 20) * (item.priceCents / 100)
     })).sort((a, b) => b.revenue - a.revenue);
   }, [menu]);
@@ -327,21 +330,49 @@ export default function ReportsPage() {
             </TabsContent>
 
             <TabsContent value="product-mix">
-              <Card className="shadow-soft rounded-2xl p-6">
-                <div className="flex justify-between items-center mb-6">
+              <Card className="shadow-soft rounded-2xl overflow-hidden">
+                <div className="p-6 border-b bg-muted/20 flex justify-between items-center">
                    <h3 className="text-lg font-medium">Top Selling Items</h3>
                    <Button variant="outline" size="sm" className="rounded-xl">Export CSV</Button>
                 </div>
-                <div className="h-[400px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={productMixData} layout="vertical" margin={{ left: 40 }}>
-                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="hsl(var(--border))" />
-                      <XAxis type="number" hide />
-                      <YAxis dataKey="name" type="category" width={120} tick={{fontSize: 12}} axisLine={false} tickLine={false} />
-                      <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
-                      <Line type="monotone" dataKey="revenue" stroke="hsl(var(--primary))" strokeWidth={3} dot={{ r: 4 }} />
-                    </LineChart>
-                  </ResponsiveContainer>
+                
+                <div className="p-6">
+                  <div className="h-[400px] w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart layout="vertical" data={productMixData} margin={{ top: 5, right: 30, left: 40, bottom: 5 }}>
+                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="hsl(var(--border))" />
+                        <XAxis type="number" hide />
+                        <YAxis dataKey="name" type="category" width={120} tick={{fontSize: 12}} axisLine={false} tickLine={false} />
+                        <Tooltip 
+                          cursor={{fill: 'hsl(var(--muted))'}}
+                          contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                          formatter={(value: number) => [`$${value.toFixed(2)}`, 'Revenue']}
+                        />
+                        <Bar dataKey="revenue" fill="hsl(var(--primary))" radius={[0, 4, 4, 0]} barSize={20} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                <div className="border-t">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Item Name</TableHead>
+                        <TableHead className="text-right">Quantity Sold</TableHead>
+                        <TableHead className="text-right">Total Revenue</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {productMixData.map((item, i) => (
+                        <TableRow key={i}>
+                          <TableCell className="font-medium">{item.name}</TableCell>
+                          <TableCell className="text-right">{item.quantity}</TableCell>
+                          <TableCell className="text-right font-medium">{formatMoney(item.revenue * 100)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
                 </div>
               </Card>
             </TabsContent>
