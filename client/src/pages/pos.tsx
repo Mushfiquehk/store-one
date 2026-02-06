@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { LayoutGrid, Receipt, ShoppingBag, Edit2, Check, X } from "lucide-react";
+import { LayoutGrid, Receipt, ShoppingBag, Edit2, Check, X, Clock, ChevronRight } from "lucide-react";
 import AppShell from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,31 +9,10 @@ import { Separator } from "@/components/ui/separator";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { useStore, type MenuItem } from "@/lib/store";
-
-export type CartItemCustomization = {
-  componentId: string;
-  inventoryItemId: string;
-  qty: number;
-};
-
-export type CartItem = {
-  instanceId: string;
-  menuItemId: string;
-  qty: number;
-  customizations: CartItemCustomization[];
-};
-
-export type Sale = {
-  id: string;
-  createdAt: number;
-  lines: CartItem[];
-  subtotalCents: number;
-  taxCents: number;
-  totalCents: number;
-  paymentMethod: "Cash" | "Card";
-};
+import { useStore, type MenuItem, type CartItem, type CartItemCustomization, type Sale } from "@/lib/store";
+import { format } from "date-fns";
 
 function formatMoney(cents: number) {
   return new Intl.NumberFormat(undefined, {
@@ -48,12 +27,11 @@ function uid(prefix: string) {
 
 export default function PosPage() {
   const { toast } = useToast();
-  const { menu, recipes, inventory, inventoryCategories, menuCategories, updateInventoryCount } = useStore();
+  const { menu, recipes, inventory, inventoryCategories, menuCategories, updateInventoryCount, sales, addSale } = useStore();
 
   const [businessName, setBusinessName] = useState("Corner Store");
   const [taxRatePct, setTaxRatePct] = useState(8.25);
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [sales, setSales] = useState<Sale[]>([]);
   
   // Menu Navigation State
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
@@ -183,7 +161,7 @@ export default function PosPage() {
       paymentMethod: paymentType,
     };
 
-    setSales((prev) => [sale, ...prev]);
+    addSale(sale);
 
     toast({ title: "Sale recorded", description: `${formatMoney(totalCents)} • ${paymentType}` });
     clearCart();
@@ -250,98 +228,149 @@ export default function PosPage() {
                   </CardContent>
                 </Card>
 
-                {/* Cart / Receipt */}
+                {/* Right Panel: Tabs for Current Order / Recent Orders */}
                 <Card className="border bg-card shadow-soft lg:col-span-5 flex flex-col h-full overflow-hidden">
-                  <CardHeader className="pb-3 border-b bg-muted/20 pt-4 px-4">
-                    <CardTitle className="flex items-center gap-2 font-serif" data-testid="text-cart-title">
-                      <Receipt className="h-5 w-5" />
-                      Current Order
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="flex-1 flex flex-col p-0">
-                    <div className="flex-1 overflow-auto p-4">
-                      {cart.length > 0 ? (
-                        <ul className="space-y-3">
-                          {cart.map((item) => {
-                            const m = menu.find((x) => x.id === item.menuItemId);
-                            const hasRecipe = !!m?.recipeId;
-                            return (
-                              <li key={item.instanceId} className="flex flex-col gap-1 rounded-xl border bg-background p-3" data-testid={`cart-item-${item.instanceId}`}>
-                                <div className="flex items-start justify-between">
-                                  <div>
-                                    <p className="font-medium">{m?.name}</p>
-                                    <p className="text-xs text-muted-foreground">{formatMoney(m?.priceCents ?? 0)}</p>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                     {hasRecipe && (
-                                       <Button size="sm" variant="outline" className="h-7 px-2 rounded-lg text-xs" onClick={() => openEdit(item)}>
-                                          <Edit2 className="h-3 w-3 mr-1" /> Edit
+                  <Tabs defaultValue="current" className="flex flex-col h-full">
+                    <div className="px-4 pt-4 pb-2 border-b bg-muted/20">
+                      <TabsList className="grid w-full grid-cols-2 rounded-xl h-10 p-1">
+                        <TabsTrigger value="current" className="rounded-lg">
+                          <Receipt className="h-4 w-4 mr-2" /> Current Order
+                        </TabsTrigger>
+                        <TabsTrigger value="recent" className="rounded-lg">
+                          <Clock className="h-4 w-4 mr-2" /> Past Orders
+                        </TabsTrigger>
+                      </TabsList>
+                    </div>
+
+                    <TabsContent value="current" className="flex-1 flex flex-col overflow-hidden m-0 data-[state=active]:flex">
+                      <div className="flex-1 overflow-auto p-4">
+                        {cart.length > 0 ? (
+                          <ul className="space-y-3">
+                            {cart.map((item) => {
+                              const m = menu.find((x) => x.id === item.menuItemId);
+                              const hasRecipe = !!m?.recipeId;
+                              return (
+                                <li key={item.instanceId} className="flex flex-col gap-1 rounded-xl border bg-background p-3" data-testid={`cart-item-${item.instanceId}`}>
+                                  <div className="flex items-start justify-between">
+                                    <div>
+                                      <p className="font-medium">{m?.name}</p>
+                                      <p className="text-xs text-muted-foreground">{formatMoney(m?.priceCents ?? 0)}</p>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                       {hasRecipe && (
+                                         <Button size="sm" variant="outline" className="h-7 px-2 rounded-lg text-xs" onClick={() => openEdit(item)}>
+                                            <Edit2 className="h-3 w-3 mr-1" /> Edit
+                                         </Button>
+                                       )}
+                                       <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive" onClick={() => removeFromCart(item.instanceId)}>
+                                         <X className="h-4 w-4" />
                                        </Button>
-                                     )}
-                                     <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive" onClick={() => removeFromCart(item.instanceId)}>
-                                       <X className="h-4 w-4" />
-                                     </Button>
+                                    </div>
                                   </div>
-                                </div>
-                                {hasRecipe && item.customizations.length > 0 && (
-                                  <div className="mt-1 pl-2 border-l-2 border-primary/20">
-                                     {item.customizations.map(c => {
-                                        // We need to look up the slot name from the recipe
-                                        const recipe = recipes.find(r => r.id === m?.recipeId);
-                                        const comp = recipe?.components.find(comp => comp.id === c.componentId);
-                                        const invItem = inventory.find(i => i.id === c.inventoryItemId);
-                                        
-                                        return (
-                                          <p key={c.componentId} className="text-[10px] text-muted-foreground">
-                                            {comp?.name}: {invItem?.name ?? "Unknown"} ({c.qty} {comp?.unit})
-                                          </p>
-                                        );
+                                  {hasRecipe && item.customizations.length > 0 && (
+                                    <div className="mt-1 pl-2 border-l-2 border-primary/20">
+                                       {item.customizations.map(c => {
+                                          // We need to look up the slot name from the recipe
+                                          const recipe = recipes.find(r => r.id === m?.recipeId);
+                                          const comp = recipe?.components.find(comp => comp.id === c.componentId);
+                                          const invItem = inventory.find(i => i.id === c.inventoryItemId);
+                                          
+                                          return (
+                                            <p key={c.componentId} className="text-[10px] text-muted-foreground">
+                                              {comp?.name}: {invItem?.name ?? "Unknown"} ({c.qty} {comp?.unit})
+                                            </p>
+                                          );
+                                       })}
+                                    </div>
+                                  )}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        ) : (
+                          <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
+                            <ShoppingBag className="h-8 w-8 opacity-20" />
+                            <p className="mt-2 text-sm">Cart is empty</p>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="border-t bg-muted/20 p-6">
+                        <div className="space-y-1.5 text-sm">
+                          <div className="flex justify-between text-muted-foreground">
+                            <span>Subtotal</span>
+                            <span>{formatMoney(subtotalCents)}</span>
+                          </div>
+                          <div className="flex justify-between text-muted-foreground">
+                            <span>Tax ({taxRatePct}%)</span>
+                            <span>{formatMoney(taxCents)}</span>
+                          </div>
+                          <div className="flex justify-between text-lg font-medium text-foreground">
+                            <span>Total</span>
+                            <span>{formatMoney(totalCents)}</span>
+                          </div>
+                        </div>
+
+                        <div className="mt-4">
+                          <Button className="w-full rounded-2xl h-12 text-lg" onClick={handleConfirmOrder} data-testid="button-confirm-order">
+                            Checkout {formatMoney(totalCents)}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            className="w-full mt-2 rounded-xl text-muted-foreground hover:text-destructive"
+                            onClick={clearCart}
+                            data-testid="button-clear-sale"
+                          >
+                            Clear Order
+                          </Button>
+                        </div>
+                      </div>
+                    </TabsContent>
+
+                    <TabsContent value="recent" className="flex-1 flex flex-col overflow-hidden m-0 data-[state=active]:flex">
+                      <div className="flex-1 overflow-auto p-4">
+                        {sales.length > 0 ? (
+                           <div className="space-y-4">
+                             {sales.slice(0, 10).map((sale) => (
+                               <div key={sale.id} className="rounded-xl border bg-background p-4 shadow-sm">
+                                  <div className="flex justify-between items-start mb-2">
+                                     <div>
+                                        <p className="font-semibold text-lg">{formatMoney(sale.totalCents)}</p>
+                                        <p className="text-xs text-muted-foreground">{format(sale.createdAt, "h:mm a")}</p>
+                                     </div>
+                                     <span className="text-xs font-medium px-2 py-1 rounded-full bg-primary/10 text-primary border border-primary/20">
+                                       {sale.paymentMethod}
+                                     </span>
+                                  </div>
+                                  <Separator className="my-2" />
+                                  <ul className="space-y-1">
+                                     {sale.lines.map((line, idx) => {
+                                       const m = menu.find((x) => x.id === line.menuItemId);
+                                       return (
+                                         <li key={idx} className="text-sm flex justify-between">
+                                           <span>{line.qty}x {m?.name}</span>
+                                           {line.customizations.length > 0 && (
+                                              <div className="flex items-center text-xs text-muted-foreground ml-2">
+                                                 <Edit2 className="h-3 w-3 mr-1 opacity-50" />
+                                                 Custom
+                                              </div>
+                                           )}
+                                         </li>
+                                       );
                                      })}
-                                  </div>
-                                )}
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      ) : (
-                        <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
-                          <ShoppingBag className="h-8 w-8 opacity-20" />
-                          <p className="mt-2 text-sm">Cart is empty</p>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="border-t bg-muted/20 p-6">
-                      <div className="space-y-1.5 text-sm">
-                        <div className="flex justify-between text-muted-foreground">
-                          <span>Subtotal</span>
-                          <span>{formatMoney(subtotalCents)}</span>
-                        </div>
-                        <div className="flex justify-between text-muted-foreground">
-                          <span>Tax ({taxRatePct}%)</span>
-                          <span>{formatMoney(taxCents)}</span>
-                        </div>
-                        <div className="flex justify-between text-lg font-medium text-foreground">
-                          <span>Total</span>
-                          <span>{formatMoney(totalCents)}</span>
-                        </div>
+                                  </ul>
+                               </div>
+                             ))}
+                           </div>
+                        ) : (
+                          <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
+                            <Clock className="h-8 w-8 opacity-20" />
+                            <p className="mt-2 text-sm">No recent orders</p>
+                          </div>
+                        )}
                       </div>
-
-                      <div className="mt-4">
-                        <Button className="w-full rounded-2xl h-12 text-lg" onClick={handleConfirmOrder} data-testid="button-confirm-order">
-                          Checkout {formatMoney(totalCents)}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          className="w-full mt-2 rounded-xl text-muted-foreground hover:text-destructive"
-                          onClick={clearCart}
-                          data-testid="button-clear-sale"
-                        >
-                          Clear Order
-                        </Button>
-                      </div>
-                    </div>
-                  </CardContent>
+                    </TabsContent>
+                  </Tabs>
                 </Card>
             </div>
 

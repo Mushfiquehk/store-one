@@ -57,6 +57,29 @@ export type Recipe = {
   components: RecipeComponent[];
 };
 
+export type CartItemCustomization = {
+  componentId: string;
+  inventoryItemId: string;
+  qty: number;
+};
+
+export type CartItem = {
+  instanceId: string;
+  menuItemId: string;
+  qty: number;
+  customizations: CartItemCustomization[];
+};
+
+export type Sale = {
+  id: string;
+  createdAt: number;
+  lines: CartItem[];
+  subtotalCents: number;
+  taxCents: number;
+  totalCents: number;
+  paymentMethod: "Cash" | "Card";
+};
+
 // --- Store Context ---
 
 type StoreContextType = {
@@ -66,6 +89,7 @@ type StoreContextType = {
   menuCategories: MenuCategory[];
   menu: MenuItem[];
   recipes: Recipe[];
+  sales: Sale[];
   
   // Actions
   addInventoryCategory: (name: string) => void;
@@ -78,6 +102,8 @@ type StoreContextType = {
   
   addRecipe: (recipe: Recipe) => void;
   updateRecipe: (id: string, updates: Partial<Recipe>) => void;
+
+  addSale: (sale: Sale) => void;
 };
 
 const StoreContext = createContext<StoreContextType | null>(null);
@@ -155,6 +181,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [menuCategories, setMenuCategories] = useState<MenuCategory[]>(INITIAL_MENU_CATS);
   const [menu, setMenu] = useState<MenuItem[]>(INITIAL_MENU);
   const [recipes, setRecipes] = useState<Recipe[]>(INITIAL_RECIPES);
+  const [sales, setSales] = useState<Sale[]>([]);
 
   // Actions
   const addInventoryCategory = (name: string) => {
@@ -191,12 +218,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setRecipes(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
   };
 
+  const addSale = (sale: Sale) => {
+    setSales(prev => [sale, ...prev]);
+  };
+
   const value = {
     inventoryCategories,
     inventory,
     menuCategories,
     menu,
     recipes,
+    sales,
     addInventoryCategory,
     addInventoryItem,
     updateInventoryCount,
@@ -204,7 +236,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     addMenuItem,
     updateMenuItem,
     addRecipe,
-    updateRecipe
+    updateRecipe,
+    addSale
   };
 
   return (
