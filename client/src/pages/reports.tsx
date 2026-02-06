@@ -11,7 +11,7 @@ import {
   ArrowUpRight,
   ArrowDownRight
 } from "lucide-react";
-import { format, addDays } from "date-fns";
+import { format, addDays, subDays } from "date-fns";
 import { 
   LineChart, 
   Line, 
@@ -43,9 +43,12 @@ function formatMoney(cents: number) {
   }).format(cents / 100);
 }
 
-function generateMockSalesData(granularity: 'hourly' | 'daily' | 'monthly', hasComparison: boolean) {
+function generateMockSalesData(
+  granularity: 'hourly' | 'daily' | 'monthly', 
+  hasComparison: boolean,
+  dateRange?: { from: Date; to: Date }
+) {
   const data = [];
-  const baseDate = new Date();
   
   if (granularity === 'hourly') {
     for (let i = 6; i <= 22; i++) {
@@ -65,8 +68,19 @@ function generateMockSalesData(granularity: 'hourly' | 'daily' | 'monthly', hasC
       data.push(item);
     }
   } else if (granularity === 'daily') {
-    for (let i = 0; i < 14; i++) {
-      const date = addDays(baseDate, -i);
+    // Default to last 14 days if no range provided, or use the range
+    const end = dateRange?.to || new Date();
+    const start = dateRange?.from || subDays(end, 13);
+    
+    // Calculate days difference
+    const diffTime = Math.abs(end.getTime() - start.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+    
+    // Limit mock data points to reasonable amount
+    const daysToGenerate = Math.max(1, Math.min(diffDays + 1, 60));
+
+    for (let i = 0; i < daysToGenerate; i++) {
+      const date = addDays(start, i);
       const transactions = Math.floor(Math.random() * 50) + 40;
       const sales = (transactions * (Math.floor(Math.random() * 400) + 900)) / 100;
       const item = {
@@ -82,8 +96,8 @@ function generateMockSalesData(granularity: 'hourly' | 'daily' | 'monthly', hasC
       }
       data.push(item);
     }
-    data.reverse();
   } else {
+    // Monthly
     const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     months.forEach(m => {
       const transactions = Math.floor(Math.random() * 1000) + 800;
@@ -120,7 +134,10 @@ export default function ReportsPage() {
   const granularities = ['hourly', 'daily', 'monthly'] as const;
   const currentGranularity = granularities[granularityIndex[0]];
 
-  const salesData = useMemo(() => generateMockSalesData(currentGranularity, showCompare), [currentGranularity, showCompare]);
+  const salesData = useMemo(() => {
+    // @ts-ignore
+    return generateMockSalesData(currentGranularity, showCompare, dateRange);
+  }, [currentGranularity, showCompare, dateRange]);
   
   const totals = useMemo(() => {
     const currentSales = salesData.reduce((acc, curr) => acc + curr.sales, 0);
