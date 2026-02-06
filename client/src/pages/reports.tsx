@@ -119,7 +119,7 @@ function generateMockSalesData(
 }
 
 export default function ReportsPage() {
-  const { menu, inventory } = useStore();
+  const { menu, inventory, inventoryCategories } = useStore();
   const { toast } = useToast();
 
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
@@ -174,7 +174,7 @@ export default function ReportsPage() {
   }, [menu]);
 
   const inventoryReportData = useMemo(() => {
-    return inventory.map(item => {
+    const reportData = inventory.map(item => {
       const beginning = item.onHand + Math.floor(Math.random() * 20);
       const received = Math.floor(Math.random() * 10);
       const sold = Math.floor(Math.random() * 15);
@@ -183,7 +183,16 @@ export default function ReportsPage() {
       const cogs = (sold + wastage) * item.unitCostCents;
       return { ...item, beginning, received, sold, wastage, ending, cogs };
     });
-  }, [inventory]);
+
+    // Group by category
+    const grouped: Record<string, typeof reportData> = {};
+    reportData.forEach(item => {
+      const catName = inventoryCategories.find(c => c.id === item.categoryId)?.name || "Uncategorized";
+      if (!grouped[catName]) grouped[catName] = [];
+      grouped[catName].push(item);
+    });
+    return grouped;
+  }, [inventory, inventoryCategories]);
 
   const rangeWarning = useMemo(() => {
     if (!showCompare || !dateRange?.from || !dateRange?.to || !compareRange?.from || !compareRange?.to) return null;
@@ -219,7 +228,7 @@ export default function ReportsPage() {
         prevSales: d.prevSales,
       })),
       productMix: productMixData,
-      inventory: inventoryReportData.map(i => ({
+      inventory: Object.values(inventoryReportData).flat().map(i => ({
         name: i.name,
         onHand: i.ending,
         wastage: i.wastage,
@@ -476,29 +485,38 @@ export default function ReportsPage() {
                       <TableHead className="text-right font-bold">Ending</TableHead>
                       <TableHead className="text-right">Unit Cost</TableHead>
                       <TableHead className="text-right">COGS</TableHead>
-                      <TableHead className="text-right">COGS %</TableHead>
+                      <TableHead className="text-center">COGS %</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {inventoryReportData.map((row) => {
-                      const netSalesCents = totals.sales * 100;
-                      const cogsPercent = netSalesCents > 0 ? (row.cogs / netSalesCents) * 100 : 0;
-                      return (
-                        <TableRow key={row.id}>
-                          <TableCell className="font-medium">{row.name}</TableCell>
-                          <TableCell className="text-right text-muted-foreground">{row.beginning}</TableCell>
-                          <TableCell className="text-right text-green-600">+{row.received}</TableCell>
-                          <TableCell className="text-right">{row.sold}</TableCell>
-                          <TableCell className="text-right text-destructive">-{row.wastage}</TableCell>
-                          <TableCell className="text-right font-bold">{row.ending}</TableCell>
-                          <TableCell className="text-right text-muted-foreground">{formatMoney(row.unitCostCents)}</TableCell>
-                          <TableCell className="text-right font-medium">{formatMoney(row.cogs)}</TableCell>
-                          <TableCell className="text-right font-medium">
-                            {cogsPercent.toFixed(1)}%
+                    {Object.entries(inventoryReportData).map(([category, items]) => (
+                      <>
+                        <TableRow key={category} className="bg-muted/30 hover:bg-muted/30">
+                          <TableCell colSpan={9} className="font-bold text-xs uppercase tracking-wider text-primary py-2 px-4">
+                            {category}
                           </TableCell>
                         </TableRow>
-                      );
-                    })}
+                        {items.map((row) => {
+                          const netSalesCents = totals.sales * 100;
+                          const cogsPercent = netSalesCents > 0 ? (row.cogs / netSalesCents) * 100 : 0;
+                          return (
+                            <TableRow key={row.id}>
+                              <TableCell className="font-medium pl-6">{row.name}</TableCell>
+                              <TableCell className="text-right text-muted-foreground">{row.beginning}</TableCell>
+                              <TableCell className="text-right text-green-600">+{row.received}</TableCell>
+                              <TableCell className="text-right">{row.sold}</TableCell>
+                              <TableCell className="text-right text-destructive">-{row.wastage}</TableCell>
+                              <TableCell className="text-right font-bold">{row.ending}</TableCell>
+                              <TableCell className="text-right text-muted-foreground">{formatMoney(row.unitCostCents)}</TableCell>
+                              <TableCell className="text-right font-medium">{formatMoney(row.cogs)}</TableCell>
+                              <TableCell className="text-center font-medium">
+                                {cogsPercent.toFixed(1)}%
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </>
+                    ))}
                   </TableBody>
                 </Table>
               </Card>
