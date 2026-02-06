@@ -184,14 +184,36 @@ export default function ReportsPage() {
       return { ...item, beginning, received, sold, wastage, ending, cogs };
     });
 
-    // Group by category
-    const grouped: Record<string, typeof reportData> = {};
+    // Group and aggregate by category
+    const aggregated: Record<string, {
+      beginning: number;
+      received: number;
+      sold: number;
+      wastage: number;
+      ending: number;
+      cogs: number;
+    }> = {};
+
     reportData.forEach(item => {
       const catName = inventoryCategories.find(c => c.id === item.categoryId)?.name || "Uncategorized";
-      if (!grouped[catName]) grouped[catName] = [];
-      grouped[catName].push(item);
+      if (!aggregated[catName]) {
+        aggregated[catName] = {
+          beginning: 0,
+          received: 0,
+          sold: 0,
+          wastage: 0,
+          ending: 0,
+          cogs: 0,
+        };
+      }
+      aggregated[catName].beginning += item.beginning;
+      aggregated[catName].received += item.received;
+      aggregated[catName].sold += item.sold;
+      aggregated[catName].wastage += item.wastage;
+      aggregated[catName].ending += item.ending;
+      aggregated[catName].cogs += item.cogs;
     });
-    return grouped;
+    return aggregated;
   }, [inventory, inventoryCategories]);
 
   const rangeWarning = useMemo(() => {
@@ -228,12 +250,11 @@ export default function ReportsPage() {
         prevSales: d.prevSales,
       })),
       productMix: productMixData,
-      inventory: Object.values(inventoryReportData).flat().map(i => ({
-        name: i.name,
-        onHand: i.ending,
-        wastage: i.wastage,
-        cogs: i.cogs / 100,
-        cogsPercent: totals.sales > 0 ? (i.cogs / (totals.sales * 100)) * 100 : 0,
+      inventory: Object.entries(inventoryReportData).map(([category, data]) => ({
+        category,
+        ...data,
+        cogsFormatted: data.cogs / 100,
+        cogsPercent: totals.sales > 0 ? (data.cogs / (totals.sales * 100)) * 100 : 0,
       })),
       context: "This data is optimized for LLM analysis. Please suggest optimizations for product pricing, wastage reduction, and peak hour staffing."
     };
@@ -477,46 +498,37 @@ export default function ReportsPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Item Name</TableHead>
+                      <TableHead>Category</TableHead>
                       <TableHead className="text-right">Beginning</TableHead>
                       <TableHead className="text-right">Received</TableHead>
                       <TableHead className="text-right">Sold</TableHead>
                       <TableHead className="text-right">Wastage</TableHead>
                       <TableHead className="text-right font-bold">Ending</TableHead>
-                      <TableHead className="text-right">Unit Cost</TableHead>
                       <TableHead className="text-right">COGS</TableHead>
                       <TableHead className="text-center">COGS %</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {Object.entries(inventoryReportData).map(([category, items]) => (
-                      <>
-                        <TableRow key={category} className="bg-muted/30 hover:bg-muted/30">
-                          <TableCell colSpan={9} className="font-bold text-xs uppercase tracking-wider text-primary py-2 px-4">
+                    {Object.entries(inventoryReportData).map(([category, totalsRow]) => {
+                      const netSalesCents = totals.sales * 100;
+                      const cogsPercent = netSalesCents > 0 ? (totalsRow.cogs / netSalesCents) * 100 : 0;
+                      return (
+                        <TableRow key={category}>
+                          <TableCell className="font-bold text-primary uppercase tracking-wider">
                             {category}
                           </TableCell>
+                          <TableCell className="text-right text-muted-foreground">{totalsRow.beginning}</TableCell>
+                          <TableCell className="text-right text-green-600">+{totalsRow.received}</TableCell>
+                          <TableCell className="text-right">{totalsRow.sold}</TableCell>
+                          <TableCell className="text-right text-destructive">-{totalsRow.wastage}</TableCell>
+                          <TableCell className="text-right font-bold">{totalsRow.ending}</TableCell>
+                          <TableCell className="text-right font-medium">{formatMoney(totalsRow.cogs)}</TableCell>
+                          <TableCell className="text-center font-medium">
+                            {cogsPercent.toFixed(1)}%
+                          </TableCell>
                         </TableRow>
-                        {items.map((row) => {
-                          const netSalesCents = totals.sales * 100;
-                          const cogsPercent = netSalesCents > 0 ? (row.cogs / netSalesCents) * 100 : 0;
-                          return (
-                            <TableRow key={row.id}>
-                              <TableCell className="font-medium pl-6">{row.name}</TableCell>
-                              <TableCell className="text-right text-muted-foreground">{row.beginning}</TableCell>
-                              <TableCell className="text-right text-green-600">+{row.received}</TableCell>
-                              <TableCell className="text-right">{row.sold}</TableCell>
-                              <TableCell className="text-right text-destructive">-{row.wastage}</TableCell>
-                              <TableCell className="text-right font-bold">{row.ending}</TableCell>
-                              <TableCell className="text-right text-muted-foreground">{formatMoney(row.unitCostCents)}</TableCell>
-                              <TableCell className="text-right font-medium">{formatMoney(row.cogs)}</TableCell>
-                              <TableCell className="text-center font-medium">
-                                {cogsPercent.toFixed(1)}%
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </>
-                    ))}
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </Card>
