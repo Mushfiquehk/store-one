@@ -90,6 +90,7 @@ type StoreContextType = {
   menu: MenuItem[];
   recipes: Recipe[];
   sales: Sale[];
+  integrations: string[];
   
   // Actions
   addInventoryCategory: (name: string) => void;
@@ -104,6 +105,7 @@ type StoreContextType = {
   updateRecipe: (id: string, updates: Partial<Recipe>) => void;
 
   addSale: (sale: Sale) => void;
+  toggleIntegration: (id: string) => void;
 };
 
 const StoreContext = createContext<StoreContextType | null>(null);
@@ -258,6 +260,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [menu, setMenu] = useState<MenuItem[]>(INITIAL_MENU);
   const [recipes, setRecipes] = useState<Recipe[]>(INITIAL_RECIPES);
   const [sales, setSales] = useState<Sale[]>([]);
+  const [integrations, setIntegrations] = useState<string[]>([]);
 
   // Actions
   const addInventoryCategory = (name: string) => {
@@ -298,6 +301,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setSales(prev => [sale, ...prev]);
   };
 
+  const toggleIntegration = (id: string) => {
+    setIntegrations(prev => {
+      if (prev.includes(id)) {
+        return prev.filter(i => i !== id);
+      } else {
+        toast({ title: "Integration Connected", description: "Successfully linked to provider." });
+        return [...prev, id];
+      }
+    });
+  };
+
   const value = {
     inventoryCategories,
     inventory,
@@ -305,6 +319,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     menu,
     recipes,
     sales,
+    integrations,
     addInventoryCategory,
     addInventoryItem,
     updateInventoryCount,
@@ -313,7 +328,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     updateMenuItem,
     addRecipe,
     updateRecipe,
-    addSale
+    addSale,
+    toggleIntegration
   };
 
   return (

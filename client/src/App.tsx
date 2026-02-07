@@ -12,6 +12,7 @@ import InventoryPage from "@/pages/inventory";
 import RecipesPage from "@/pages/recipes";
 import MenuPage from "@/pages/menu";
 import ReportsPage from "@/pages/reports";
+import IntegrationsPage from "@/pages/integrations";
 
 function Router() {
   return (
@@ -22,6 +23,7 @@ function Router() {
       <Route path="/recipes" component={RecipesPage} />
       <Route path="/menu" component={MenuPage} />
       <Route path="/reports" component={ReportsPage} />
+      <Route path="/integrations" component={IntegrationsPage} />
 
       <Route component={NotFound} />
     </Switch>

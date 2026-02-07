@@ -8,7 +8,8 @@ import {
   Sparkles,
   Soup,
   ArrowRight,
-  Settings
+  Settings,
+  Link2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -24,6 +25,7 @@ const nav = [
   { href: "/recipes", label: "Recipes", icon: Soup, testid: "link-nav-recipes" },
   { href: "/menu", label: "Menu", icon: ClipboardList, testid: "link-nav-menu" },
   { href: "/reports", label: "Reports", icon: BarChart3, testid: "link-nav-reports" },
+  { href: "/integrations", label: "Integrations", icon: Link2, testid: "link-nav-integrations" },
   { href: "/start", label: "Getting Started", icon: Sparkles, testid: "link-nav-start" },
 ];
 

@@ -27,7 +27,7 @@ function uid(prefix: string) {
 
 export default function PosPage() {
   const { toast } = useToast();
-  const { menu, recipes, inventory, inventoryCategories, menuCategories, updateInventoryCount, sales, addSale } = useStore();
+  const { menu, recipes, inventory, inventoryCategories, menuCategories, updateInventoryCount, sales, addSale, integrations } = useStore();
 
   const [businessName, setBusinessName] = useState("Corner Store");
   const [taxRatePct, setTaxRatePct] = useState(8.25);
@@ -119,7 +119,18 @@ export default function PosPage() {
 
   // --- Payment Dialog State ---
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
-  const [paymentType, setPaymentType] = useState<"Cash" | "Card">("Card");
+  const [paymentType, setPaymentType] = useState<"Cash" | "Card">("Cash");
+
+  const hasPaymentIntegration = useMemo(() => {
+    return integrations.some(id => id.startsWith('pay_'));
+  }, [integrations]);
+
+  // Reset payment type if integrations change
+  useMemo(() => {
+    if (!hasPaymentIntegration && paymentType === "Card") {
+      setPaymentType("Cash");
+    }
+  }, [hasPaymentIntegration, paymentType]);
 
   // Calculations
   const subtotalCents = cart.reduce((acc, item) => {
@@ -139,6 +150,10 @@ export default function PosPage() {
     if (cart.length === 0) {
       toast({ title: "Cart is empty", description: "Add items first." });
       return;
+    }
+    // Ensure default is correct before opening
+    if (!hasPaymentIntegration) {
+      setPaymentType("Cash");
     }
     setIsPaymentOpen(true);
   }
@@ -456,9 +471,11 @@ export default function PosPage() {
                 <Button 
                   variant={paymentType === "Card" ? "default" : "outline"} 
                   className="h-16 rounded-2xl flex flex-col gap-1"
-                  onClick={() => setPaymentType("Card")}
+                  onClick={() => hasPaymentIntegration && setPaymentType("Card")}
+                  disabled={!hasPaymentIntegration}
                 >
                   <span className="font-semibold text-lg">Card</span>
+                  {!hasPaymentIntegration && <span className="text-[10px] font-normal opacity-70">(Setup Integration)</span>}
                 </Button>
                 <Button 
                   variant={paymentType === "Cash" ? "default" : "outline"} 
