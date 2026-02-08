@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
 import { useStore, type Recipe, type RecipeComponent } from "@/lib/store";
-import { DndContext, useDraggable, useDroppable, DragOverlay, type DragEndEvent, type DragStartEvent } from "@dnd-kit/core";
+import { DndContext, useDraggable, useDroppable, DragOverlay, type DragEndEvent, type DragStartEvent, useSensor, useSensors, PointerSensor } from "@dnd-kit/core";
 import { createPortal } from "react-dom";
 
 function uid(prefix: string) {
@@ -32,7 +32,7 @@ function DraggableIngredient({ item, categoryName }: { item: any, categoryName: 
       ref={setNodeRef}
       {...listeners}
       {...attributes}
-      className={`p-3 rounded-xl border bg-card shadow-sm cursor-grab hover:border-primary/50 transition-colors flex flex-col gap-1 ${isDragging ? 'opacity-50' : ''}`}
+      className={`p-3 rounded-xl border bg-card shadow-sm cursor-grab hover:border-primary/50 transition-colors flex flex-col gap-1 touch-none ${isDragging ? 'opacity-50' : ''}`}
     >
       <div className="flex justify-between items-start">
         <span className="font-medium text-sm leading-tight">{item.name}</span>
@@ -65,6 +65,14 @@ function DroppableRecipeArea({ children }: { children: React.ReactNode }) {
 export default function RecipesPage() {
   const { toast } = useToast();
   const { recipes, inventory, inventoryCategories, addRecipe, updateRecipe } = useStore();
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    })
+  );
 
   const [selectedRecipeId, setSelectedRecipeId] = useState<string | null>(null);
   const selectedRecipe = useMemo(() => recipes.find((r) => r.id === selectedRecipeId) ?? null, [recipes, selectedRecipeId]);
@@ -227,7 +235,7 @@ export default function RecipesPage() {
   }
 
   return (
-    <DndContext onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+    <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
         <AppShell title="Recipes">
           <header className="relative overflow-hidden rounded-3xl border bg-card shadow-soft grain">
