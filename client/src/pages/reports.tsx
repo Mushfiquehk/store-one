@@ -1,5 +1,3 @@
-import { useMemo, useState } from "react";
-import { motion } from "framer-motion";
 import { 
   FileDown, 
   Calendar as CalendarIcon, 
@@ -11,7 +9,8 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   AlertCircle,
-  Share2
+  Share2,
+  Wallet
 } from "lucide-react";
 import { format, addDays, subDays, differenceInDays } from "date-fns";
 import { 
@@ -40,6 +39,10 @@ import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import type { DateRange } from "react-day-picker";
 import { useToast } from "@/hooks/use-toast";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+import { PinProtection } from "@/components/pin-protection";
+import { useMemo, useState } from "react";
+import { motion } from "framer-motion";
 
 function formatMoney(cents: number) {
   return new Intl.NumberFormat(undefined, {
@@ -119,7 +122,7 @@ function generateMockSalesData(
 }
 
 export default function ReportsPage() {
-  const { menu, inventory, inventoryCategories } = useStore();
+  const { menu, inventory, inventoryCategories, employees, timePunches } = useStore();
   const { toast } = useToast();
 
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
@@ -133,6 +136,11 @@ export default function ReportsPage() {
   const [granularityIndex, setGranularityIndex] = useState([1]); 
   const granularities = ['hourly', 'daily', 'monthly'] as const;
   const currentGranularity = granularities[granularityIndex[0]];
+
+  // --- Protected P&L State ---
+  const [isPinOpen, setIsPinOpen] = useState(false);
+  const [showPnL, setShowPnL] = useState(false);
+  const [activeTab, setActiveTab] = useState("sales");
 
   const salesData = useMemo(() => {
     // @ts-ignore
@@ -164,6 +172,47 @@ export default function ReportsPage() {
       txnsDiff
     };
   }, [salesData, showCompare]);
+
+  // --- P&L Calculations ---
+  const pnlData = useMemo(() => {
+    // 1. Total Revenue (from Sales) - using mock totals here but in real app would sum actual sales
+    const revenueCents = totals.sales * 100;
+
+    // 2. COGS (Cost of Goods Sold)
+    // In a real app, this would filter sales by date range and sum up recipe component costs
+    // We'll estimate based on Mock Sales Volume to keep it consistent with the "generated" mock data above
+    // Assuming roughly 25% COGS for this demo
+    const cogsCents = revenueCents * 0.24; 
+
+    // 3. Labor Cost
+    // In real app: Sum (timeOut - timeIn) * payRate for punches in range
+    // We'll use mock data from store or generate approximate if empty
+    let laborCents = 0;
+    if (timePunches.length > 0) {
+      // Just sum all punches for demo purposes as they are sparse
+      timePunches.forEach(tp => {
+        if (!tp.timeOut) return;
+        const durationHours = (tp.timeOut - tp.timeIn) / (1000 * 60 * 60);
+        const emp = employees.find(e => e.id === tp.employeeId);
+        if (emp) {
+          laborCents += durationHours * emp.payRate;
+        }
+      });
+      // Scale labor to match the large revenue numbers from mock data
+      laborCents = revenueCents * 0.30; 
+    } else {
+       laborCents = revenueCents * 0.30;
+    }
+
+    const netProfitCents = revenueCents - cogsCents - laborCents;
+
+    return {
+      revenueCents,
+      cogsCents,
+      laborCents,
+      netProfitCents
+    };
+  }, [totals.sales, timePunches, employees]);
 
   const productMixData = useMemo(() => {
     return menu.slice(0, 8).map(item => ({
@@ -283,9 +332,27 @@ export default function ReportsPage() {
     toast({ title: "Downloaded", description: "AI analysis file saved." });
   };
 
+  const handleTabChange = (val: string) => {
+    if (val === "pnl" && !showPnL) {
+       setIsPinOpen(true);
+    } else {
+       setActiveTab(val);
+    }
+  };
+
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
       <AppShell title="Reports">
+        <PinProtection 
+           isOpen={isPinOpen} 
+           onClose={() => setIsPinOpen(false)} 
+           onSuccess={() => {
+              setShowPnL(true);
+              setActiveTab("pnl");
+           }}
+           title="Enter Admin PIN"
+        />
+
         <div className="flex flex-col gap-6">
           <header className="rounded-3xl border bg-card shadow-soft p-6">
             <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6">
@@ -386,11 +453,14 @@ export default function ReportsPage() {
             </div>
           </header>
 
-          <Tabs defaultValue="sales" className="space-y-6">
+          <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <TabsList className="bg-card border shadow-sm rounded-xl h-12 p-1 w-fit">
                 <TabsTrigger value="sales" className="rounded-lg h-full px-4">
                   <TrendingUp className="h-4 w-4 mr-2" /> Sales Trends
+                </TabsTrigger>
+                <TabsTrigger value="pnl" className="rounded-lg h-full px-4">
+                  <Wallet className="h-4 w-4 mr-2" /> P&L Statement
                 </TabsTrigger>
                 <TabsTrigger value="product-mix" className="rounded-lg h-full px-4">
                   <PieChart className="h-4 w-4 mr-2" /> Product Mix
@@ -400,7 +470,7 @@ export default function ReportsPage() {
                 </TabsTrigger>
               </TabsList>
 
-              <TabsContent value="sales" className="mt-0">
+              {activeTab === "sales" && (
                 <div className="flex flex-col gap-3 w-full sm:w-[180px]">
                   <div className="flex justify-between">
                     <Label className="text-xs text-muted-foreground">Granularity</Label>
@@ -408,7 +478,7 @@ export default function ReportsPage() {
                   </div>
                   <Slider value={granularityIndex} onValueChange={setGranularityIndex} max={2} step={1} className="cursor-pointer" />
                 </div>
-              </TabsContent>
+              )}
             </div>
 
             <TabsContent value="sales" className="space-y-6 mt-0">
@@ -440,6 +510,102 @@ export default function ReportsPage() {
               </div>
             </TabsContent>
 
+            <TabsContent value="pnl" className="mt-0">
+              <Card className="shadow-soft rounded-2xl overflow-hidden border-2 border-primary/5">
+                 <CardHeader className="bg-muted/20 pb-6">
+                    <CardTitle className="font-serif text-2xl">Profit & Loss Statement</CardTitle>
+                    <p className="text-muted-foreground">Net Profit Calculation based on selected period.</p>
+                 </CardHeader>
+                 <CardContent className="p-6 grid gap-6">
+                    {/* Summary Cards */}
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                       <div className="p-4 rounded-xl bg-primary/5 border border-primary/10">
+                          <p className="text-sm font-medium text-muted-foreground mb-1">Total Revenue</p>
+                          <p className="text-2xl font-bold text-primary">{formatMoney(pnlData.revenueCents)}</p>
+                       </div>
+                       <div className="p-4 rounded-xl bg-orange-500/5 border border-orange-500/10">
+                          <p className="text-sm font-medium text-muted-foreground mb-1">COGS</p>
+                          <p className="text-2xl font-bold text-orange-600">-{formatMoney(pnlData.cogsCents)}</p>
+                       </div>
+                       <div className="p-4 rounded-xl bg-blue-500/5 border border-blue-500/10">
+                          <p className="text-sm font-medium text-muted-foreground mb-1">Labor Cost</p>
+                          <p className="text-2xl font-bold text-blue-600">-{formatMoney(pnlData.laborCents)}</p>
+                       </div>
+                       <div className="p-4 rounded-xl bg-green-500/10 border border-green-500/20">
+                          <p className="text-sm font-medium text-muted-foreground mb-1">Net Profit</p>
+                          <p className="text-2xl font-bold text-green-700">{formatMoney(pnlData.netProfitCents)}</p>
+                       </div>
+                    </div>
+
+                    {/* Detailed Breakdown */}
+                    <Accordion type="single" collapsible className="w-full">
+                      <AccordionItem value="revenue">
+                        <AccordionTrigger className="hover:no-underline px-4 py-3 rounded-xl hover:bg-muted/50">
+                           <div className="flex flex-1 justify-between items-center pr-4">
+                              <span className="font-medium">Total Revenue</span>
+                              <span>{formatMoney(pnlData.revenueCents)}</span>
+                           </div>
+                        </AccordionTrigger>
+                        <AccordionContent className="px-4 pb-4">
+                           <div className="space-y-2 pt-2 text-sm text-muted-foreground">
+                              <div className="flex justify-between">
+                                 <span>Sales</span>
+                                 <span>{formatMoney(pnlData.revenueCents)}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                 <span>Returns/Refunds</span>
+                                 <span>$0.00</span>
+                              </div>
+                           </div>
+                        </AccordionContent>
+                      </AccordionItem>
+
+                      <AccordionItem value="cogs">
+                        <AccordionTrigger className="hover:no-underline px-4 py-3 rounded-xl hover:bg-muted/50">
+                           <div className="flex flex-1 justify-between items-center pr-4">
+                              <span className="font-medium">Cost of Goods Sold (COGS)</span>
+                              <span className="text-orange-600">-{formatMoney(pnlData.cogsCents)}</span>
+                           </div>
+                        </AccordionTrigger>
+                        <AccordionContent className="px-4 pb-4">
+                           <div className="space-y-2 pt-2 text-sm text-muted-foreground">
+                              <div className="flex justify-between">
+                                 <span>Ingredients Usage</span>
+                                 <span>-{formatMoney(pnlData.cogsCents * 0.9)}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                 <span>Wastage</span>
+                                 <span>-{formatMoney(pnlData.cogsCents * 0.1)}</span>
+                              </div>
+                           </div>
+                        </AccordionContent>
+                      </AccordionItem>
+
+                      <AccordionItem value="labor">
+                        <AccordionTrigger className="hover:no-underline px-4 py-3 rounded-xl hover:bg-muted/50">
+                           <div className="flex flex-1 justify-between items-center pr-4">
+                              <span className="font-medium">Labor Cost</span>
+                              <span className="text-blue-600">-{formatMoney(pnlData.laborCents)}</span>
+                           </div>
+                        </AccordionTrigger>
+                        <AccordionContent className="px-4 pb-4">
+                           <div className="space-y-2 pt-2 text-sm text-muted-foreground">
+                              <div className="flex justify-between">
+                                 <span>Manager Wages</span>
+                                 <span>-{formatMoney(pnlData.laborCents * 0.4)}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                 <span>Staff Wages</span>
+                                 <span>-{formatMoney(pnlData.laborCents * 0.6)}</span>
+                              </div>
+                           </div>
+                        </AccordionContent>
+                      </AccordionItem>
+                    </Accordion>
+                 </CardContent>
+              </Card>
+            </TabsContent>
+            
             <TabsContent value="product-mix">
               <Card className="shadow-soft rounded-2xl overflow-hidden">
                 <div className="p-6 border-b bg-muted/20 flex justify-between items-center">
@@ -527,7 +693,7 @@ export default function ReportsPage() {
                           <TableCell className="text-right text-destructive">-{totalsRow.wastage}</TableCell>
                           <TableCell className="text-right font-bold">{totalsRow.ending}</TableCell>
                           <TableCell className="text-right font-medium">{formatMoney(totalsRow.cogs)}</TableCell>
-                          <TableCell className="text-center font-medium">
+                          <TableCell className="text-center text-xs text-muted-foreground">
                             {cogsPercent.toFixed(1)}%
                           </TableCell>
                         </TableRow>
@@ -546,43 +712,58 @@ export default function ReportsPage() {
 
 function KpiCard({ title, value, diff, showCompare, icon }: { title: string, value: string, diff?: number, showCompare?: boolean, icon: React.ReactNode }) {
   return (
-    <Card className="shadow-soft rounded-2xl">
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-sm font-medium">{title}</CardTitle>
-        {icon}
-      </CardHeader>
-      <CardContent>
-        <div className="text-2xl font-serif font-bold">{value}</div>
-        {showCompare && diff !== undefined && (
-          <div className={cn("flex items-center text-xs mt-1 font-medium", diff >= 0 ? "text-green-600" : "text-destructive")}>
-            {diff >= 0 ? <ArrowUpRight className="h-3 w-3 mr-0.5" /> : <ArrowDownRight className="h-3 w-3 mr-0.5" />}
-            {Math.abs(diff).toFixed(1)}% from last period
-          </div>
-        )}
+    <Card className="shadow-soft rounded-2xl border-none bg-card">
+      <CardContent className="p-6">
+        <div className="flex items-center justify-between space-y-0 pb-2">
+          <p className="text-sm font-medium text-muted-foreground">{title}</p>
+          {icon}
+        </div>
+        <div className="flex flex-col gap-1">
+          <div className="text-2xl font-bold">{value}</div>
+          {showCompare && diff !== undefined && (
+            <div className={`text-xs font-medium flex items-center ${diff >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              {diff >= 0 ? <ArrowUpRight className="h-3 w-3 mr-1" /> : <ArrowDownRight className="h-3 w-3 mr-1" />}
+              {Math.abs(diff).toFixed(1)}% vs prev
+            </div>
+          )}
+        </div>
       </CardContent>
     </Card>
   );
 }
 
-function ChartCard({ title, data, dataKey, compareKey, format }: { title: string, data: any[], dataKey: string, compareKey?: string, format?: 'currency' }) {
+function ChartCard({ title, data, dataKey, compareKey, format = "number" }: { title: string, data: any[], dataKey: string, compareKey?: string, format?: "number" | "currency" }) {
   return (
-    <Card className="shadow-soft rounded-2xl p-6">
-      <h3 className="text-lg font-medium mb-4">{title}</h3>
-      <div className="h-[300px] w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={data}>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-            <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{fontSize: 12}} />
-            <YAxis axisLine={false} tickLine={false} tick={{fontSize: 12}} tickFormatter={(val) => format === 'currency' ? `$${val}` : val} />
-            <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
-            <Legend verticalAlign="top" align="right" height={36} iconType="circle" />
-            <Line name="Current" type="monotone" dataKey={dataKey} stroke="hsl(var(--primary))" strokeWidth={3} dot={{ r: 4, fill: "hsl(var(--primary))" }} activeDot={{ r: 6 }} />
-            {compareKey && (
-              <Line name="Previous" type="monotone" dataKey={compareKey} stroke="hsl(var(--muted-foreground))" strokeWidth={2} strokeDasharray="5 5" dot={false} />
-            )}
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
+    <Card className="shadow-soft rounded-2xl border-none">
+      <CardHeader>
+        <CardTitle className="text-lg font-medium">{title}</CardTitle>
+      </CardHeader>
+      <CardContent className="pl-0">
+        <div className="h-[300px] w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={data} margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
+              <XAxis dataKey="label" stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
+              <YAxis 
+                stroke="hsl(var(--muted-foreground))" 
+                fontSize={12} 
+                tickLine={false} 
+                axisLine={false} 
+                tickFormatter={(val) => format === "currency" ? `$${val}` : val} 
+              />
+              <Tooltip 
+                contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                formatter={(val: number) => [format === "currency" ? `$${val.toFixed(2)}` : val, '']}
+              />
+              <Legend />
+              <Line type="monotone" dataKey={dataKey} stroke="hsl(var(--primary))" strokeWidth={3} dot={false} activeDot={{ r: 6 }} />
+              {compareKey && (
+                <Line type="monotone" dataKey={compareKey} stroke="hsl(var(--muted-foreground))" strokeWidth={2} strokeDasharray="5 5" dot={false} />
+              )}
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </CardContent>
     </Card>
   );
 }

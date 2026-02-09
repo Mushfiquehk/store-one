@@ -81,6 +81,21 @@ export type Sale = {
   status: "in-progress" | "completed";
 };
 
+export type Employee = {
+  id: string;
+  name: string;
+  role: "manager" | "staff";
+  payRate: number; // hourly rate in cents
+  pin: string;
+};
+
+export type TimePunch = {
+  id: string;
+  employeeId: string;
+  timeIn: number;
+  timeOut?: number;
+};
+
 // --- Store Context ---
 
 type StoreContextType = {
@@ -92,6 +107,8 @@ type StoreContextType = {
   recipes: Recipe[];
   sales: Sale[];
   integrations: string[];
+  employees: Employee[];
+  timePunches: TimePunch[];
   
   // Actions
   addInventoryCategory: (name: string) => void;
@@ -107,11 +124,27 @@ type StoreContextType = {
 
   addSale: (sale: Sale) => void;
   toggleIntegration: (id: string) => void;
+  
+  addEmployee: (employee: Employee) => void;
+  updateEmployee: (id: string, updates: Partial<Employee>) => void;
+  addTimePunch: (punch: TimePunch) => void;
+  updateTimePunch: (id: string, updates: Partial<TimePunch>) => void;
 };
 
 const StoreContext = createContext<StoreContextType | null>(null);
 
 // --- Initial Data ---
+
+const INITIAL_EMPLOYEES: Employee[] = [
+  { id: "emp_1", name: "Manager", role: "manager", payRate: 2500, pin: "1234" },
+  { id: "emp_2", name: "Barista", role: "staff", payRate: 1500, pin: "0000" },
+];
+
+const INITIAL_TIME_PUNCHES: TimePunch[] = [
+  // Mock data for reports
+  { id: "tp_1", employeeId: "emp_1", timeIn: Date.now() - 86400000 * 2, timeOut: Date.now() - 86400000 * 2 + 28800000 },
+  { id: "tp_2", employeeId: "emp_2", timeIn: Date.now() - 86400000, timeOut: Date.now() - 86400000 + 18000000 },
+];
 
 const INITIAL_INV_CATS: InventoryCategory[] = [
   { id: "cat_beans", name: "Coffee Beans" },
@@ -262,6 +295,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [recipes, setRecipes] = useState<Recipe[]>(INITIAL_RECIPES);
   const [sales, setSales] = useState<Sale[]>([]);
   const [integrations, setIntegrations] = useState<string[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>(INITIAL_EMPLOYEES);
+  const [timePunches, setTimePunches] = useState<TimePunch[]>(INITIAL_TIME_PUNCHES);
 
   // Actions
   const addInventoryCategory = (name: string) => {
@@ -313,6 +348,22 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
+  const addEmployee = (employee: Employee) => {
+    setEmployees(prev => [...prev, employee]);
+  };
+
+  const updateEmployee = (id: string, updates: Partial<Employee>) => {
+    setEmployees(prev => prev.map(e => e.id === id ? { ...e, ...updates } : e));
+  };
+
+  const addTimePunch = (punch: TimePunch) => {
+    setTimePunches(prev => [...prev, punch]);
+  };
+
+  const updateTimePunch = (id: string, updates: Partial<TimePunch>) => {
+    setTimePunches(prev => prev.map(tp => tp.id === id ? { ...tp, ...updates } : tp));
+  };
+
   const value = {
     inventoryCategories,
     inventory,
@@ -321,6 +372,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     recipes,
     sales,
     integrations,
+    employees,
+    timePunches,
     addInventoryCategory,
     addInventoryItem,
     updateInventoryCount,
@@ -330,7 +383,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     addRecipe,
     updateRecipe,
     addSale,
-    toggleIntegration
+    toggleIntegration,
+    addEmployee,
+    updateEmployee,
+    addTimePunch,
+    updateTimePunch
   };
 
   return (
