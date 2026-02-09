@@ -187,7 +187,7 @@ export default function PosPage() {
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
       <AppShell title="POS">
-        <div className="grid gap-6 lg:grid-cols-12 h-[calc(100vh-140px)] pb-6">
+        <div className="grid gap-6 lg:grid-cols-12 h-[calc(100vh-90px)] pb-2">
                 {/* Menu Grid */}
                 <Card className="border bg-card shadow-soft lg:col-span-7 flex flex-col overflow-hidden h-full">
                   <CardHeader className="pb-3 flex-shrink-0 pt-4 px-4">
@@ -216,7 +216,7 @@ export default function PosPage() {
                   </div>
 
                   <CardContent className="flex-1 overflow-y-auto p-4 bg-muted/10">
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-3 pb-20">
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-3 pb-4">
                       {activeMenuItems.length > 0 ? (
                         activeMenuItems.map((m) => (
                           <Button
