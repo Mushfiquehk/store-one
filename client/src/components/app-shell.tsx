@@ -54,7 +54,7 @@ export default function AppShell({
               </SheetTrigger>
               <SheetContent side="left" className="w-[280px] sm:w-[320px]">
                 <SheetHeader>
-                  <SheetTitle className="font-serif text-xl text-left">CornerPOS</SheetTitle>
+                  <SheetTitle className="font-serif text-xl text-left">CornerShop</SheetTitle>
                 </SheetHeader>
                 <div className="mt-6 flex flex-col gap-2">
                   {nav.map((n) => {
@@ -86,7 +86,7 @@ export default function AppShell({
           
           <div className="flex items-center gap-4">
             <div className="text-2xl font-serif font-bold tracking-tight text-primary sm:block">
-              CornerPOS
+              CornerShop
             </div>
           </div>
         </div>

@@ -78,6 +78,7 @@ export type Sale = {
   taxCents: number;
   totalCents: number;
   paymentMethod: "Cash" | "Card";
+  status: "in-progress" | "completed";
 };
 
 // --- Store Context ---

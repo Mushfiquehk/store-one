@@ -174,6 +174,7 @@ export default function PosPage() {
       taxCents,
       totalCents,
       paymentMethod: paymentType,
+      status: "in-progress",
     };
 
     addSale(sale);
@@ -221,16 +222,16 @@ export default function PosPage() {
                           <Button
                             key={m.id}
                             variant="secondary"
-                            className="h-auto flex-col items-start gap-2 rounded-2xl p-4 text-left hover-lift transition-all bg-secondary/50 hover:bg-secondary"
+                            className="h-auto flex-col items-start gap-1 rounded-2xl p-3 text-left hover-lift transition-all bg-secondary/50 hover:bg-secondary"
                             onClick={() => addToCart(m.id)}
                             data-testid={`button-add-menu-${m.id}`}
                           >
                             <div className="w-full">
                               <p className="font-semibold leading-tight line-clamp-2 text-base">{m.name}</p>
                               {m.description && (
-                                <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{m.description}</p>
+                                <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{m.description}</p>
                               )}
-                              <p className="text-sm font-medium text-primary mt-2">{formatMoney(m.priceCents)}</p>
+                              <p className="text-sm font-medium text-primary mt-1">{formatMoney(m.priceCents)}</p>
                             </div>
                           </Button>
                         ))
@@ -249,10 +250,10 @@ export default function PosPage() {
                     <div className="px-4 pt-4 pb-2 border-b bg-muted/20">
                       <TabsList className="grid w-full grid-cols-2 rounded-xl h-10 p-1">
                         <TabsTrigger value="current" className="rounded-lg">
-                          <Receipt className="h-4 w-4 mr-2" /> Current Order
+                          <Receipt className="h-4 w-4 mr-2" /> New Order
                         </TabsTrigger>
                         <TabsTrigger value="recent" className="rounded-lg">
-                          <Clock className="h-4 w-4 mr-2" /> Past Orders
+                          <Clock className="h-4 w-4 mr-2" /> In-Progress Orders
                         </TabsTrigger>
                       </TabsList>
                     </div>
@@ -331,31 +332,23 @@ export default function PosPage() {
                           <Button className="w-full rounded-2xl h-12 text-lg shadow-lg hover-lift" onClick={handleConfirmOrder} data-testid="button-confirm-order">
                             Checkout {formatMoney(totalCents)}
                           </Button>
-                          <Button
-                            variant="ghost"
-                            className="w-full h-10 rounded-xl text-muted-foreground hover:text-destructive"
-                            onClick={clearCart}
-                            data-testid="button-clear-sale"
-                          >
-                            Clear Order
-                          </Button>
                         </div>
                       </div>
                     </TabsContent>
 
                     <TabsContent value="recent" className="flex-1 flex flex-col overflow-hidden m-0 data-[state=active]:flex">
                       <div className="flex-1 overflow-auto p-4">
-                        {sales.length > 0 ? (
+                        {sales.filter(s => s.status !== 'completed').length > 0 ? (
                            <div className="space-y-4">
-                             {sales.slice(0, 10).map((sale) => (
+                             {sales.filter(s => s.status !== 'completed').map((sale) => (
                                <div key={sale.id} className="rounded-xl border bg-background p-4 shadow-sm">
                                   <div className="flex justify-between items-start mb-2">
                                      <div>
                                         <p className="font-semibold text-lg">{formatMoney(sale.totalCents)}</p>
                                         <p className="text-xs text-muted-foreground">{format(sale.createdAt, "h:mm a")}</p>
                                      </div>
-                                     <span className="text-xs font-medium px-2 py-1 rounded-full bg-primary/10 text-primary border border-primary/20">
-                                       {sale.paymentMethod}
+                                     <span className="text-xs font-medium px-2 py-1 rounded-full bg-primary/10 text-primary border border-primary/20 capitalize">
+                                       {sale.status}
                                      </span>
                                   </div>
                                   <Separator className="my-2" />
@@ -381,7 +374,7 @@ export default function PosPage() {
                         ) : (
                           <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
                             <Clock className="h-8 w-8 opacity-20" />
-                            <p className="mt-2 text-sm">No recent orders</p>
+                            <p className="mt-2 text-sm">No in-progress orders</p>
                           </div>
                         )}
                       </div>
