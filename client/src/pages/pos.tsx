@@ -263,7 +263,7 @@ export default function PosPage() {
                         {cart.length > 0 ? (
                           <div className="space-y-4">
                             <ul className="space-y-3">
-                              {cart.map((item) => {
+                              {[...cart].reverse().map((item) => {
                                 const m = menu.find((x) => x.id === item.menuItemId);
                                 const hasRecipe = !!m?.recipeId;
                                 return (
