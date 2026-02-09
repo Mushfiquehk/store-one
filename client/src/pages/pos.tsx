@@ -260,48 +260,64 @@ export default function PosPage() {
                     <TabsContent value="current" className="flex-1 flex flex-col overflow-hidden m-0 data-[state=active]:flex">
                       <div className="flex-1 overflow-auto p-4">
                         {cart.length > 0 ? (
-                          <ul className="space-y-3">
-                            {cart.map((item) => {
-                              const m = menu.find((x) => x.id === item.menuItemId);
-                              const hasRecipe = !!m?.recipeId;
-                              return (
-                                <li key={item.instanceId} className="flex flex-col gap-1 rounded-xl border bg-background p-3" data-testid={`cart-item-${item.instanceId}`}>
-                                  <div className="flex items-start justify-between">
-                                    <div>
-                                      <p className="font-medium">{m?.name}</p>
-                                      <p className="text-xs text-muted-foreground">{formatMoney(m?.priceCents ?? 0)}</p>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                       {hasRecipe && (
-                                         <Button size="sm" variant="outline" className="h-7 px-2 rounded-lg text-xs" onClick={() => openEdit(item)}>
-                                            <Edit2 className="h-3 w-3 mr-1" /> Edit
+                          <div className="space-y-4">
+                            <ul className="space-y-3">
+                              {cart.map((item) => {
+                                const m = menu.find((x) => x.id === item.menuItemId);
+                                const hasRecipe = !!m?.recipeId;
+                                return (
+                                  <li key={item.instanceId} className="flex flex-col gap-1 rounded-xl border bg-background p-3" data-testid={`cart-item-${item.instanceId}`}>
+                                    <div className="flex items-start justify-between">
+                                      <div>
+                                        <p className="font-medium">{m?.name}</p>
+                                        <p className="text-xs text-muted-foreground">{formatMoney(m?.priceCents ?? 0)}</p>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                         {hasRecipe && (
+                                           <Button size="sm" variant="outline" className="h-7 px-2 rounded-lg text-xs" onClick={() => openEdit(item)}>
+                                              <Edit2 className="h-3 w-3 mr-1" /> Edit
+                                           </Button>
+                                         )}
+                                         <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive" onClick={() => removeFromCart(item.instanceId)}>
+                                           <X className="h-4 w-4" />
                                          </Button>
-                                       )}
-                                       <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive" onClick={() => removeFromCart(item.instanceId)}>
-                                         <X className="h-4 w-4" />
-                                       </Button>
+                                      </div>
                                     </div>
-                                  </div>
-                                  {hasRecipe && item.customizations.length > 0 && (
-                                    <div className="mt-1 pl-2 border-l-2 border-primary/20">
-                                       {item.customizations.map(c => {
-                                          // We need to look up the slot name from the recipe
-                                          const recipe = recipes.find(r => r.id === m?.recipeId);
-                                          const comp = recipe?.components.find(comp => comp.id === c.componentId);
-                                          const invItem = inventory.find(i => i.id === c.inventoryItemId);
-                                          
-                                          return (
-                                            <p key={c.componentId} className="text-[10px] text-muted-foreground">
-                                              {comp?.name}: {invItem?.name ?? "Unknown"} ({c.qty} {comp?.unit})
-                                            </p>
-                                          );
-                                       })}
-                                    </div>
-                                  )}
-                                </li>
-                              );
-                            })}
-                          </ul>
+                                    {hasRecipe && item.customizations.length > 0 && (
+                                      <div className="mt-1 pl-2 border-l-2 border-primary/20">
+                                         {item.customizations.map(c => {
+                                            const recipe = recipes.find(r => r.id === m?.recipeId);
+                                            const comp = recipe?.components.find(comp => comp.id === c.componentId);
+                                            const invItem = inventory.find(i => i.id === c.inventoryItemId);
+                                            return (
+                                              <p key={c.componentId} className="text-[10px] text-muted-foreground">
+                                                {comp?.name}: {invItem?.name ?? "Unknown"} ({c.qty} {comp?.unit})
+                                              </p>
+                                            );
+                                         })}
+                                      </div>
+                                    )}
+                                  </li>
+                                );
+                              })}
+                            </ul>
+
+                            <div className="rounded-xl bg-muted/30 p-4 border border-border/50 space-y-1.5 text-sm mt-4">
+                              <div className="flex justify-between text-muted-foreground">
+                                <span>Subtotal</span>
+                                <span>{formatMoney(subtotalCents)}</span>
+                              </div>
+                              <div className="flex justify-between text-muted-foreground">
+                                <span>Tax ({taxRatePct}%)</span>
+                                <span>{formatMoney(taxCents)}</span>
+                              </div>
+                              <Separator className="my-2" />
+                              <div className="flex justify-between text-lg font-medium text-foreground">
+                                <span>Total</span>
+                                <span>{formatMoney(totalCents)}</span>
+                              </div>
+                            </div>
+                          </div>
                         ) : (
                           <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
                             <ShoppingBag className="h-8 w-8 opacity-20" />
@@ -310,29 +326,14 @@ export default function PosPage() {
                         )}
                       </div>
 
-                      <div className="border-t bg-muted/20 p-6">
-                        <div className="space-y-1.5 text-sm">
-                          <div className="flex justify-between text-muted-foreground">
-                            <span>Subtotal</span>
-                            <span>{formatMoney(subtotalCents)}</span>
-                          </div>
-                          <div className="flex justify-between text-muted-foreground">
-                            <span>Tax ({taxRatePct}%)</span>
-                            <span>{formatMoney(taxCents)}</span>
-                          </div>
-                          <div className="flex justify-between text-lg font-medium text-foreground">
-                            <span>Total</span>
-                            <span>{formatMoney(totalCents)}</span>
-                          </div>
-                        </div>
-
-                        <div className="mt-4">
-                          <Button className="w-full rounded-2xl h-12 text-lg" onClick={handleConfirmOrder} data-testid="button-confirm-order">
+                      <div className="border-t bg-muted/20 p-4 sm:p-6 shrink-0">
+                        <div className="grid gap-2">
+                          <Button className="w-full rounded-2xl h-12 text-lg shadow-lg hover-lift" onClick={handleConfirmOrder} data-testid="button-confirm-order">
                             Checkout {formatMoney(totalCents)}
                           </Button>
                           <Button
                             variant="ghost"
-                            className="w-full mt-2 rounded-xl text-muted-foreground hover:text-destructive"
+                            className="w-full h-10 rounded-xl text-muted-foreground hover:text-destructive"
                             onClick={clearCart}
                             data-testid="button-clear-sale"
                           >

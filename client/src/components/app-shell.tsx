@@ -9,7 +9,8 @@ import {
   Soup,
   ArrowRight,
   Settings,
-  Link2
+  Link2,
+  Sliders
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,7 @@ const nav = [
   { href: "/inventory", label: "Ingredients", icon: Package, testid: "link-nav-inventory" },
   { href: "/start", label: "Getting Started", icon: Sparkles, testid: "link-nav-start" },
   { href: "/integrations", label: "Integrations", icon: Link2, testid: "link-nav-integrations" },
+  { href: "/settings", label: "Settings", icon: Settings, testid: "link-nav-settings" },
 ];
 
 export default function AppShell({
@@ -83,28 +85,6 @@ export default function AppShell({
           </div>
           
           <div className="flex items-center gap-4">
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="ghost" size="icon" className="rounded-xl h-9 w-9 text-muted-foreground hover:text-primary">
-                  <Settings className="h-5 w-5" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent align="end" className="w-64 rounded-2xl p-4 shadow-xl border-primary/10">
-                <div className="space-y-4">
-                  <h4 className="font-medium leading-none">Settings</h4>
-                  <div className="space-y-2">
-                    <Label htmlFor="tax-rate" className="text-xs">Global Tax Rate (%)</Label>
-                    <Input 
-                      id="tax-rate"
-                      type="number" 
-                      value={taxRate} 
-                      onChange={(e) => setTaxRate(Number(e.target.value))}
-                      className="rounded-xl h-9"
-                    />
-                  </div>
-                </div>
-              </PopoverContent>
-            </Popover>
             <div className="text-2xl font-serif font-bold tracking-tight text-primary sm:block">
               CornerPOS
             </div>
