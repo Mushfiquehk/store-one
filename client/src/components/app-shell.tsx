@@ -12,7 +12,8 @@ import {
   Link2,
   Sliders,
   Users,
-  Clock
+  Clock,
+  LogOut
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,9 @@ import { Label } from "@/components/ui/label";
 import { useState } from "react";
 import { PinProtection } from "@/components/pin-protection";
 import { useToast } from "@/hooks/use-toast";
+import { useStore } from "@/lib/store";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const nav = [
   { href: "/", label: "POS", icon: LayoutGrid, testid: "link-nav-pos" },
@@ -30,7 +34,7 @@ const nav = [
   { href: "/menu", label: "Menu", icon: ClipboardList, testid: "link-nav-menu" },
   { href: "/recipes", label: "Recipes", icon: Soup, testid: "link-nav-recipes" },
   { href: "/inventory", label: "Ingredients", icon: Package, testid: "link-nav-inventory" },
-  { href: "/employees", label: "Employees", icon: Users, testid: "link-nav-employees", protected: true },
+  { href: "/employees", label: "Employees", icon: Users, testid: "link-nav-employees" },
   { href: "/start", label: "Getting Started", icon: Sparkles, testid: "link-nav-start" },
   { href: "/integrations", label: "Integrations", icon: Link2, testid: "link-nav-integrations" },
   { href: "/settings", label: "Settings", icon: Settings, testid: "link-nav-settings" },
@@ -46,38 +50,93 @@ export default function AppShell({
   const [location, setLocation] = useLocation();
   const [taxRate, setTaxRate] = useState(8.25);
   const { toast } = useToast();
+  const { employees, timePunches, addTimePunch, updateTimePunch } = useStore();
   
-  const [pinOpen, setPinOpen] = useState(false);
-  const [targetPath, setTargetPath] = useState<string | null>(null);
+  // Time Punch State
+  const [isTimePunchOpen, setIsTimePunchOpen] = useState(false);
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>("");
+  
+  // Check if selected employee is currently clocked in
+  const activePunch = timePunches.find(tp => tp.employeeId === selectedEmployeeId && !tp.timeOut);
+  const isClockedIn = !!activePunch;
 
-  const handleNavClick = (n: typeof nav[0]) => {
-    if (n.protected) {
-      setTargetPath(n.href);
-      setPinOpen(true);
+  const handleTimePunchSubmit = () => {
+    if (!selectedEmployeeId) {
+      toast({ title: "Error", description: "Please select an employee", variant: "destructive" });
+      return;
+    }
+
+    const emp = employees.find(e => e.id === selectedEmployeeId);
+    
+    if (isClockedIn && activePunch) {
+      // Clock Out
+      updateTimePunch(activePunch.id, { timeOut: Date.now() });
+      toast({ title: "Clocked Out", description: `Goodbye, ${emp?.name}! Session ended at ${new Date().toLocaleTimeString()}` });
     } else {
-      setLocation(n.href);
+      // Clock In
+      addTimePunch({
+        id: `tp_${Date.now()}`,
+        employeeId: selectedEmployeeId,
+        timeIn: Date.now()
+      });
+      toast({ title: "Clocked In", description: `Welcome, ${emp?.name}! Started at ${new Date().toLocaleTimeString()}` });
     }
-  };
-
-  const handlePinSuccess = () => {
-    if (targetPath) {
-      setLocation(targetPath);
-      setTargetPath(null);
-    }
-  };
-
-  const handleTimePunch = () => {
-    toast({ title: "Time Punch", description: "Clocked in successfully at " + new Date().toLocaleTimeString() });
+    
+    setIsTimePunchOpen(false);
+    setSelectedEmployeeId("");
   };
 
   return (
     <div className="min-h-screen app-shell">
-      <PinProtection 
-        isOpen={pinOpen} 
-        onClose={() => setPinOpen(false)} 
-        onSuccess={handlePinSuccess}
-        title="Admin Access"
-      />
+      {/* Time Punch Dialog */}
+      <Dialog open={isTimePunchOpen} onOpenChange={setIsTimePunchOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Time Clock</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label>Select Employee</Label>
+              <Select value={selectedEmployeeId} onValueChange={setSelectedEmployeeId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Who are you?" />
+                </SelectTrigger>
+                <SelectContent>
+                  {employees.map(emp => (
+                    <SelectItem key={emp.id} value={emp.id}>{emp.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            
+            {selectedEmployeeId && (
+              <div className={`p-4 rounded-xl border flex items-center gap-3 ${isClockedIn ? 'bg-orange-500/10 border-orange-500/20' : 'bg-green-500/10 border-green-500/20'}`}>
+                <div className={`p-2 rounded-full ${isClockedIn ? 'bg-orange-500/20 text-orange-600' : 'bg-green-500/20 text-green-600'}`}>
+                  {isClockedIn ? <LogOut className="h-5 w-5" /> : <Clock className="h-5 w-5" />}
+                </div>
+                <div>
+                  <p className="font-medium">{isClockedIn ? "Ready to Clock Out?" : "Ready to Clock In?"}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {isClockedIn 
+                      ? `Started: ${new Date(activePunch.timeIn).toLocaleTimeString()}` 
+                      : "Start your shift now"}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsTimePunchOpen(false)}>Cancel</Button>
+            <Button 
+              onClick={handleTimePunchSubmit} 
+              disabled={!selectedEmployeeId}
+              variant={isClockedIn ? "destructive" : "default"}
+            >
+              {isClockedIn ? "Clock Out" : "Clock In"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between gap-3 mb-4">
@@ -98,17 +157,16 @@ export default function AppShell({
                       const active = location === n.href;
                       const Icon = n.icon;
                       return (
-                        <Button
-                          key={n.href}
-                          variant={active ? "default" : "ghost"}
-                          className={cn("w-full justify-start rounded-xl text-base h-12 mb-1", active ? "" : "text-muted-foreground")}
-                          onClick={() => handleNavClick(n)}
-                        >
-                          <Icon className="mr-3 h-5 w-5" />
-                          {n.label}
-                          {n.protected && <span className="ml-auto text-[10px] bg-muted px-1.5 py-0.5 rounded text-muted-foreground">PIN</span>}
-                          {active && !n.protected && <ArrowRight className="ml-auto h-4 w-4 opacity-50" />}
-                        </Button>
+                        <Link key={n.href} href={n.href}>
+                          <Button
+                            variant={active ? "default" : "ghost"}
+                            className={cn("w-full justify-start rounded-xl text-base h-12 mb-1", active ? "" : "text-muted-foreground")}
+                          >
+                            <Icon className="mr-3 h-5 w-5" />
+                            {n.label}
+                            {active && <ArrowRight className="ml-auto h-4 w-4 opacity-50" />}
+                          </Button>
+                        </Link>
                       );
                     })}
                   </div>
@@ -117,7 +175,7 @@ export default function AppShell({
                     <Button 
                       variant="outline" 
                       className="w-full justify-start rounded-xl text-base h-12 text-primary border-primary/20 hover:bg-primary/5"
-                      onClick={handleTimePunch}
+                      onClick={() => setIsTimePunchOpen(true)}
                     >
                       <Clock className="mr-3 h-5 w-5" />
                       Time Punch
