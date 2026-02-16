@@ -322,10 +322,20 @@ export default function MenuPage({ isTab = false }: { isTab?: boolean }) {
                         </TableCell>
                         <TableCell>
                             {hasRecipe ? (
-                              <div className="flex items-center gap-1.5 text-xs text-primary font-medium">
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  // In a real app, this would navigate to the recipes tab and select the recipe
+                                  toast({ 
+                                    title: "Navigating to Recipe", 
+                                    description: `Opening recipe for ${recipeName}...`,
+                                  });
+                                }}
+                                className="flex items-center gap-1.5 text-xs text-primary font-medium hover:underline hover:text-primary/80 transition-colors"
+                              >
                                   <Soup className="h-3.5 w-3.5" />
                                   {recipeName ?? "Unknown Recipe"}
-                              </div>
+                              </button>
                             ) : (
                               <span className="text-xs text-muted-foreground italic">No recipe</span>
                             )}
