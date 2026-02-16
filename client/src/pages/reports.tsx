@@ -414,21 +414,31 @@ export default function ReportsPage() {
                  <CardContent className="p-6 grid gap-6">
                     {/* Summary Cards */}
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                       <div className="p-4 rounded-xl bg-green-500/10 border border-green-500/20 md:order-first">
+                          <p className="text-sm font-medium text-muted-foreground mb-1">Net Profit</p>
+                          <p className="text-2xl font-bold text-green-700">{formatMoney(pnlData.netProfitCents)}</p>
+                       </div>
                        <div className="p-4 rounded-xl bg-primary/5 border border-primary/10">
                           <p className="text-sm font-medium text-muted-foreground mb-1">Total Revenue</p>
                           <p className="text-2xl font-bold text-primary">{formatMoney(pnlData.revenueCents)}</p>
                        </div>
                        <div className="p-4 rounded-xl bg-orange-500/5 border border-orange-500/10">
-                          <p className="text-sm font-medium text-muted-foreground mb-1">COGS</p>
+                          <div className="flex justify-between items-center mb-1">
+                            <p className="text-sm font-medium text-muted-foreground">COGS</p>
+                            <span className="text-xs font-bold text-orange-600/70">
+                              {pnlData.revenueCents > 0 ? ((pnlData.cogsCents / pnlData.revenueCents) * 100).toFixed(1) : 0}%
+                            </span>
+                          </div>
                           <p className="text-2xl font-bold text-orange-600">-{formatMoney(pnlData.cogsCents)}</p>
                        </div>
                        <div className="p-4 rounded-xl bg-blue-500/5 border border-blue-500/10">
-                          <p className="text-sm font-medium text-muted-foreground mb-1">Labor Cost</p>
+                          <div className="flex justify-between items-center mb-1">
+                            <p className="text-sm font-medium text-muted-foreground">Labor Cost</p>
+                            <span className="text-xs font-bold text-blue-600/70">
+                              {pnlData.revenueCents > 0 ? ((pnlData.laborCents / pnlData.revenueCents) * 100).toFixed(1) : 0}%
+                            </span>
+                          </div>
                           <p className="text-2xl font-bold text-blue-600">-{formatMoney(pnlData.laborCents)}</p>
-                       </div>
-                       <div className="p-4 rounded-xl bg-green-500/10 border border-green-500/20">
-                          <p className="text-sm font-medium text-muted-foreground mb-1">Net Profit</p>
-                          <p className="text-2xl font-bold text-green-700">{formatMoney(pnlData.netProfitCents)}</p>
                        </div>
                     </div>
 
