@@ -21,7 +21,7 @@ function formatMoney(cents: number) {
   }).format(cents / 100);
 }
 
-export default function InventoryPage() {
+export default function InventoryPage({ isTab = false }: { isTab?: boolean }) {
   const { toast } = useToast();
   const { inventory, inventoryCategories, addInventoryItem, updateInventoryCount, addInventoryCategory } = useStore();
 
@@ -99,6 +99,239 @@ export default function InventoryPage() {
     updateInventoryCount(id, delta);
   }
 
+  const Content = (
+    <div className="grid gap-6 lg:grid-cols-12">
+      <Card className="border bg-card shadow-soft lg:col-span-5">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 font-serif" data-testid="text-inventory-create-title">
+            <Package className="h-5 w-5" />
+            Create an inventory item
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="mt-4 grid gap-3">
+            <div>
+              <Label className="text-xs text-muted-foreground" htmlFor="invName">
+                Item name
+              </Label>
+              <Input
+                id="invName"
+                value={draftName}
+                onChange={(e) => setDraftName(e.target.value)}
+                className="mt-1 rounded-2xl"
+                placeholder="e.g., Paper Towels"
+                data-testid="input-inventory-name"
+              />
+            </div>
+
+            <div>
+              <Label className="text-xs text-muted-foreground" htmlFor="invSku">
+                SKU
+              </Label>
+              <Input
+                id="invSku"
+                value={draftSku}
+                onChange={(e) => setDraftSku(e.target.value)}
+                className="mt-1 rounded-2xl"
+                placeholder="e.g., TOWEL-ROLL"
+                data-testid="input-inventory-sku"
+              />
+            </div>
+
+            <div>
+              <Label className="text-xs text-muted-foreground" htmlFor="invCategory">
+                Category
+              </Label>
+              <div className="flex gap-2">
+                <Select value={draftCategory} onValueChange={setDraftCategory}>
+                  <SelectTrigger className="mt-1 rounded-2xl flex-1" id="invCategory" data-testid="select-inventory-category">
+                    <SelectValue placeholder="Select category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {inventoryCategories.map((c) => (
+                      <SelectItem key={c.id} value={c.id} data-testid={`option-category-${c.id}`}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button 
+                  variant="secondary" 
+                  className="mt-1 h-10 w-10 p-0 rounded-xl flex-shrink-0"
+                  onClick={() => setIsNewCategoryOpen(true)}
+                  title="Create new category"
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+
+            <div>
+              <Label className="text-xs text-muted-foreground" htmlFor="invUnit">
+                Unit
+              </Label>
+              <Input
+                id="invUnit"
+                value={draftUnit}
+                onChange={(e) => setDraftUnit(e.target.value)}
+                className="mt-1 rounded-2xl"
+                placeholder="each"
+                data-testid="input-inventory-unit"
+              />
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div>
+                <Label className="text-xs text-muted-foreground" htmlFor="invOnHand">
+                  On hand
+                </Label>
+                <Input
+                  id="invOnHand"
+                  value={draftOnHand}
+                  onChange={(e) => setDraftOnHand(e.target.value)}
+                  className="mt-1 rounded-2xl"
+                  inputMode="numeric"
+                  data-testid="input-inventory-onhand"
+                />
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground" htmlFor="invReorder">
+                  Reorder at
+                </Label>
+                <Input
+                  id="invReorder"
+                  value={draftReorderAt}
+                  onChange={(e) => setDraftReorderAt(e.target.value)}
+                  className="mt-1 rounded-2xl"
+                  inputMode="numeric"
+                  data-testid="input-inventory-reorderat"
+                />
+              </div>
+            </div>
+
+            <div>
+              <Label className="text-xs text-muted-foreground" htmlFor="invCost">
+                Unit cost (USD)
+              </Label>
+              <Input
+                id="invCost"
+                value={draftUnitCost}
+                onChange={(e) => setDraftUnitCost(e.target.value)}
+                className="mt-1 rounded-2xl"
+                inputMode="decimal"
+                placeholder="e.g., 0.09"
+                data-testid="input-inventory-unitcost"
+              />
+            </div>
+
+            <Button className="rounded-2xl" onClick={handleAddItem} data-testid="button-add-inventory-item">
+              <Plus className="mr-2 h-4 w-4" />
+              Add inventory item
+            </Button>
+
+            <p className="text-xs text-muted-foreground" data-testid="text-inventory-kpi">
+              Low stock items: {lowStockCount}
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border bg-card shadow-soft lg:col-span-7">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 font-serif" data-testid="text-inventory-list-title">
+            <Package className="h-5 w-5" />
+            Count & adjust inventory
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="max-h-[520px] overflow-auto rounded-2xl border bg-background/40">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Item</TableHead>
+                  <TableHead className="w-[140px] text-center">On hand</TableHead>
+                  <TableHead className="w-[220px] text-center">Adjust</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {inventory.map((i) => {
+                  const isLow = i.onHand <= i.reorderAt;
+                  return (
+                    <TableRow key={i.id} data-testid={`row-inventory-${i.id}`}>
+                      <TableCell>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate font-medium" data-testid={`text-inventory-name-${i.id}`}>
+                              {i.name}
+                            </p>
+                            <p className="text-xs text-muted-foreground" data-testid={`text-inventory-sku-${i.id}`}>
+                              {i.sku} • {inventoryCategories.find((c) => c.id === i.categoryId)?.name ?? "Uncategorized"} • Cost {formatMoney(i.unitCostCents)}
+                            </p>
+                          </div>
+                          <span
+                            className={
+                              isLow
+                                ? "rounded-full bg-destructive/10 px-2 py-1 text-xs font-medium text-destructive"
+                                : "rounded-full bg-accent/10 px-2 py-1 text-xs font-medium text-accent"
+                            }
+                            data-testid={`status-inventory-level-${i.id}`}
+                          >
+                            {isLow ? "Low" : "OK"}
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <span className="font-serif text-lg" data-testid={`text-inventory-onhand-${i.id}`}>
+                          {i.onHand} <span className="text-sm text-muted-foreground font-sans">{i.unit}</span>
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center justify-center gap-2">
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            className="h-8 rounded-xl"
+                            onClick={() => adjustOnHand(i.id, -1)}
+                            data-testid={`button-inventory-dec-${i.id}`}
+                          >
+                            -1
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            className="h-8 rounded-xl"
+                            onClick={() => adjustOnHand(i.id, 1)}
+                            data-testid={`button-inventory-inc-${i.id}`}
+                          >
+                            +1
+                          </Button>
+                          <Button
+                            size="sm"
+                            className="h-8 rounded-xl"
+                            onClick={() => adjustOnHand(i.id, 10)}
+                            data-testid={`button-inventory-plus10-${i.id}`}
+                          >
+                            +10
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+
+          <p className="mt-3 text-xs text-muted-foreground" data-testid="text-prototype-note">
+            Note: inventory is now centralized in the store.
+          </p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+
+  if (isTab) return Content;
+
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
       <AppShell title="Inventory">
@@ -128,234 +361,7 @@ export default function InventoryPage() {
 
               <Separator className="my-6" />
 
-              <div className="grid gap-6 lg:grid-cols-12">
-                <Card className="border bg-card shadow-soft lg:col-span-5">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="flex items-center gap-2 font-serif" data-testid="text-inventory-create-title">
-                      <Package className="h-5 w-5" />
-                      Create an inventory item
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="mt-4 grid gap-3">
-                      <div>
-                        <Label className="text-xs text-muted-foreground" htmlFor="invName">
-                          Item name
-                        </Label>
-                        <Input
-                          id="invName"
-                          value={draftName}
-                          onChange={(e) => setDraftName(e.target.value)}
-                          className="mt-1 rounded-2xl"
-                          placeholder="e.g., Paper Towels"
-                          data-testid="input-inventory-name"
-                        />
-                      </div>
-
-                      <div>
-                        <Label className="text-xs text-muted-foreground" htmlFor="invSku">
-                          SKU
-                        </Label>
-                        <Input
-                          id="invSku"
-                          value={draftSku}
-                          onChange={(e) => setDraftSku(e.target.value)}
-                          className="mt-1 rounded-2xl"
-                          placeholder="e.g., TOWEL-ROLL"
-                          data-testid="input-inventory-sku"
-                        />
-                      </div>
-
-                      <div>
-                        <Label className="text-xs text-muted-foreground" htmlFor="invCategory">
-                          Category
-                        </Label>
-                        <div className="flex gap-2">
-                          <Select value={draftCategory} onValueChange={setDraftCategory}>
-                            <SelectTrigger className="mt-1 rounded-2xl flex-1" id="invCategory" data-testid="select-inventory-category">
-                              <SelectValue placeholder="Select category" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {inventoryCategories.map((c) => (
-                                <SelectItem key={c.id} value={c.id} data-testid={`option-category-${c.id}`}>
-                                  {c.name}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <Button 
-                            variant="secondary" 
-                            className="mt-1 h-10 w-10 p-0 rounded-xl flex-shrink-0"
-                            onClick={() => setIsNewCategoryOpen(true)}
-                            title="Create new category"
-                          >
-                            <Plus className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-
-                      <div>
-                        <Label className="text-xs text-muted-foreground" htmlFor="invUnit">
-                          Unit
-                        </Label>
-                        <Input
-                          id="invUnit"
-                          value={draftUnit}
-                          onChange={(e) => setDraftUnit(e.target.value)}
-                          className="mt-1 rounded-2xl"
-                          placeholder="each"
-                          data-testid="input-inventory-unit"
-                        />
-                      </div>
-
-                      <div className="grid gap-2 sm:grid-cols-2">
-                        <div>
-                          <Label className="text-xs text-muted-foreground" htmlFor="invOnHand">
-                            On hand
-                          </Label>
-                          <Input
-                            id="invOnHand"
-                            value={draftOnHand}
-                            onChange={(e) => setDraftOnHand(e.target.value)}
-                            className="mt-1 rounded-2xl"
-                            inputMode="numeric"
-                            data-testid="input-inventory-onhand"
-                          />
-                        </div>
-                        <div>
-                          <Label className="text-xs text-muted-foreground" htmlFor="invReorder">
-                            Reorder at
-                          </Label>
-                          <Input
-                            id="invReorder"
-                            value={draftReorderAt}
-                            onChange={(e) => setDraftReorderAt(e.target.value)}
-                            className="mt-1 rounded-2xl"
-                            inputMode="numeric"
-                            data-testid="input-inventory-reorderat"
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <Label className="text-xs text-muted-foreground" htmlFor="invCost">
-                          Unit cost (USD)
-                        </Label>
-                        <Input
-                          id="invCost"
-                          value={draftUnitCost}
-                          onChange={(e) => setDraftUnitCost(e.target.value)}
-                          className="mt-1 rounded-2xl"
-                          inputMode="decimal"
-                          placeholder="e.g., 0.09"
-                          data-testid="input-inventory-unitcost"
-                        />
-                      </div>
-
-                      <Button className="rounded-2xl" onClick={handleAddItem} data-testid="button-add-inventory-item">
-                        <Plus className="mr-2 h-4 w-4" />
-                        Add inventory item
-                      </Button>
-
-                      <p className="text-xs text-muted-foreground" data-testid="text-inventory-kpi">
-                        Low stock items: {lowStockCount}
-                      </p>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card className="border bg-card shadow-soft lg:col-span-7">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="flex items-center gap-2 font-serif" data-testid="text-inventory-list-title">
-                      <Package className="h-5 w-5" />
-                      Count & adjust inventory
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="max-h-[520px] overflow-auto rounded-2xl border bg-background/40">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Item</TableHead>
-                            <TableHead className="w-[140px] text-center">On hand</TableHead>
-                            <TableHead className="w-[220px] text-center">Adjust</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {inventory.map((i) => {
-                            const isLow = i.onHand <= i.reorderAt;
-                            return (
-                              <TableRow key={i.id} data-testid={`row-inventory-${i.id}`}>
-                                <TableCell>
-                                  <div className="flex items-start justify-between gap-3">
-                                    <div className="min-w-0">
-                                      <p className="truncate font-medium" data-testid={`text-inventory-name-${i.id}`}>
-                                        {i.name}
-                                      </p>
-                                      <p className="text-xs text-muted-foreground" data-testid={`text-inventory-sku-${i.id}`}>
-                                        {i.sku} • {inventoryCategories.find((c) => c.id === i.categoryId)?.name ?? "Uncategorized"} • Cost {formatMoney(i.unitCostCents)}
-                                      </p>
-                                    </div>
-                                    <span
-                                      className={
-                                        isLow
-                                          ? "rounded-full bg-destructive/10 px-2 py-1 text-xs font-medium text-destructive"
-                                          : "rounded-full bg-accent/10 px-2 py-1 text-xs font-medium text-accent"
-                                      }
-                                      data-testid={`status-inventory-level-${i.id}`}
-                                    >
-                                      {isLow ? "Low" : "OK"}
-                                    </span>
-                                  </div>
-                                </TableCell>
-                                <TableCell className="text-center">
-                                  <span className="font-serif text-lg" data-testid={`text-inventory-onhand-${i.id}`}>
-                                    {i.onHand} <span className="text-sm text-muted-foreground font-sans">{i.unit}</span>
-                                  </span>
-                                </TableCell>
-                                <TableCell>
-                                  <div className="flex items-center justify-center gap-2">
-                                    <Button
-                                      variant="secondary"
-                                      size="sm"
-                                      className="h-8 rounded-xl"
-                                      onClick={() => adjustOnHand(i.id, -1)}
-                                      data-testid={`button-inventory-dec-${i.id}`}
-                                    >
-                                      -1
-                                    </Button>
-                                    <Button
-                                      variant="secondary"
-                                      size="sm"
-                                      className="h-8 rounded-xl"
-                                      onClick={() => adjustOnHand(i.id, 1)}
-                                      data-testid={`button-inventory-inc-${i.id}`}
-                                    >
-                                      +1
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      className="h-8 rounded-xl"
-                                      onClick={() => adjustOnHand(i.id, 10)}
-                                      data-testid={`button-inventory-plus10-${i.id}`}
-                                    >
-                                      +10
-                                    </Button>
-                                  </div>
-                                </TableCell>
-                              </TableRow>
-                            );
-                          })}
-                        </TableBody>
-                      </Table>
-                    </div>
-
-                    <p className="mt-3 text-xs text-muted-foreground" data-testid="text-prototype-note">
-                      Note: inventory is now centralized in the store.
-                    </p>
-                  </CardContent>
-                </Card>
-              </div>
+              {Content}
             </div>
         </header>
 

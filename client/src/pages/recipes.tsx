@@ -62,7 +62,7 @@ function DroppableRecipeArea({ children }: { children: React.ReactNode }) {
   );
 }
 
-export default function RecipesPage() {
+export default function RecipesPage({ isTab = false }: { isTab?: boolean }) {
   const { toast } = useToast();
   const { recipes, inventory, inventoryCategories, addRecipe, updateRecipe } = useStore();
 
@@ -234,6 +234,243 @@ export default function RecipesPage() {
     });
   }
 
+  const Content = (
+    <div className="grid gap-6 lg:grid-cols-12">
+      {/* List Column */}
+      <Card className="border bg-card shadow-soft lg:col-span-3 h-fit max-h-[calc(100vh-300px)] flex flex-col">
+        <CardHeader className="pb-3 flex flex-row items-center justify-between space-y-0 px-4 pt-4">
+          <CardTitle className="font-serif text-lg">Recipes</CardTitle>
+          <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
+            <DialogTrigger asChild>
+              <Button size="sm" variant="ghost" className="h-8 w-8 p-0" data-testid="button-open-create-recipe">
+                <Plus className="h-4 w-4" />
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Create Recipe</DialogTitle>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="name">Recipe Name</Label>
+                  <Input
+                    id="name"
+                    value={createName}
+                    onChange={(e) => setCreateName(e.target.value)}
+                    placeholder="e.g. Latte 16oz"
+                    data-testid="input-create-recipe-name"
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button onClick={handleCreateRecipe} className="rounded-xl" data-testid="button-confirm-create-recipe">Create</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </CardHeader>
+        <CardContent className="p-2 flex-1 overflow-y-auto">
+          <div className="flex flex-col gap-1">
+            {recipes.map((r) => (
+              <Button
+                key={r.id}
+                variant={selectedRecipeId === r.id ? "secondary" : "ghost"}
+                className={`justify-between rounded-lg h-auto py-2.5 px-3 text-left whitespace-normal ${selectedRecipeId === r.id ? 'bg-secondary font-medium shadow-sm' : ''}`}
+                onClick={() => setSelectedRecipeId(r.id)}
+                data-testid={`select-recipe-${r.id}`}
+              >
+                <span className="truncate">{r.name}</span>
+              </Button>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Editor Column */}
+      <Card className="border bg-card shadow-soft lg:col-span-9 h-full min-h-[500px] flex flex-col overflow-hidden">
+        {selectedRecipe ? (
+          <div className="flex flex-col h-full">
+            <div className="px-6 py-4 border-b bg-muted/20 flex justify-between items-center">
+              <div>
+                 <h2 className="font-serif text-2xl" data-testid="text-selected-recipe-name">{selectedRecipe.name}</h2>
+                 <p className="text-xs text-muted-foreground mt-1">Drag ingredients here to add components</p>
+              </div>
+            </div>
+            
+            <div className="flex-1 grid grid-cols-1 md:grid-cols-12 h-full overflow-hidden">
+              {/* Left: Recipe Components (Drop Zone) */}
+              <div className="md:col-span-8 p-6 overflow-y-auto bg-background/50">
+                 <DroppableRecipeArea>
+                    {selectedRecipe.components.length > 0 ? (
+                       selectedRecipe.components.map(c => {
+                          const cat = inventoryCategories.find(cat => cat.id === c.inventoryCategoryId);
+                          const item = inventory.find(i => i.id === c.defaultInventoryItemId);
+                          return (
+                            <div 
+                              key={c.id} 
+                              className="p-4 rounded-xl border bg-card shadow-sm hover:shadow-md hover:border-primary/30 transition-all cursor-pointer group relative"
+                              onClick={() => openEditComponent(c)}
+                            >
+                              <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                 <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:bg-destructive/10" onClick={(e) => removeComponent(c.id, e)}>
+                                   <Trash2 className="h-3 w-3" />
+                                 </Button>
+                              </div>
+                              
+                              <p className="font-semibold text-sm mb-1">{c.name}</p>
+                              
+                              <div className="text-xs space-y-1 text-muted-foreground">
+                                 <div className="flex justify-between">
+                                   <span>Default:</span>
+                                   <span className="font-medium text-foreground">{item?.name}</span>
+                                 </div>
+                                 <div className="flex justify-between">
+                                   <span>Category:</span>
+                                   <span>{cat?.name}</span>
+                                 </div>
+                                 <div className="flex justify-between pt-1 border-t border-dashed mt-1">
+                                   <span>Qty:</span>
+                                   <span className="font-medium text-primary">{c.qty} {c.unit}</span>
+                                 </div>
+                              </div>
+                            </div>
+                          );
+                       })
+                    ) : (
+                      <div className="col-span-2 flex flex-col items-center justify-center h-40 text-muted-foreground border-2 border-dashed rounded-xl border-muted-foreground/20">
+                        <Soup className="h-8 w-8 mb-2 opacity-20" />
+                        <p>Drop ingredients here</p>
+                      </div>
+                    )}
+                 </DroppableRecipeArea>
+              </div>
+
+              {/* Right: Ingredients Palette (Source) */}
+              <div className="md:col-span-4 border-l bg-muted/10 flex flex-col h-full overflow-hidden">
+                 <div className="p-3 border-b">
+                   <div className="relative">
+                     <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                     <Input 
+                       placeholder="Search ingredients..." 
+                       className="pl-8 h-9 rounded-xl bg-background" 
+                       value={searchTerm}
+                       onChange={e => setSearchTerm(e.target.value)}
+                     />
+                   </div>
+                 </div>
+                 
+                 <ScrollArea className="flex-1 p-3">
+                   <div className="space-y-4">
+                      {inventoryCategories.map(cat => {
+                         const items = filteredInventory.filter(i => i.categoryId === cat.id);
+                         if (items.length === 0) return null;
+                         
+                         return (
+                           <div key={cat.id}>
+                             <h4 className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wider pl-1">{cat.name}</h4>
+                             <div className="grid gap-2">
+                                {items.map(item => (
+                                  <DraggableIngredient key={item.id} item={item} categoryName={cat.name} />
+                                ))}
+                             </div>
+                           </div>
+                         );
+                      })}
+                   </div>
+                 </ScrollArea>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="flex h-full flex-col items-center justify-center p-8 text-center text-muted-foreground">
+            <Soup className="h-12 w-12 opacity-20 mb-4" />
+            <p>Select or create a recipe to start editing.</p>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+
+  if (isTab) {
+    return (
+      <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+        {Content}
+        <Dialog open={isCompDialogOpen} onOpenChange={setIsCompDialogOpen}>
+            <DialogContent className="sm:max-w-[425px]">
+              <DialogHeader>
+                <DialogTitle>{activeCompId ? "Edit Component" : "Add Component"}</DialogTitle>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
+                <div className="grid gap-2">
+                  <Label>Slot Name</Label>
+                  <Input 
+                    value={compName} 
+                    onChange={e => setCompName(e.target.value)} 
+                    placeholder="e.g. Milk Choice"
+                  />
+                  <p className="text-[11px] text-muted-foreground">Label shown when customizing.</p>
+                </div>
+                
+                <div className="grid gap-2">
+                  <Label>Category (Options Pool)</Label>
+                  <Select value={compCatId} onValueChange={setCompCatId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select inventory category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {inventoryCategories.map(c => (
+                        <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label>Default Item</Label>
+                  <Select value={compDefaultItemId} onValueChange={setCompDefaultItemId} disabled={!compCatId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder={compCatId ? "Select default item" : "Choose category first"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableItemsForDialog.map(i => (
+                        <SelectItem key={i.id} value={i.id}>{i.name} ({i.unit})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label>Quantity</Label>
+                  <Input 
+                    type="number" 
+                    value={compQty} 
+                    onChange={e => setCompQty(e.target.value)}
+                    placeholder="e.g. 200"
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button onClick={handleSaveComponent} className="rounded-xl">Save</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Drag Overlay */}
+          {createPortal(
+             <DragOverlay>
+               {draggedItem ? (
+                 <div className="p-3 rounded-xl border bg-card shadow-xl cursor-grabbing w-48 opacity-90 rotate-3">
+                   <div className="flex justify-between items-start">
+                     <span className="font-medium text-sm leading-tight">{draggedItem.name}</span>
+                   </div>
+                 </div>
+               ) : null}
+             </DragOverlay>,
+             document.body
+          )}
+      </DndContext>
+    );
+  }
+
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
@@ -264,159 +501,7 @@ export default function RecipesPage() {
 
                 <Separator className="my-6" />
 
-                <div className="grid gap-6 lg:grid-cols-12">
-                  {/* List Column */}
-                  <Card className="border bg-card shadow-soft lg:col-span-3 h-fit max-h-[calc(100vh-300px)] flex flex-col">
-                    <CardHeader className="pb-3 flex flex-row items-center justify-between space-y-0 px-4 pt-4">
-                      <CardTitle className="font-serif text-lg">Recipes</CardTitle>
-                      <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-                        <DialogTrigger asChild>
-                          <Button size="sm" variant="ghost" className="h-8 w-8 p-0" data-testid="button-open-create-recipe">
-                            <Plus className="h-4 w-4" />
-                          </Button>
-                        </DialogTrigger>
-                        <DialogContent>
-                          <DialogHeader>
-                            <DialogTitle>Create Recipe</DialogTitle>
-                          </DialogHeader>
-                          <div className="grid gap-4 py-4">
-                            <div className="grid gap-2">
-                              <Label htmlFor="name">Recipe Name</Label>
-                              <Input
-                                id="name"
-                                value={createName}
-                                onChange={(e) => setCreateName(e.target.value)}
-                                placeholder="e.g. Latte 16oz"
-                                data-testid="input-create-recipe-name"
-                              />
-                            </div>
-                          </div>
-                          <DialogFooter>
-                            <Button onClick={handleCreateRecipe} className="rounded-xl" data-testid="button-confirm-create-recipe">Create</Button>
-                          </DialogFooter>
-                        </DialogContent>
-                      </Dialog>
-                    </CardHeader>
-                    <CardContent className="p-2 flex-1 overflow-y-auto">
-                      <div className="flex flex-col gap-1">
-                        {recipes.map((r) => (
-                          <Button
-                            key={r.id}
-                            variant={selectedRecipeId === r.id ? "secondary" : "ghost"}
-                            className={`justify-between rounded-lg h-auto py-2.5 px-3 text-left whitespace-normal ${selectedRecipeId === r.id ? 'bg-secondary font-medium shadow-sm' : ''}`}
-                            onClick={() => setSelectedRecipeId(r.id)}
-                            data-testid={`select-recipe-${r.id}`}
-                          >
-                            <span className="truncate">{r.name}</span>
-                          </Button>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  {/* Editor Column */}
-                  <Card className="border bg-card shadow-soft lg:col-span-9 h-full min-h-[500px] flex flex-col overflow-hidden">
-                    {selectedRecipe ? (
-                      <div className="flex flex-col h-full">
-                        <div className="px-6 py-4 border-b bg-muted/20 flex justify-between items-center">
-                          <div>
-                             <h2 className="font-serif text-2xl" data-testid="text-selected-recipe-name">{selectedRecipe.name}</h2>
-                             <p className="text-xs text-muted-foreground mt-1">Drag ingredients here to add components</p>
-                          </div>
-                        </div>
-                        
-                        <div className="flex-1 grid grid-cols-1 md:grid-cols-12 h-full overflow-hidden">
-                          {/* Left: Recipe Components (Drop Zone) */}
-                          <div className="md:col-span-8 p-6 overflow-y-auto bg-background/50">
-                             <DroppableRecipeArea>
-                                {selectedRecipe.components.length > 0 ? (
-                                   selectedRecipe.components.map(c => {
-                                      const cat = inventoryCategories.find(cat => cat.id === c.inventoryCategoryId);
-                                      const item = inventory.find(i => i.id === c.defaultInventoryItemId);
-                                      return (
-                                        <div 
-                                          key={c.id} 
-                                          className="p-4 rounded-xl border bg-card shadow-sm hover:shadow-md hover:border-primary/30 transition-all cursor-pointer group relative"
-                                          onClick={() => openEditComponent(c)}
-                                        >
-                                          <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                             <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:bg-destructive/10" onClick={(e) => removeComponent(c.id, e)}>
-                                               <Trash2 className="h-3 w-3" />
-                                             </Button>
-                                          </div>
-                                          
-                                          <p className="font-semibold text-sm mb-1">{c.name}</p>
-                                          
-                                          <div className="text-xs space-y-1 text-muted-foreground">
-                                             <div className="flex justify-between">
-                                               <span>Default:</span>
-                                               <span className="font-medium text-foreground">{item?.name}</span>
-                                             </div>
-                                             <div className="flex justify-between">
-                                               <span>Category:</span>
-                                               <span>{cat?.name}</span>
-                                             </div>
-                                             <div className="flex justify-between pt-1 border-t border-dashed mt-1">
-                                               <span>Qty:</span>
-                                               <span className="font-medium text-primary">{c.qty} {c.unit}</span>
-                                             </div>
-                                          </div>
-                                        </div>
-                                      );
-                                   })
-                                ) : (
-                                  <div className="col-span-2 flex flex-col items-center justify-center h-40 text-muted-foreground border-2 border-dashed rounded-xl border-muted-foreground/20">
-                                    <Soup className="h-8 w-8 mb-2 opacity-20" />
-                                    <p>Drop ingredients here</p>
-                                  </div>
-                                )}
-                             </DroppableRecipeArea>
-                          </div>
-
-                          {/* Right: Ingredients Palette (Source) */}
-                          <div className="md:col-span-4 border-l bg-muted/10 flex flex-col h-full overflow-hidden">
-                             <div className="p-3 border-b">
-                               <div className="relative">
-                                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                                 <Input 
-                                   placeholder="Search ingredients..." 
-                                   className="pl-8 h-9 rounded-xl bg-background" 
-                                   value={searchTerm}
-                                   onChange={e => setSearchTerm(e.target.value)}
-                                 />
-                               </div>
-                             </div>
-                             
-                             <ScrollArea className="flex-1 p-3">
-                               <div className="space-y-4">
-                                  {inventoryCategories.map(cat => {
-                                     const items = filteredInventory.filter(i => i.categoryId === cat.id);
-                                     if (items.length === 0) return null;
-                                     
-                                     return (
-                                       <div key={cat.id}>
-                                         <h4 className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wider pl-1">{cat.name}</h4>
-                                         <div className="grid gap-2">
-                                            {items.map(item => (
-                                              <DraggableIngredient key={item.id} item={item} categoryName={cat.name} />
-                                            ))}
-                                         </div>
-                                       </div>
-                                     );
-                                  })}
-                               </div>
-                             </ScrollArea>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex h-full flex-col items-center justify-center p-8 text-center text-muted-foreground">
-                        <Soup className="h-12 w-12 opacity-20 mb-4" />
-                        <p>Select or create a recipe to start editing.</p>
-                      </div>
-                    )}
-                  </Card>
-                </div>
+                {Content}
               </div>
           </header>
 

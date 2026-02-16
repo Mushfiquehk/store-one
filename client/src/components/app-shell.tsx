@@ -31,9 +31,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 const nav = [
   { href: "/", label: "POS", icon: LayoutGrid, testid: "link-nav-pos" },
   { href: "/reports", label: "Reports", icon: BarChart3, testid: "link-nav-reports" },
-  { href: "/menu", label: "Menu", icon: ClipboardList, testid: "link-nav-menu" },
-  { href: "/recipes", label: "Recipes", icon: Soup, testid: "link-nav-recipes" },
-  { href: "/inventory", label: "Ingredients", icon: Package, testid: "link-nav-inventory" },
+  { href: "/products", label: "Products", icon: ClipboardList, testid: "link-nav-products" },
   { href: "/employees", label: "Employees", icon: Users, testid: "link-nav-employees" },
   { href: "/start", label: "Getting Started", icon: Sparkles, testid: "link-nav-start" },
   { href: "/integrations", label: "Integrations", icon: Link2, testid: "link-nav-integrations" },

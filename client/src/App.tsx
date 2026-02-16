@@ -9,8 +9,7 @@ import { StoreProvider } from "@/lib/store";
 import OnboardingPage from "@/pages/onboarding";
 import PosPage from "@/pages/pos";
 import InventoryPage from "@/pages/inventory";
-import RecipesPage from "@/pages/recipes";
-import MenuPage from "@/pages/menu";
+import ProductsPage from "@/pages/products";
 import ReportsPage from "@/pages/reports";
 import IntegrationsPage from "@/pages/integrations";
 import SettingsPage from "@/pages/settings";
@@ -21,9 +20,7 @@ function Router() {
     <Switch>
       <Route path="/" component={PosPage} />
       <Route path="/start" component={OnboardingPage} />
-      <Route path="/inventory" component={InventoryPage} />
-      <Route path="/recipes" component={RecipesPage} />
-      <Route path="/menu" component={MenuPage} />
+      <Route path="/products" component={ProductsPage} />
       <Route path="/reports" component={ReportsPage} />
       <Route path="/integrations" component={IntegrationsPage} />
       <Route path="/employees" component={EmployeesPage} />
