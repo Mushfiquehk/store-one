@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import AppShell from "@/components/app-shell";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { ClipboardList, Soup, Package } from "lucide-react";
+import { ClipboardList, Fuel, Package } from "lucide-react";
 
 // Import existing pages as components
 // We'll need to modify them slightly to be used as components or just render them here
@@ -21,13 +21,13 @@ export default function ProductsPage() {
             <div className="flex items-center justify-between mb-6">
                <TabsList className="bg-card border shadow-sm rounded-xl h-12 p-1 w-fit">
                 <TabsTrigger value="menu" className="rounded-lg h-full px-4">
-                  <ClipboardList className="h-4 w-4 mr-2" /> Menu
+                  <ClipboardList className="h-4 w-4 mr-2" /> Station Menu
                 </TabsTrigger>
                 <TabsTrigger value="recipes" className="rounded-lg h-full px-4">
-                  <Soup className="h-4 w-4 mr-2" /> Recipes
+                  <Fuel className="h-4 w-4 mr-2" /> Fuel Mixes
                 </TabsTrigger>
                 <TabsTrigger value="inventory" className="rounded-lg h-full px-4">
-                  <Package className="h-4 w-4 mr-2" /> Ingredients
+                  <Package className="h-4 w-4 mr-2" /> Bulk Inventory
                 </TabsTrigger>
               </TabsList>
             </div>
