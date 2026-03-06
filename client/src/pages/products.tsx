@@ -1,11 +1,9 @@
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { motion } from "framer-motion";
 import AppShell from "@/components/app-shell";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ClipboardList, Fuel, Package } from "lucide-react";
 
-// Import existing pages as components
-// We'll need to modify them slightly to be used as components or just render them here
 import MenuPageContent from "./menu";
 import RecipesPageContent from "./recipes";
 import InventoryPageContent from "./inventory";
@@ -24,7 +22,7 @@ export default function ProductsPage() {
                   <ClipboardList className="h-4 w-4 mr-2" /> Station Menu
                 </TabsTrigger>
                 <TabsTrigger value="recipes" className="rounded-lg h-full px-4">
-                  <Fuel className="h-4 w-4 mr-2" /> Fuel Mixes
+                  <Fuel className="h-4 w-4 mr-2" /> Bill of Materials
                 </TabsTrigger>
                 <TabsTrigger value="inventory" className="rounded-lg h-full px-4">
                   <Package className="h-4 w-4 mr-2" /> Bulk Inventory
@@ -35,7 +33,7 @@ export default function ProductsPage() {
             <TabsContent value="menu" className="mt-0 space-y-6">
                <MenuPageContent isTab={true} />
             </TabsContent>
-            
+
             <TabsContent value="recipes" className="mt-0 space-y-6">
                <RecipesPageContent isTab={true} />
             </TabsContent>
