@@ -114,14 +114,17 @@ type StoreContextType = {
   isLoading: boolean;
 
   addProduct: (data: Partial<Product>) => void;
+  addProductAsync: (data: Partial<Product>) => Promise<any>;
   updateProduct: (id: string, data: Partial<Product>) => void;
   deleteProduct: (id: string) => void;
 
   addVariant: (data: Partial<Variant>) => void;
+  addVariantAsync: (data: Partial<Variant>) => Promise<any>;
   updateVariant: (id: string, data: Partial<Variant>) => void;
   deleteVariant: (id: string) => void;
 
   addModifierGroup: (data: Partial<ModifierGroup>) => void;
+  addModifierGroupAsync: (data: Partial<ModifierGroup>) => Promise<any>;
   updateModifierGroup: (id: string, data: Partial<ModifierGroup>) => void;
   deleteModifierGroup: (id: string) => void;
 
@@ -130,14 +133,18 @@ type StoreContextType = {
   deleteModifier: (id: string) => void;
 
   setProductModifierGroups: (productId: string, groupIds: string[]) => void;
+  setProductModifierGroupsAsync: (productId: string, groupIds: string[]) => Promise<any>;
   setProductModifierScaleFactors: (productId: string, groupId: string, scaleFactors: string | null) => void;
+  setProductModifierScaleFactorsAsync: (productId: string, groupId: string, scaleFactors: string | null) => Promise<any>;
 
   addInventoryItem: (data: Partial<InventoryItem>) => void;
+  addInventoryItemAsync: (data: Partial<InventoryItem>) => Promise<any>;
   updateInventoryItem: (id: string, data: Partial<InventoryItem>) => void;
   adjustInventory: (id: string, delta: number) => void;
   deleteInventoryItem: (id: string) => void;
 
   addBom: (data: Partial<BomEntry>) => void;
+  addBomAsync: (data: Partial<BomEntry>) => Promise<any>;
   updateBom: (id: string, data: Partial<BomEntry>) => void;
   deleteBom: (id: string) => void;
 
@@ -248,14 +255,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     isLoading,
 
     addProduct: (data) => addProductMut.mutate(data),
+    addProductAsync: (data) => addProductMut.mutateAsync(data),
     updateProduct: (id, data) => updateProductMut.mutate({ id, data }),
     deleteProduct: (id) => deleteProductMut.mutate(id),
 
     addVariant: (data) => addVariantMut.mutate(data),
+    addVariantAsync: (data) => addVariantMut.mutateAsync(data),
     updateVariant: (id, data) => updateVariantMut.mutate({ id, data }),
     deleteVariant: (id) => deleteVariantMut.mutate(id),
 
     addModifierGroup: (data) => addModGroupMut.mutate(data),
+    addModifierGroupAsync: (data) => addModGroupMut.mutateAsync(data),
     updateModifierGroup: (id, data) => updateModGroupMut.mutate({ id, data }),
     deleteModifierGroup: (id) => deleteModGroupMut.mutate(id),
 
@@ -264,14 +274,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     deleteModifier: (id) => deleteModMut.mutate(id),
 
     setProductModifierGroups: (productId, groupIds) => setProductModGroupsMut.mutate({ productId, groupIds }),
+    setProductModifierGroupsAsync: (productId, groupIds) => setProductModGroupsMut.mutateAsync({ productId, groupIds }),
     setProductModifierScaleFactors: (productId, groupId, scaleFactors) => setScaleFactorsMut.mutate({ productId, groupId, scaleFactors }),
+    setProductModifierScaleFactorsAsync: (productId, groupId, scaleFactors) => setScaleFactorsMut.mutateAsync({ productId, groupId, scaleFactors }),
 
     addInventoryItem: (data) => addInvMut.mutate(data),
+    addInventoryItemAsync: (data) => addInvMut.mutateAsync(data),
     updateInventoryItem: (id, data) => updateInvMut.mutate({ id, data }),
     adjustInventory: (id, delta) => adjustInvMut.mutate({ id, delta }),
     deleteInventoryItem: (id) => deleteInvMut.mutate(id),
 
     addBom: (data) => addBomMut.mutate(data),
+    addBomAsync: (data) => addBomMut.mutateAsync(data),
     updateBom: (id, data) => updateBomMut.mutate({ id, data }),
     deleteBom: (id) => deleteBomMut.mutate(id),
 

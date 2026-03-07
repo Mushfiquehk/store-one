@@ -45,7 +45,7 @@ type WizardBomEntry = {
   overrideModifierGroupId?: string;
 };
 
-const STEPS_RETAIL = ["Item Type", "Review & Create"];
+const STEPS_RETAIL = ["Item Type", "Inventory", "Review & Create"];
 const STEPS_PREPARED = ["Item Type", "Variants", "Recipes", "Modifiers", "Review & Create"];
 
 export default function ProductWizard({
@@ -62,13 +62,20 @@ export default function ProductWizard({
     modifiers,
     inventory,
     addProduct,
+    addProductAsync,
     addVariant,
+    addVariantAsync,
     addInventoryItem,
+    addInventoryItemAsync,
     addBom,
+    addBomAsync,
     addModifierGroup,
+    addModifierGroupAsync,
     addModifier,
     setProductModifierGroups,
+    setProductModifierGroupsAsync,
     setProductModifierScaleFactors,
+    setProductModifierScaleFactorsAsync,
   } = useStore();
 
   const [step, setStep] = useState(0);
@@ -78,6 +85,9 @@ export default function ProductWizard({
   const [sku, setSku] = useState("");
   const [price, setPrice] = useState("");
   const [tags, setTags] = useState("");
+  const [retailInventoryItemId, setRetailInventoryItemId] = useState<string>("");
+  const [retailDeductQty, setRetailDeductQty] = useState("1");
+  const [retailInvSearch, setRetailInvSearch] = useState("");
 
   const [wizardVariants, setWizardVariants] = useState<WizardVariant[]>([
     { tempId: uid("tmp"), name: "Small", sku: "", basePrice: "" },
@@ -118,6 +128,9 @@ export default function ProductWizard({
     setSelectedBomVariant(null);
     setAutoScaleBase(null);
     setAutoScalePercents({});
+    setRetailInventoryItemId("");
+    setRetailDeductQty("1");
+    setRetailInvSearch("");
   }
 
   function handleClose() {
@@ -161,152 +174,164 @@ export default function ProductWizard({
     if (step > 0) setStep(step - 1);
   }
 
-  function handleCreate() {
-    const productId = uid("prod");
-    const tagList = tags.split(",").map(t => t.trim()).filter(Boolean);
+  const [isCreating, setIsCreating] = useState(false);
 
-    if (isRetail) {
-      const variantId = uid("var");
-      const invItemId = uid("inv");
-      addProduct({
-        id: productId,
-        name: name.trim(),
-        type: "RETAIL",
-        isComposite: false,
-        attributes: JSON.stringify({ tax_exempt: false, tags: tagList }),
-      });
-      addInventoryItem({
-        id: invItemId,
-        name: name.trim(),
-        unitOfMeasure: "each",
-        currentQuantity: 0,
-        trackingConfig: JSON.stringify({ low_stock_alert: 10 }),
-      });
-      addVariant({
-        id: variantId,
-        productId,
-        sku: sku.trim() || null,
-        name: "Default",
-        basePrice: Math.round(Number(price) * 100),
-        directInventoryId: invItemId,
-        config: null,
-      });
-      toast({ title: "Product created", description: `Retail item "${name.trim()}" added successfully` });
-    } else {
-      addProduct({
-        id: productId,
-        name: name.trim(),
-        type: "RESTAURANT",
-        isComposite: true,
-        attributes: JSON.stringify({ tax_exempt: false, tags: tagList }),
-      });
+  async function handleCreate() {
+    if (isCreating) return;
+    setIsCreating(true);
+    try {
+      const productId = uid("prod");
+      const tagList = tags.split(",").map(t => t.trim()).filter(Boolean);
 
-      const variantIdMap: Record<string, string> = {};
-      wizardVariants.forEach(wv => {
-        const variantId = uid("var");
-        variantIdMap[wv.tempId] = variantId;
-        addVariant({
-          id: variantId,
+      if (isRetail) {
+        await addProductAsync({
+          id: productId,
+          name: name.trim(),
+          type: "RETAIL",
+          isComposite: false,
+          attributes: JSON.stringify({ tax_exempt: false, tags: tagList }),
+        });
+
+        const directInvId = retailInventoryItemId && inventory.find(i => i.id === retailInventoryItemId) ? retailInventoryItemId : null;
+
+        const retailVariantId = uid("var");
+        await addVariantAsync({
+          id: retailVariantId,
           productId,
-          sku: wv.sku.trim() || null,
-          name: wv.name.trim(),
-          basePrice: Math.round(Number(wv.basePrice) * 100),
+          sku: sku.trim() || null,
+          name: "Default",
+          basePrice: Math.round(Number(price) * 100),
+          directInventoryId: directInvId,
           config: null,
         });
-      });
 
-      const linkedGroupIds: string[] = [];
-      const tempIdToGroupId: Record<string, string> = {};
-      wizardModGroups.forEach(wmg => {
-        if (wmg.isNew && wmg.newName.trim()) {
-          const groupId = uid("mg");
-          addModifierGroup({
-            id: groupId,
-            name: wmg.newName.trim(),
-            minSelections: Number(wmg.newMin) || 0,
-            maxSelections: Number(wmg.newMax) || 0,
-          });
-          linkedGroupIds.push(groupId);
-          tempIdToGroupId[wmg.tempId] = groupId;
-        } else if (!wmg.isNew && wmg.groupId) {
-          linkedGroupIds.push(wmg.groupId);
-          tempIdToGroupId[wmg.tempId] = wmg.groupId;
-        }
-      });
-
-      if (linkedGroupIds.length > 0) {
-        setTimeout(() => {
-          setProductModifierGroups(productId, linkedGroupIds);
-
-          setTimeout(() => {
-            wizardModGroups.forEach(wmg => {
-              const groupId = tempIdToGroupId[wmg.tempId];
-              if (!groupId) return;
-              const groupScaleData = wizardScaleFactors[wmg.tempId];
-              if (!groupScaleData) return;
-              const scaleFactorsObj: Record<string, Record<string, number>> = {};
-              Object.entries(groupScaleData).forEach(([modId, sizeMap]) => {
-                const numMap: Record<string, number> = {};
-                Object.entries(sizeMap).forEach(([sizeName, val]) => {
-                  const num = Number(val);
-                  if (Number.isFinite(num) && num >= 0) {
-                    numMap[sizeName] = Math.round(num * 100);
-                  }
-                });
-                if (Object.keys(numMap).length > 0) {
-                  scaleFactorsObj[modId] = numMap;
-                }
-              });
-              if (Object.keys(scaleFactorsObj).length > 0) {
-                setProductModifierScaleFactors(productId, groupId, JSON.stringify(scaleFactorsObj));
-              }
-            });
-          }, 300);
-        }, 200);
-      }
-
-      wizardBom.forEach(wb => {
-        const realVariantId = variantIdMap[wb.variantTempId];
-        if (realVariantId && wb.inventoryItemId && Number(wb.quantity) > 0) {
-          const bomData: any = {
+        if (directInvId && Number(retailDeductQty) > 0 && Number(retailDeductQty) !== 1) {
+          await addBomAsync({
             id: uid("bom"),
             sourceType: "VARIANT",
-            sourceId: realVariantId,
-            inventoryItemId: wb.inventoryItemId,
-            quantityDeducted: Number(wb.quantity),
-          };
-          if (wb.overrideModifierGroupId) {
-            const resolvedGroupId = tempIdToGroupId[wb.overrideModifierGroupId] || wb.overrideModifierGroupId;
-            if (resolvedGroupId) bomData.overrideModifierGroupId = resolvedGroupId;
-          }
-          addBom(bomData);
+            sourceId: retailVariantId,
+            inventoryItemId: directInvId,
+            quantityDeducted: Number(retailDeductQty),
+          });
         }
-      });
 
-      Object.entries(modifierSizeQtys).forEach(([modId, sizeMap]) => {
-        const mod = modifiers.find(m => m.id === modId);
-        if (!mod?.inventoryItemId) return;
-        const hasAnyQty = Object.values(sizeMap).some(v => Number(v) > 0);
-        if (!hasAnyQty) return;
-        const matrix: Record<string, number> = {};
-        wizardVariants.forEach(wv => {
-          const qty = Number(sizeMap[wv.name] || 0);
-          if (qty > 0) matrix[wv.name] = qty;
+        toast({ title: "Product created", description: `Retail item "${name.trim()}" added successfully` });
+      } else {
+        await addProductAsync({
+          id: productId,
+          name: name.trim(),
+          type: "RESTAURANT",
+          isComposite: true,
+          attributes: JSON.stringify({ tax_exempt: false, tags: tagList }),
         });
-        addBom({
-          id: uid("bom"),
-          sourceType: "MODIFIER",
-          sourceId: modId,
-          inventoryItemId: mod.inventoryItemId,
-          quantityDeducted: 1,
-          scaleFactorMatrix: JSON.stringify(matrix),
-        });
-      });
 
-      toast({ title: "Product created", description: `Prepared item "${name.trim()}" with ${wizardVariants.length} variant(s) added` });
+        const variantIdMap: Record<string, string> = {};
+        for (const wv of wizardVariants) {
+          const variantId = uid("var");
+          variantIdMap[wv.tempId] = variantId;
+          await addVariantAsync({
+            id: variantId,
+            productId,
+            sku: wv.sku.trim() || null,
+            name: wv.name.trim(),
+            basePrice: Math.round(Number(wv.basePrice) * 100),
+            config: null,
+          });
+        }
+
+        const linkedGroupIds: string[] = [];
+        const tempIdToGroupId: Record<string, string> = {};
+        for (const wmg of wizardModGroups) {
+          if (wmg.isNew && wmg.newName.trim()) {
+            const groupId = uid("mg");
+            await addModifierGroupAsync({
+              id: groupId,
+              name: wmg.newName.trim(),
+              minSelections: Number(wmg.newMin) || 0,
+              maxSelections: Number(wmg.newMax) || 0,
+            });
+            linkedGroupIds.push(groupId);
+            tempIdToGroupId[wmg.tempId] = groupId;
+          } else if (!wmg.isNew && wmg.groupId) {
+            linkedGroupIds.push(wmg.groupId);
+            tempIdToGroupId[wmg.tempId] = wmg.groupId;
+          }
+        }
+
+        if (linkedGroupIds.length > 0) {
+          await setProductModifierGroupsAsync(productId, linkedGroupIds);
+
+          for (const wmg of wizardModGroups) {
+            const groupId = tempIdToGroupId[wmg.tempId];
+            if (!groupId) continue;
+            const groupScaleData = wizardScaleFactors[wmg.tempId];
+            if (!groupScaleData) continue;
+            const scaleFactorsObj: Record<string, Record<string, number>> = {};
+            Object.entries(groupScaleData).forEach(([modId, sizeMap]) => {
+              const numMap: Record<string, number> = {};
+              Object.entries(sizeMap).forEach(([sizeName, val]) => {
+                const num = Number(val);
+                if (Number.isFinite(num) && num >= 0) {
+                  numMap[sizeName] = Math.round(num * 100);
+                }
+              });
+              if (Object.keys(numMap).length > 0) {
+                scaleFactorsObj[modId] = numMap;
+              }
+            });
+            if (Object.keys(scaleFactorsObj).length > 0) {
+              await setProductModifierScaleFactorsAsync(productId, groupId, JSON.stringify(scaleFactorsObj));
+            }
+          }
+        }
+
+        for (const wb of wizardBom) {
+          const realVariantId = variantIdMap[wb.variantTempId];
+          if (realVariantId && wb.inventoryItemId && Number(wb.quantity) > 0) {
+            const bomData: any = {
+              id: uid("bom"),
+              sourceType: "VARIANT",
+              sourceId: realVariantId,
+              inventoryItemId: wb.inventoryItemId,
+              quantityDeducted: Number(wb.quantity),
+            };
+            if (wb.overrideModifierGroupId) {
+              const resolvedGroupId = tempIdToGroupId[wb.overrideModifierGroupId] || wb.overrideModifierGroupId;
+              if (resolvedGroupId) bomData.overrideModifierGroupId = resolvedGroupId;
+            }
+            await addBomAsync(bomData);
+          }
+        }
+
+        for (const [modId, sizeMap] of Object.entries(modifierSizeQtys)) {
+          const mod = modifiers.find(m => m.id === modId);
+          if (!mod?.inventoryItemId) continue;
+          const hasAnyQty = Object.values(sizeMap).some(v => Number(v) > 0);
+          if (!hasAnyQty) continue;
+          const matrix: Record<string, number> = {};
+          wizardVariants.forEach(wv => {
+            const qty = Number(sizeMap[wv.name] || 0);
+            if (qty > 0) matrix[wv.name] = qty;
+          });
+          await addBomAsync({
+            id: uid("bom"),
+            sourceType: "MODIFIER",
+            sourceId: modId,
+            inventoryItemId: mod.inventoryItemId,
+            quantityDeducted: 1,
+            scaleFactorMatrix: JSON.stringify(matrix),
+          });
+        }
+
+        toast({ title: "Product created", description: `Prepared item "${name.trim()}" with ${wizardVariants.length} variant(s) added` });
+      }
+
+      handleClose();
+    } catch (err: any) {
+      toast({ title: "Error creating product", description: err?.message || "Please try again", variant: "destructive" });
+    } finally {
+      setIsCreating(false);
     }
-
-    handleClose();
   }
 
   function addVariantRow() {
@@ -1018,6 +1043,86 @@ export default function ProductWizard({
     );
   }
 
+  function renderRetailInventory() {
+    const filteredInv = inventory.filter(i =>
+      !retailInvSearch || i.name.toLowerCase().includes(retailInvSearch.toLowerCase())
+    );
+    return (
+      <div className="space-y-4">
+        <div>
+          <h3 className="font-semibold text-sm">Link Inventory Item</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">Optionally link this product to an existing inventory item to track stock. You can skip this step.</p>
+        </div>
+
+        {retailInventoryItemId ? (
+          <div className="rounded-xl border p-3 flex items-center justify-between bg-muted/30" data-testid="wizard-retail-inv-selected">
+            <div>
+              <p className="text-sm font-medium">{inventory.find(i => i.id === retailInventoryItemId)?.name || "Unknown"}</p>
+              <p className="text-xs text-muted-foreground">Linked inventory item</p>
+            </div>
+            <Button size="sm" variant="ghost" onClick={() => { setRetailInventoryItemId(""); setRetailDeductQty("1"); }} data-testid="wizard-retail-inv-clear">
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                value={retailInvSearch}
+                onChange={e => setRetailInvSearch(e.target.value)}
+                placeholder="Search inventory items…"
+                className="pl-9 rounded-xl"
+                data-testid="wizard-retail-inv-search"
+              />
+            </div>
+            <ScrollArea className="max-h-[200px]">
+              {filteredInv.length === 0 ? (
+                <p className="text-xs text-muted-foreground p-3 text-center">
+                  {inventory.length === 0 ? "No inventory items exist yet. Add items in Bulk Inventory first, or skip this step." : "No matches found."}
+                </p>
+              ) : (
+                <div className="space-y-1">
+                  {filteredInv.map(item => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setRetailInventoryItemId(item.id)}
+                      className="w-full text-left p-2 rounded-lg hover:bg-muted/50 transition-colors flex items-center justify-between cursor-pointer"
+                      data-testid={`wizard-retail-inv-item-${item.id}`}
+                    >
+                      <div>
+                        <p className="text-sm font-medium">{item.name}</p>
+                        <p className="text-xs text-muted-foreground">{item.unitOfMeasure} · Qty: {item.currentQuantity}</p>
+                      </div>
+                      <Package className="h-4 w-4 text-muted-foreground" />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </ScrollArea>
+          </div>
+        )}
+
+        {retailInventoryItemId && (
+          <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+            <Label className="text-xs text-muted-foreground" htmlFor="wizard-deduct-qty">Deduct Quantity Per Sale</Label>
+            <Input
+              id="wizard-deduct-qty"
+              value={retailDeductQty}
+              onChange={e => setRetailDeductQty(e.target.value)}
+              className="mt-1 rounded-xl w-32"
+              inputMode="decimal"
+              placeholder="1"
+              data-testid="wizard-retail-deduct-qty"
+            />
+            <p className="text-xs text-muted-foreground mt-1">How many units of this inventory item to deduct per sale (default: 1).</p>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   function renderReview() {
     const tagList = tags.split(",").map(t => t.trim()).filter(Boolean);
     return (
@@ -1041,14 +1146,27 @@ export default function ProductWizard({
           <Separator />
 
           {isRetail ? (
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <div>
-                <span className="text-muted-foreground text-xs">SKU</span>
-                <p className="font-mono" data-testid="wizard-review-sku">{sku || "—"}</p>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div>
+                  <span className="text-muted-foreground text-xs">SKU</span>
+                  <p className="font-mono" data-testid="wizard-review-sku">{sku || "—"}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground text-xs">Price</span>
+                  <p className="font-semibold" data-testid="wizard-review-price">{formatMoney(Math.round(Number(price) * 100))}</p>
+                </div>
               </div>
               <div>
-                <span className="text-muted-foreground text-xs">Price</span>
-                <p className="font-semibold" data-testid="wizard-review-price">{formatMoney(Math.round(Number(price) * 100))}</p>
+                <span className="text-muted-foreground text-xs">Inventory Link</span>
+                {retailInventoryItemId ? (
+                  <p className="text-sm" data-testid="wizard-review-inventory">
+                    {inventory.find(i => i.id === retailInventoryItemId)?.name || "Unknown"}
+                    {Number(retailDeductQty) !== 1 && ` (deduct ${retailDeductQty} per sale)`}
+                  </p>
+                ) : (
+                  <p className="text-sm text-muted-foreground" data-testid="wizard-review-inventory">None — no stock tracking</p>
+                )}
               </div>
             </div>
           ) : (
@@ -1163,7 +1281,11 @@ export default function ProductWizard({
 
   function renderCurrentStep() {
     if (step === 0) return renderStep0();
-    if (isRetail) return renderReview();
+    if (isRetail) {
+      if (step === 1) return renderRetailInventory();
+      if (step === 2) return renderReview();
+      return null;
+    }
     if (step === 1) return renderStep1Variants();
     if (step === 2) return renderStep2Recipes();
     if (step === 3) return renderStep3Modifiers();
@@ -1203,8 +1325,8 @@ export default function ProductWizard({
               Cancel
             </Button>
             {isLastStep ? (
-              <Button onClick={handleCreate} className="rounded-xl" disabled={!canAdvance()} data-testid="wizard-create">
-                <Check className="h-4 w-4 mr-1" /> Create Product
+              <Button onClick={handleCreate} className="rounded-xl" disabled={!canAdvance() || isCreating} data-testid="wizard-create">
+                {isCreating ? "Creating…" : <><Check className="h-4 w-4 mr-1" /> Create Product</>}
               </Button>
             ) : (
               <Button onClick={handleNext} className="rounded-xl" disabled={!canAdvance()} data-testid="wizard-next">
