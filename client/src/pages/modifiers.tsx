@@ -23,7 +23,7 @@ function uid(prefix: string) {
 export default function ModifiersPageContent({ isTab = false }: { isTab?: boolean }) {
   const { toast } = useToast();
   const {
-    modifierGroups, modifiers, products, variants,
+    modifierGroups, modifiers, products, variants, inventory,
     addModifierGroup, updateModifierGroup, deleteModifierGroup,
     addModifier, updateModifier, deleteModifier,
     productModifierLinks, setProductModifierGroups,
@@ -36,7 +36,7 @@ export default function ModifiersPageContent({ isTab = false }: { isTab?: boolea
 
   const [modifierDialogOpen, setModifierDialogOpen] = useState(false);
   const [editingModifier, setEditingModifier] = useState<Modifier | null>(null);
-  const [modifierForm, setModifierForm] = useState({ name: "", baseUpcharge: "", scaleRows: [] as { size: string; factor: string }[] });
+  const [modifierForm, setModifierForm] = useState({ name: "", baseUpcharge: "", scaleRows: [] as { size: string; factor: string }[], inventoryItemId: "", quantityPerUse: "" });
   const [modifierGroupId, setModifierGroupId] = useState<string>("");
 
   const [deleteTarget, setDeleteTarget] = useState<{ type: "group" | "modifier"; id: string; name: string } | null>(null);
@@ -102,7 +102,7 @@ export default function ModifiersPageContent({ isTab = false }: { isTab?: boolea
   function openCreateModifier(groupId: string) {
     setEditingModifier(null);
     setModifierGroupId(groupId);
-    setModifierForm({ name: "", baseUpcharge: "", scaleRows: [] });
+    setModifierForm({ name: "", baseUpcharge: "", scaleRows: [], inventoryItemId: "", quantityPerUse: "" });
     setModifierDialogOpen(true);
   }
 
@@ -117,6 +117,8 @@ export default function ModifiersPageContent({ isTab = false }: { isTab?: boolea
       name: mod.name,
       baseUpcharge: (mod.baseUpcharge / 100).toFixed(2),
       scaleRows: rows,
+      inventoryItemId: mod.inventoryItemId || "",
+      quantityPerUse: mod.quantityPerUse ? String(mod.quantityPerUse) : "",
     });
     setModifierDialogOpen(true);
   }
@@ -148,11 +150,20 @@ export default function ModifiersPageContent({ isTab = false }: { isTab?: boolea
       scaleFactorStr = JSON.stringify(obj);
     }
 
+    const invItemId = modifierForm.inventoryItemId.trim() || null;
+    const qtyPerUse = modifierForm.quantityPerUse.trim() ? parseFloat(modifierForm.quantityPerUse) : null;
+    if (invItemId && (qtyPerUse === null || !Number.isFinite(qtyPerUse) || qtyPerUse <= 0)) {
+      toast({ title: "Invalid quantity", description: "Enter a positive number for quantity per use." });
+      return;
+    }
+
     if (editingModifier) {
       updateModifier(editingModifier.id, {
         name,
         baseUpcharge: upcharge,
         scaleFactor: scaleFactorStr,
+        inventoryItemId: invItemId,
+        quantityPerUse: qtyPerUse,
       });
       toast({ title: "Modifier updated" });
     } else {
@@ -162,6 +173,8 @@ export default function ModifiersPageContent({ isTab = false }: { isTab?: boolea
         name,
         baseUpcharge: upcharge,
         scaleFactor: scaleFactorStr,
+        inventoryItemId: invItemId,
+        quantityPerUse: qtyPerUse,
       });
       toast({ title: "Modifier created" });
     }
@@ -314,14 +327,16 @@ export default function ModifiersPageContent({ isTab = false }: { isTab?: boolea
                         <TableHeader>
                           <TableRow>
                             <TableHead>Name</TableHead>
-                            <TableHead>Base Upcharge</TableHead>
-                            <TableHead>Scale Factor Matrix</TableHead>
+                            <TableHead>Upcharge</TableHead>
+                            <TableHead>Ingredient</TableHead>
+                            <TableHead>Scale Factors</TableHead>
                             <TableHead className="w-[100px]">Actions</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {groupModifiers.map(mod => {
                             const sfObj = parseScaleFactor(mod.scaleFactor);
+                            const invItem = mod.inventoryItemId ? inventory.find(i => i.id === mod.inventoryItemId) : null;
                             return (
                               <TableRow key={mod.id} data-testid={`row-modifier-${mod.id}`}>
                                 <TableCell data-testid={`text-modifier-name-${mod.id}`}>{mod.name}</TableCell>
@@ -330,6 +345,16 @@ export default function ModifiersPageContent({ isTab = false }: { isTab?: boolea
                                     <DollarSign className="h-3 w-3 text-muted-foreground" />
                                     {formatMoney(mod.baseUpcharge)}
                                   </span>
+                                </TableCell>
+                                <TableCell data-testid={`text-modifier-ingredient-${mod.id}`}>
+                                  {invItem ? (
+                                    <div className="text-xs">
+                                      <span className="font-medium">{invItem.name}</span>
+                                      <span className="text-muted-foreground ml-1">({mod.quantityPerUse} {invItem.unitOfMeasure})</span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-muted-foreground text-xs">—</span>
+                                  )}
                                 </TableCell>
                                 <TableCell data-testid={`text-modifier-scalefactor-${mod.id}`}>
                                   {sfObj ? (
@@ -456,6 +481,44 @@ export default function ModifiersPageContent({ isTab = false }: { isTab?: boolea
               />
               <p className="text-xs text-muted-foreground mt-1">Price adjustment in dollars (e.g., 0.50 = $0.50)</p>
             </div>
+            <Separator />
+            <div>
+              <Label className="text-sm font-medium mb-2 block">Ingredient Consumed</Label>
+              <p className="text-xs text-muted-foreground mb-3">Assign an inventory item that gets deducted each time this modifier is sold.</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label htmlFor="modifier-ingredient" className="text-xs text-muted-foreground">Inventory Item</Label>
+                  <select
+                    id="modifier-ingredient"
+                    value={modifierForm.inventoryItemId}
+                    onChange={e => setModifierForm(f => ({ ...f, inventoryItemId: e.target.value }))}
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring mt-1"
+                    data-testid="select-modifier-ingredient"
+                  >
+                    <option value="">None</option>
+                    {inventory.map(item => (
+                      <option key={item.id} value={item.id}>{item.name} ({item.unitOfMeasure})</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <Label htmlFor="modifier-qty" className="text-xs text-muted-foreground">Qty Per Use</Label>
+                  <Input
+                    id="modifier-qty"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={modifierForm.quantityPerUse}
+                    onChange={e => setModifierForm(f => ({ ...f, quantityPerUse: e.target.value }))}
+                    placeholder="1.0"
+                    className="mt-1"
+                    disabled={!modifierForm.inventoryItemId}
+                    data-testid="input-modifier-qty"
+                  />
+                </div>
+              </div>
+            </div>
+            <Separator />
             <div>
               <div className="flex items-center justify-between mb-2">
                 <Label>Size Pricing Multipliers</Label>

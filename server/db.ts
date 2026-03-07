@@ -62,6 +62,8 @@ function initTables() {
       base_upcharge INTEGER NOT NULL DEFAULT 0,
       scale_factor TEXT,
       pricing_logic TEXT,
+      inventory_item_id TEXT,
+      quantity_per_use REAL,
       FOREIGN KEY (modifier_group_id) REFERENCES modifier_groups(id) ON DELETE CASCADE
     );
 
@@ -157,4 +159,19 @@ function seedIfEmpty() {
 }
 
 initTables();
+
+function migrateModifiersColumns() {
+  try {
+    const cols = sqlite.prepare("PRAGMA table_info(modifiers)").all() as { name: string }[];
+    const colNames = cols.map(c => c.name);
+    if (!colNames.includes("inventory_item_id")) {
+      sqlite.exec("ALTER TABLE modifiers ADD COLUMN inventory_item_id TEXT");
+    }
+    if (!colNames.includes("quantity_per_use")) {
+      sqlite.exec("ALTER TABLE modifiers ADD COLUMN quantity_per_use REAL");
+    }
+  } catch {}
+}
+migrateModifiersColumns();
+
 seedIfEmpty();

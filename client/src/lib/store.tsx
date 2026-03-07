@@ -37,6 +37,8 @@ export type Modifier = {
   baseUpcharge: number;
   scaleFactor: string | null;
   pricingLogic: string | null;
+  inventoryItemId: string | null;
+  quantityPerUse: number | null;
 };
 
 export type InventoryItem = {

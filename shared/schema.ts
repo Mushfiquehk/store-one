@@ -42,6 +42,8 @@ export const modifiers = sqliteTable("modifiers", {
   baseUpcharge: integer("base_upcharge").notNull().default(0),
   scaleFactor: text("scale_factor"),
   pricingLogic: text("pricing_logic"),
+  inventoryItemId: text("inventory_item_id"),
+  quantityPerUse: real("quantity_per_use"),
 });
 
 export const inventoryItems = sqliteTable("inventory_items", {

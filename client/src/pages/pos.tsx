@@ -192,20 +192,27 @@ export default function PosPage() {
 
       line.modifiers.forEach(sel => {
         const modBomEntries = bom.filter(b => b.sourceType === "MODIFIER" && b.sourceId === sel.modifierId);
-        modBomEntries.forEach(entry => {
-          let qty = entry.quantityDeducted * sel.qty * line.qty;
-          if (entry.scaleFactorMatrix) {
-            try {
-              const sfm: Record<string, number> = JSON.parse(entry.scaleFactorMatrix);
-              const variant = variants.find(v => v.id === line.variantId);
-              if (variant) {
-                const scale = sfm[variant.name] ?? sfm[variant.id] ?? 1;
-                qty = entry.quantityDeducted * scale * sel.qty * line.qty;
-              }
-            } catch {}
+        if (modBomEntries.length > 0) {
+          modBomEntries.forEach(entry => {
+            let qty = entry.quantityDeducted * sel.qty * line.qty;
+            if (entry.scaleFactorMatrix) {
+              try {
+                const sfm: Record<string, number> = JSON.parse(entry.scaleFactorMatrix);
+                const variant = variants.find(v => v.id === line.variantId);
+                if (variant) {
+                  const scale = sfm[variant.name] ?? sfm[variant.id] ?? 1;
+                  qty = entry.quantityDeducted * scale * sel.qty * line.qty;
+                }
+              } catch {}
+            }
+            adjustInventory(entry.inventoryItemId, -qty);
+          });
+        } else {
+          const mod = modifiers.find(m => m.id === sel.modifierId);
+          if (mod?.inventoryItemId && mod.quantityPerUse) {
+            adjustInventory(mod.inventoryItemId, -(mod.quantityPerUse * sel.qty * line.qty));
           }
-          adjustInventory(entry.inventoryItemId, -qty);
-        });
+        }
       });
     });
 
