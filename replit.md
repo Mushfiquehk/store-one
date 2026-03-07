@@ -53,5 +53,12 @@ Full-stack fuel station point-of-sale application built with React + Express + S
 - **Wizard Modifier Size Grid**: When assigning an existing modifier group during product creation, a grid shows modifier options as rows × product sizes as columns for entering per-size ingredient quantities
 - **Price Calculation**: P_final = P_variant + Σ(U_modifier × S_price_matrix)
 
+## CRUD Capabilities
+- **Products**: Create (wizard), Edit (name/tags), Delete (with dependency warnings for sales, BOM)
+- **Variants**: Edit (name/SKU/price), Delete (with BOM warning, last-variant guard deletes product)
+- **Modifier Groups**: Create, Edit (name/rules), Delete (with confirmation)
+- **Modifiers**: Create, Edit (name/price/ingredient/scale factors), Delete (with confirmation)
+- **Inventory Items**: Create, Edit (name/unit/low stock alert), Delete (with warnings for BOM/modifier/variant references)
+
 ## Seed Data
 5 products (Regular 91, Premium 95, Ultimate 98, Diesel, Bottled Water), 5 variants with direct_inventory_id, 5 inventory items, 7 BOM entries, 2 employees

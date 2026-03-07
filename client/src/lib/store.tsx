@@ -132,6 +132,7 @@ type StoreContextType = {
   addInventoryItem: (data: Partial<InventoryItem>) => void;
   updateInventoryItem: (id: string, data: Partial<InventoryItem>) => void;
   adjustInventory: (id: string, delta: number) => void;
+  deleteInventoryItem: (id: string) => void;
 
   addBom: (data: Partial<BomEntry>) => void;
   updateBom: (id: string, data: Partial<BomEntry>) => void;
@@ -200,6 +201,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const addInvMut = useMutation({ mutationFn: api.inventory.create, onSuccess: () => inv([["inventory"]]) });
   const updateInvMut = useMutation({ mutationFn: ({ id, data }: { id: string; data: any }) => api.inventory.update(id, data), onSuccess: () => inv([["inventory"]]) });
   const adjustInvMut = useMutation({ mutationFn: ({ id, delta }: { id: string; delta: number }) => api.inventory.adjust(id, delta), onSuccess: () => inv([["inventory"]]) });
+  const deleteInvMut = useMutation({ mutationFn: api.inventory.delete, onSuccess: () => inv([["inventory"], ["bom"], ["variants"], ["modifiers"]]) });
 
   const addBomMut = useMutation({ mutationFn: api.bom.create, onSuccess: () => inv([["bom"]]) });
   const updateBomMut = useMutation({ mutationFn: ({ id, data }: { id: string; data: any }) => api.bom.update(id, data), onSuccess: () => inv([["bom"]]) });
@@ -248,6 +250,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     addInventoryItem: (data) => addInvMut.mutate(data),
     updateInventoryItem: (id, data) => updateInvMut.mutate({ id, data }),
     adjustInventory: (id, delta) => adjustInvMut.mutate({ id, delta }),
+    deleteInventoryItem: (id) => deleteInvMut.mutate(id),
 
     addBom: (data) => addBomMut.mutate(data),
     updateBom: (id, data) => updateBomMut.mutate({ id, data }),

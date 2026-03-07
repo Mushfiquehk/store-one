@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Package, Plus } from "lucide-react";
+import { Package, Plus, Pencil, Trash2 } from "lucide-react";
 import AppShell from "@/components/app-shell";
 import HelpDialog from "@/components/help-dialog";
 import { Button } from "@/components/ui/button";
@@ -9,8 +9,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { useStore } from "@/lib/store";
+import { useStore, type InventoryItem } from "@/lib/store";
 
 function uid(prefix: string) {
   return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`;
@@ -18,12 +20,18 @@ function uid(prefix: string) {
 
 export default function InventoryPage({ isTab = false }: { isTab?: boolean }) {
   const { toast } = useToast();
-  const { inventory, addInventoryItem, adjustInventory } = useStore();
+  const { inventory, bom, modifiers, variants, addInventoryItem, updateInventoryItem, adjustInventory, deleteInventoryItem } = useStore();
 
   const [draftName, setDraftName] = useState("");
   const [draftUnit, setDraftUnit] = useState("each");
   const [draftQty, setDraftQty] = useState("0");
   const [draftLowAlert, setDraftLowAlert] = useState("10");
+
+  const [editOpen, setEditOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
+  const [editForm, setEditForm] = useState({ name: "", unitOfMeasure: "", lowStockAlert: "" });
+
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string; deps: string[] } | null>(null);
 
   const lowStockCount = useMemo(() => {
     return inventory.filter(i => {
@@ -57,6 +65,46 @@ export default function InventoryPage({ isTab = false }: { isTab?: boolean }) {
     setDraftQty("0");
     setDraftLowAlert("10");
     toast({ title: "Inventory updated", description: `Added "${name}"` });
+  }
+
+  function openEditItem(item: InventoryItem) {
+    let lowAlert = "10";
+    try { lowAlert = String(JSON.parse(item.trackingConfig || "{}").low_stock_alert || 10); } catch {}
+    setEditingItem(item);
+    setEditForm({ name: item.name, unitOfMeasure: item.unitOfMeasure, lowStockAlert: lowAlert });
+    setEditOpen(true);
+  }
+
+  function handleSaveEdit() {
+    if (!editingItem) return;
+    const name = editForm.name.trim();
+    if (!name) { toast({ title: "Name required" }); return; }
+    const lowAlert = Number(editForm.lowStockAlert);
+    updateInventoryItem(editingItem.id, {
+      name,
+      unitOfMeasure: editForm.unitOfMeasure.trim() || "each",
+      trackingConfig: JSON.stringify({ low_stock_alert: Number.isFinite(lowAlert) ? lowAlert : 10 }),
+    });
+    toast({ title: "Item updated" });
+    setEditOpen(false);
+  }
+
+  function requestDelete(item: InventoryItem) {
+    const deps: string[] = [];
+    const bomCount = bom.filter(b => b.inventoryItemId === item.id).length;
+    if (bomCount > 0) deps.push(`${bomCount} recipe/BOM entry(ies)`);
+    const modCount = modifiers.filter(m => m.inventoryItemId === item.id).length;
+    if (modCount > 0) deps.push(`${modCount} modifier(s)`);
+    const varCount = variants.filter(v => v.directInventoryId === item.id).length;
+    if (varCount > 0) deps.push(`${varCount} variant(s) with direct link`);
+    setDeleteTarget({ id: item.id, name: item.name, deps });
+  }
+
+  function handleConfirmDelete() {
+    if (!deleteTarget) return;
+    deleteInventoryItem(deleteTarget.id);
+    toast({ title: "Item deleted" });
+    setDeleteTarget(null);
   }
 
   const Content = (
@@ -112,8 +160,9 @@ export default function InventoryPage({ isTab = false }: { isTab?: boolean }) {
               <TableHeader>
                 <TableRow>
                   <TableHead>Item</TableHead>
-                  <TableHead className="w-[140px] text-center">On hand</TableHead>
-                  <TableHead className="w-[220px] text-center">Adjust</TableHead>
+                  <TableHead className="w-[120px] text-center">On hand</TableHead>
+                  <TableHead className="w-[180px] text-center">Adjust</TableHead>
+                  <TableHead className="w-[80px]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -153,6 +202,16 @@ export default function InventoryPage({ isTab = false }: { isTab?: boolean }) {
                           <Button size="sm" className="h-8 rounded-xl" onClick={() => adjustInventory(i.id, 10)} data-testid={`button-inventory-plus10-${i.id}`}>+10</Button>
                         </div>
                       </TableCell>
+                      <TableCell>
+                        <div className="flex gap-1">
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditItem(i)} data-testid={`button-edit-inventory-${i.id}`}>
+                            <Pencil className="h-3 w-3" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => requestDelete(i)} data-testid={`button-delete-inventory-${i.id}`}>
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </TableCell>
                     </TableRow>
                   );
                 })}
@@ -161,6 +220,59 @@ export default function InventoryPage({ isTab = false }: { isTab?: boolean }) {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="max-w-md" data-testid="dialog-edit-inventory">
+          <DialogHeader>
+            <DialogTitle>Edit Inventory Item</DialogTitle>
+            <DialogDescription>Update the item details below.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="edit-inv-name">Item Name</Label>
+              <Input id="edit-inv-name" value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} data-testid="input-edit-inventory-name" />
+            </div>
+            <div>
+              <Label htmlFor="edit-inv-unit">Unit of Measure</Label>
+              <Input id="edit-inv-unit" value={editForm.unitOfMeasure} onChange={e => setEditForm(f => ({ ...f, unitOfMeasure: e.target.value }))} data-testid="input-edit-inventory-unit" />
+            </div>
+            <div>
+              <Label htmlFor="edit-inv-low">Low Stock Alert</Label>
+              <Input id="edit-inv-low" type="number" min="0" value={editForm.lowStockAlert} onChange={e => setEditForm(f => ({ ...f, lowStockAlert: e.target.value }))} data-testid="input-edit-inventory-low" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
+            <Button onClick={handleSaveEdit} data-testid="button-save-edit-inventory">Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={open => { if (!open) setDeleteTarget(null); }}>
+        <AlertDialogContent data-testid="dialog-confirm-delete-inventory">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Inventory Item?</AlertDialogTitle>
+            <AlertDialogDescription>
+              <span className="font-medium">{deleteTarget?.name}</span> will be permanently removed.
+              {deleteTarget?.deps && deleteTarget.deps.length > 0 ? (
+                <span className="block mt-2 text-destructive">
+                  Warning: This item is referenced by {deleteTarget.deps.join(", ")}. Deleting it may break those references.
+                </span>
+              ) : (
+                <span className="block mt-2 text-muted-foreground">
+                  This item is not referenced by any recipes or modifiers.
+                </span>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90" data-testid="button-confirm-delete-inventory">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 
