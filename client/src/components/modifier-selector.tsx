@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
-import { type Product, type Variant, type ModifierGroup, type Modifier, type ProductModifierGroupSetting } from "@/lib/store";
+import { type Product, type Variant, type ModifierGroup, type Modifier } from "@/lib/store";
 
 function formatMoney(cents: number) {
   return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(cents / 100);
@@ -24,7 +24,6 @@ type Props = {
   modifiers: Modifier[];
   linkedGroupIds: string[];
   productModifierScaleFactors?: Record<string, string | null>;
-  productModifierGroupSettings?: ProductModifierGroupSetting[];
   onAddToCart: (variantId: string, modifiers: SelectedModifier[]) => void;
 };
 
@@ -37,7 +36,6 @@ export default function ModifierSelector({
   modifiers,
   linkedGroupIds,
   productModifierScaleFactors = {},
-  productModifierGroupSettings = [],
   onAddToCart,
 }: Props) {
   const [selectedVariantId, setSelectedVariantId] = useState<string>("");
@@ -61,24 +59,8 @@ export default function ModifierSelector({
     return map;
   }, [groups, modifiers]);
 
-  function getProductGroupSetting(groupId: string): ProductModifierGroupSetting | undefined {
-    return productModifierGroupSettings.find(s => s.productId === product.id && s.modifierGroupId === groupId);
-  }
-
-  function getEffectiveBaseUpcharge(mod: Modifier): number {
-    const setting = getProductGroupSetting(mod.modifierGroupId);
-    if (setting?.modifierPrices) {
-      try {
-        const prices: Record<string, number> = JSON.parse(setting.modifierPrices);
-        if (prices[mod.id] !== undefined) return prices[mod.id];
-      } catch {}
-    }
-    return mod.baseUpcharge;
-  }
-
   function getModifierPrice(mod: Modifier): number {
-    const basePrice = getEffectiveBaseUpcharge(mod);
-    if (!activeVariant) return basePrice;
+    if (!activeVariant) return mod.baseUpcharge;
     const modGroup = mod.modifierGroupId;
     const sfKey = `${product.id}::${modGroup}`;
     const sfJson = productModifierScaleFactors[sfKey];
@@ -89,11 +71,11 @@ export default function ModifierSelector({
         if (modScaleFactors) {
           const variantName = activeVariant.name;
           if (modScaleFactors[variantName] !== undefined) {
-            return Math.round(basePrice * modScaleFactors[variantName]);
+            return Math.round(mod.baseUpcharge * modScaleFactors[variantName]);
           }
           const variantId = activeVariant.id;
           if (modScaleFactors[variantId] !== undefined) {
-            return Math.round(basePrice * modScaleFactors[variantId]);
+            return Math.round(mod.baseUpcharge * modScaleFactors[variantId]);
           }
         }
       } catch {}
@@ -103,15 +85,15 @@ export default function ModifierSelector({
         const sf: Record<string, number> = JSON.parse(mod.scaleFactor);
         const variantName = activeVariant.name;
         if (sf[variantName] !== undefined) {
-          return Math.round(basePrice * sf[variantName]);
+          return Math.round(mod.baseUpcharge * sf[variantName]);
         }
         const variantId = activeVariant.id;
         if (sf[variantId] !== undefined) {
-          return Math.round(basePrice * sf[variantId]);
+          return Math.round(mod.baseUpcharge * sf[variantId]);
         }
       } catch {}
     }
-    return basePrice;
+    return mod.baseUpcharge;
   }
 
   function getSelectionCount(groupId: string): number {
@@ -119,24 +101,15 @@ export default function ModifierSelector({
     return groupMods.reduce((sum, m) => sum + (selections[m.id] || 0), 0);
   }
 
-  function getEffectiveMinMax(group: ModifierGroup): { min: number; max: number } {
-    const setting = getProductGroupSetting(group.id);
-    const min = setting?.minSelections ?? group.minSelections;
-    const max = setting?.maxSelections ?? group.maxSelections;
-    return { min, max };
-  }
-
   function isGroupValid(group: ModifierGroup): boolean {
     const count = getSelectionCount(group.id);
-    const { min } = getEffectiveMinMax(group);
-    if (min > 0 && count < min) return false;
+    if (group.minSelections > 0 && count < group.minSelections) return false;
     return true;
   }
 
   function canAddMore(group: ModifierGroup): boolean {
-    const { max } = getEffectiveMinMax(group);
-    if (max === 0) return true;
-    return getSelectionCount(group.id) < max;
+    if (group.maxSelections === 0) return true;
+    return getSelectionCount(group.id) < group.maxSelections;
   }
 
   const allGroupsValid = groups.every(isGroupValid);
@@ -239,15 +212,14 @@ export default function ModifierSelector({
             const groupMods = modifiersByGroup[group.id] || [];
             const count = getSelectionCount(group.id);
             const valid = isGroupValid(group);
-            const { min: effMin, max: effMax } = getEffectiveMinMax(group);
-            const maxReached = effMax > 0 && count >= effMax;
+            const maxReached = group.maxSelections > 0 && count >= group.maxSelections;
 
             return (
               <div key={group.id} data-testid={`section-modifier-group-${group.id}`}>
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="text-sm font-semibold" data-testid={`text-group-title-${group.id}`}>
                     {group.name}
-                    {effMin > 0 && <span className="text-destructive ml-1">*</span>}
+                    {group.minSelections > 0 && <span className="text-destructive ml-1">*</span>}
                   </h3>
                   <div className="flex items-center gap-1.5">
                     <Badge
@@ -255,8 +227,8 @@ export default function ModifierSelector({
                       className="text-[10px]"
                       data-testid={`badge-group-status-${group.id}`}
                     >
-                      {count} / {effMax === 0 ? "∞" : effMax}
-                      {effMin > 0 && ` (min ${effMin})`}
+                      {count} / {group.maxSelections === 0 ? "∞" : group.maxSelections}
+                      {group.minSelections > 0 && ` (min ${group.minSelections})`}
                     </Badge>
                   </div>
                 </div>

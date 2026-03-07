@@ -65,8 +65,6 @@ function ProductEditorInner({
     setProductModifierGroups,
     productModifierScaleFactors,
     setProductModifierScaleFactors,
-    productModifierGroupSettings,
-    updateProductModifierGroupSettings,
   } = useStore();
 
   const productVariants = useMemo(() => variants.filter(v => v.productId === product.id), [variants, product.id]);
@@ -446,18 +444,12 @@ function ProductEditorInner({
               const group = modifierGroups.find(mg => mg.id === gid);
               if (!group) return null;
               const groupMods = modifiers.filter(m => m.modifierGroupId === gid);
-              const setting = productModifierGroupSettings.find(s => s.productId === product.id && s.modifierGroupId === gid);
-              const effectiveMin = setting?.minSelections ?? group.minSelections;
-              const effectiveMax = setting?.maxSelections ?? group.maxSelections;
-              const modPrices: Record<string, number> = setting?.modifierPrices ? JSON.parse(setting.modifierPrices) : {};
-              const overrideInvId = setting?.overrideInventoryItemId || null;
-              const overrideInvItem = overrideInvId ? inventory.find(i => i.id === overrideInvId) : null;
               return (
-                <div key={gid} className="rounded-xl border p-3 space-y-2" data-testid={`editor-mod-group-${gid}`}>
+                <div key={gid} className="rounded-xl border p-3" data-testid={`editor-mod-group-${gid}`}>
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm font-medium">{group.name}</p>
-                      <p className="text-xs text-muted-foreground">Group default: min {group.minSelections}, max {group.maxSelections}</p>
+                      <p className="text-xs text-muted-foreground">Min: {group.minSelections}, Max: {group.maxSelections}</p>
                     </div>
                     <div className="flex items-center gap-1">
                       {productVariants.length > 0 && groupMods.length > 0 && (
@@ -470,50 +462,13 @@ function ProductEditorInner({
                       </Button>
                     </div>
                   </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <Label className="text-[10px]">Product Min</Label>
-                      <Input type="number" min={0} className="h-7 text-xs" value={effectiveMin} onChange={e => updateProductModifierGroupSettings(product.id, gid, { minSelections: Number(e.target.value) })} data-testid={`editor-mod-min-${gid}`} />
-                    </div>
-                    <div>
-                      <Label className="text-[10px]">Product Max</Label>
-                      <Input type="number" min={0} className="h-7 text-xs" value={effectiveMax} onChange={e => updateProductModifierGroupSettings(product.id, gid, { maxSelections: Number(e.target.value) })} data-testid={`editor-mod-max-${gid}`} />
-                    </div>
-                  </div>
-
-                  <div>
-                    <Label className="text-[10px]">Recipe Override Ingredient</Label>
-                    <Select value={overrideInvId || "none"} onValueChange={v => updateProductModifierGroupSettings(product.id, gid, { overrideInventoryItemId: v === "none" ? null : v })}>
-                      <SelectTrigger className="h-7 text-xs" data-testid={`editor-mod-override-${gid}`}>
-                        <SelectValue placeholder="None" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">None</SelectItem>
-                        {inventory.map(inv => (
-                          <SelectItem key={inv.id} value={inv.id}>{inv.name}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
                   {groupMods.length > 0 && (
-                    <div className="space-y-1">
-                      <Label className="text-[10px]">Modifier Prices (product-level)</Label>
-                      {groupMods.map(m => {
-                        const prodPrice = modPrices[m.id] ?? "";
-                        return (
-                          <div key={m.id} className="flex items-center gap-2">
-                            <span className="text-xs flex-1">{m.name} <span className="text-muted-foreground">(default +{formatMoney(m.baseUpcharge)})</span></span>
-                            <Input type="number" min={0} step={0.01} className="h-7 text-xs w-20" placeholder="—" value={prodPrice ? (Number(prodPrice) / 100).toFixed(2) : ""} onChange={e => {
-                              const val = e.target.value;
-                              const newPrices = { ...modPrices };
-                              if (val === "" || val === "0") { delete newPrices[m.id]; } else { newPrices[m.id] = Math.round(Number(val) * 100); }
-                              updateProductModifierGroupSettings(product.id, gid, { modifierPrices: JSON.stringify(newPrices) });
-                            }} data-testid={`editor-mod-price-${gid}-${m.id}`} />
-                          </div>
-                        );
-                      })}
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {groupMods.map(m => (
+                        <Badge key={m.id} variant="outline" className="text-xs">
+                          {m.name} {m.baseUpcharge > 0 && `+${formatMoney(m.baseUpcharge)}`}
+                        </Badge>
+                      ))}
                     </div>
                   )}
                 </div>

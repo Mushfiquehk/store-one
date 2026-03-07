@@ -92,19 +92,6 @@ export async function registerRoutes(
     storage.setProductModifierScaleFactors(req.params.productId, req.params.groupId, req.body.scaleFactors ?? null);
     res.json({ ok: true });
   });
-  app.get("/api/product-modifier-group-settings", (_req, res) => {
-    res.json(storage.getAllProductModifierGroupSettings());
-  });
-  app.put("/api/products/:productId/modifier-groups/:groupId/settings", (req, res) => {
-    const { minSelections, maxSelections, modifierPrices, overrideInventoryItemId } = req.body;
-    storage.updateProductModifierGroupSettings(req.params.productId, req.params.groupId, {
-      minSelections: minSelections ?? undefined,
-      maxSelections: maxSelections ?? undefined,
-      modifierPrices: modifierPrices ?? undefined,
-      overrideInventoryItemId: overrideInventoryItemId ?? undefined,
-    });
-    res.json({ ok: true });
-  });
 
   // --- Modifiers ---
   app.get("/api/modifiers", (req, res) => {

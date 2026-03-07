@@ -36,8 +36,6 @@ export interface IStorage {
   setProductModifierGroups(productId: string, groupIds: string[]): void;
   getAllProductModifierScaleFactors(): Record<string, string | null>;
   setProductModifierScaleFactors(productId: string, modifierGroupId: string, scaleFactors: string | null): void;
-  getAllProductModifierGroupSettings(): { productId: string; modifierGroupId: string; minSelections: number | null; maxSelections: number | null; modifierPrices: string | null; overrideInventoryItemId: string | null }[];
-  updateProductModifierGroupSettings(productId: string, modifierGroupId: string, data: { minSelections?: number | null; maxSelections?: number | null; modifierPrices?: string | null; overrideInventoryItemId?: string | null }): void;
 
   getModifiers(groupId?: string): Modifier[];
   createModifier(data: InsertModifier): Modifier;
@@ -143,21 +141,16 @@ export class SqliteStorage implements IStorage {
   setProductModifierGroups(productId: string, groupIds: string[]): void {
     const existingRows = db.select().from(productModifierGroups)
       .where(eq(productModifierGroups.productId, productId)).all();
-    const existingData: Record<string, typeof existingRows[0]> = {};
+    const existingScaleFactors: Record<string, string | null> = {};
     for (const row of existingRows) {
-      existingData[row.modifierGroupId] = row;
+      existingScaleFactors[row.modifierGroupId] = row.scaleFactors;
     }
     db.delete(productModifierGroups).where(eq(productModifierGroups.productId, productId)).run();
     for (const gid of groupIds) {
-      const prev = existingData[gid];
       db.insert(productModifierGroups).values({
         productId,
         modifierGroupId: gid,
-        scaleFactors: prev?.scaleFactors || null,
-        minSelections: prev?.minSelections ?? null,
-        maxSelections: prev?.maxSelections ?? null,
-        modifierPrices: prev?.modifierPrices || null,
-        overrideInventoryItemId: prev?.overrideInventoryItemId || null,
+        scaleFactors: existingScaleFactors[gid] || null,
       }).run();
     }
   }
@@ -176,24 +169,6 @@ export class SqliteStorage implements IStorage {
   setProductModifierScaleFactors(productId: string, modifierGroupId: string, scaleFactors: string | null): void {
     db.update(productModifierGroups)
       .set({ scaleFactors })
-      .where(sql`${productModifierGroups.productId} = ${productId} AND ${productModifierGroups.modifierGroupId} = ${modifierGroupId}`)
-      .run();
-  }
-
-  getAllProductModifierGroupSettings(): { productId: string; modifierGroupId: string; minSelections: number | null; maxSelections: number | null; modifierPrices: string | null; overrideInventoryItemId: string | null }[] {
-    return db.select({
-      productId: productModifierGroups.productId,
-      modifierGroupId: productModifierGroups.modifierGroupId,
-      minSelections: productModifierGroups.minSelections,
-      maxSelections: productModifierGroups.maxSelections,
-      modifierPrices: productModifierGroups.modifierPrices,
-      overrideInventoryItemId: productModifierGroups.overrideInventoryItemId,
-    }).from(productModifierGroups).all();
-  }
-
-  updateProductModifierGroupSettings(productId: string, modifierGroupId: string, data: { minSelections?: number | null; maxSelections?: number | null; modifierPrices?: string | null; overrideInventoryItemId?: string | null }): void {
-    db.update(productModifierGroups)
-      .set(data)
       .where(sql`${productModifierGroups.productId} = ${productId} AND ${productModifierGroups.modifierGroupId} = ${modifierGroupId}`)
       .run();
   }

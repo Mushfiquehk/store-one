@@ -43,12 +43,6 @@ export const api = {
         method: "PUT",
         body: JSON.stringify({ scaleFactors }),
       }),
-    listAllSettings: () => request<any[]>(`/product-modifier-group-settings`),
-    updateSettings: (productId: string, groupId: string, data: any) =>
-      request<any>(`/products/${productId}/modifier-groups/${groupId}/settings`, {
-        method: "PUT",
-        body: JSON.stringify(data),
-      }),
   },
   modifiers: {
     list: (groupId?: string) => request<any[]>(`/modifiers${groupId ? `?groupId=${groupId}` : ""}`),

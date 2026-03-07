@@ -34,10 +34,6 @@ export const productModifierGroups = sqliteTable("product_modifier_groups", {
   productId: text("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
   modifierGroupId: text("modifier_group_id").notNull().references(() => modifierGroups.id, { onDelete: "cascade" }),
   scaleFactors: text("scale_factors"),
-  minSelections: integer("min_selections"),
-  maxSelections: integer("max_selections"),
-  modifierPrices: text("modifier_prices"),
-  overrideInventoryItemId: text("override_inventory_item_id"),
 });
 
 export const modifiers = sqliteTable("modifiers", {

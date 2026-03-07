@@ -51,10 +51,6 @@ function initTables() {
       product_id TEXT NOT NULL,
       modifier_group_id TEXT NOT NULL,
       scale_factors TEXT,
-      min_selections INTEGER,
-      max_selections INTEGER,
-      modifier_prices TEXT,
-      override_inventory_item_id TEXT,
       PRIMARY KEY (product_id, modifier_group_id),
       FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
       FOREIGN KEY (modifier_group_id) REFERENCES modifier_groups(id) ON DELETE CASCADE
@@ -186,18 +182,6 @@ function migrateProductModifierGroupsColumns() {
     const colNames = cols.map(c => c.name);
     if (!colNames.includes("scale_factors")) {
       sqlite.exec("ALTER TABLE product_modifier_groups ADD COLUMN scale_factors TEXT");
-    }
-    if (!colNames.includes("min_selections")) {
-      sqlite.exec("ALTER TABLE product_modifier_groups ADD COLUMN min_selections INTEGER");
-    }
-    if (!colNames.includes("max_selections")) {
-      sqlite.exec("ALTER TABLE product_modifier_groups ADD COLUMN max_selections INTEGER");
-    }
-    if (!colNames.includes("modifier_prices")) {
-      sqlite.exec("ALTER TABLE product_modifier_groups ADD COLUMN modifier_prices TEXT");
-    }
-    if (!colNames.includes("override_inventory_item_id")) {
-      sqlite.exec("ALTER TABLE product_modifier_groups ADD COLUMN override_inventory_item_id TEXT");
     }
   } catch {}
 }

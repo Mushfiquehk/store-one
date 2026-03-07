@@ -29,7 +29,7 @@ export default function PosPage() {
   const { toast } = useToast();
   const {
     products, variants, inventory, bom, sales, modifierGroups, modifiers,
-    productModifierLinks, productModifierScaleFactors, productModifierGroupSettings, addSale, adjustInventory, integrations, isLoading,
+    productModifierLinks, productModifierScaleFactors, addSale, adjustInventory, integrations, isLoading,
   } = useStore();
 
   const [taxRatePct, setTaxRatePct] = useState(8.25);
@@ -120,22 +120,10 @@ export default function PosPage() {
     setCart([]);
   }
 
-  function getEffectiveBaseUpcharge(mod: typeof modifiers[0], productId: string): number {
-    const setting = productModifierGroupSettings.find(s => s.productId === productId && s.modifierGroupId === mod.modifierGroupId);
-    if (setting?.modifierPrices) {
-      try {
-        const prices: Record<string, number> = JSON.parse(setting.modifierPrices);
-        if (prices[mod.id] !== undefined) return prices[mod.id];
-      } catch {}
-    }
-    return mod.baseUpcharge;
-  }
-
   function getModifierPrice(mod: typeof modifiers[0], variantId: string): number {
     const variant = variants.find(v => v.id === variantId);
     if (variant) {
       const productId = variant.productId;
-      const basePrice = getEffectiveBaseUpcharge(mod, productId);
       const sfKey = `${productId}::${mod.modifierGroupId}`;
       const sfJson = productModifierScaleFactors[sfKey];
       if (sfJson) {
@@ -143,19 +131,18 @@ export default function PosPage() {
           const allSf: Record<string, Record<string, number>> = JSON.parse(sfJson);
           const modSf = allSf[mod.id];
           if (modSf) {
-            if (modSf[variant.name] !== undefined) return Math.round(basePrice * modSf[variant.name]);
-            if (modSf[variant.id] !== undefined) return Math.round(basePrice * modSf[variant.id]);
+            if (modSf[variant.name] !== undefined) return Math.round(mod.baseUpcharge * modSf[variant.name]);
+            if (modSf[variant.id] !== undefined) return Math.round(mod.baseUpcharge * modSf[variant.id]);
           }
         } catch {}
       }
       if (mod.scaleFactor) {
         try {
           const sf: Record<string, number> = JSON.parse(mod.scaleFactor);
-          if (sf[variant.name] !== undefined) return Math.round(basePrice * sf[variant.name]);
-          if (sf[variant.id] !== undefined) return Math.round(basePrice * sf[variant.id]);
+          if (sf[variant.name] !== undefined) return Math.round(mod.baseUpcharge * sf[variant.name]);
+          if (sf[variant.id] !== undefined) return Math.round(mod.baseUpcharge * sf[variant.id]);
         } catch {}
       }
-      return basePrice;
     }
     return mod.baseUpcharge;
   }
@@ -201,14 +188,6 @@ export default function PosPage() {
         }).filter(Boolean)
       );
 
-      const productId = variants.find(v => v.id === line.variantId)?.productId;
-      const overriddenInventoryIds = new Set<string>();
-      if (productId) {
-        productModifierGroupSettings
-          .filter(s => s.productId === productId && s.overrideInventoryItemId && selectedModGroupIds.has(s.modifierGroupId))
-          .forEach(s => overriddenInventoryIds.add(s.overrideInventoryItemId!));
-      }
-
       if (bomEntries.length === 0) {
         const variant = variants.find(v => v.id === line.variantId);
         if (variant?.directInventoryId) {
@@ -217,9 +196,6 @@ export default function PosPage() {
       } else {
         bomEntries.forEach(entry => {
           if (entry.overrideModifierGroupId && selectedModGroupIds.has(entry.overrideModifierGroupId)) {
-            return;
-          }
-          if (overriddenInventoryIds.has(entry.inventoryItemId)) {
             return;
           }
           let qty = entry.quantityDeducted * line.qty;
@@ -580,7 +556,6 @@ export default function PosPage() {
             modifiers={modifiers}
             linkedGroupIds={getLinkedGroupIds(modSelectorProduct.id)}
             productModifierScaleFactors={productModifierScaleFactors}
-            productModifierGroupSettings={productModifierGroupSettings}
             onAddToCart={handleModifierAdd}
           />
         )}
