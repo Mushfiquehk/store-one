@@ -14,7 +14,7 @@ Full-stack fuel station point-of-sale application built with React + Express + S
 - `products` — catalog items with `type` (RETAIL/RESTAURANT), `is_composite` flag, and JSON `attributes` (tags, tax_exempt)
 - `variants` — SKU-level pricing with `direct_inventory_id` for 1:1 retail mapping
 - `modifier_groups` — groupings for modifiers with `min_selections` / `max_selections` constraints
-- `modifiers` — individual options with `base_upcharge` (cents) and `scale_factor` JSON (size-based pricing matrix)
+- `modifiers` — individual options with `base_upcharge` (cents), `scale_factor` JSON (size-based pricing matrix), `inventory_item_id` (assigned ingredient), and `quantity_per_use` (deduction amount)
 - `product_modifier_groups` — many-to-many link between products and modifier groups
 - `inventory_items` — raw materials/stock with current_quantity and tracking_config JSON
 - `bill_of_materials` — links variants/modifiers to inventory items with `quantity_deducted` and `scale_factor_matrix` JSON
@@ -49,6 +49,8 @@ Full-stack fuel station point-of-sale application built with React + Express + S
 - **Size-Scaled Pricing**: Modifier upcharges scale by variant size via `scaleFactor` JSON
 - **Auto-Scale BOM**: Define base recipe for one size, proportionally scale to other sizes
 - **POS Modifier Selection**: Composite items prompt modifier selection with min/max validation
+- **Modifier Ingredient Assignment**: Each modifier option can have an inventory item + quantity per use; POS deducts via BOM entries first, then falls back to modifier's own inventoryItemId
+- **Wizard Modifier Size Grid**: When assigning an existing modifier group during product creation, a grid shows modifier options as rows × product sizes as columns for entering per-size ingredient quantities
 - **Price Calculation**: P_final = P_variant + Σ(U_modifier × S_price_matrix)
 
 ## Seed Data

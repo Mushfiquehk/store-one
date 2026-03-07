@@ -35,8 +35,6 @@ type WizardModifierGroup = {
   newName: string;
   newMin: string;
   newMax: string;
-  sizeScaled: boolean;
-  scaleFactors: Record<string, string>;
 };
 
 type WizardBomEntry = {
@@ -86,6 +84,7 @@ export default function ProductWizard({
   ]);
 
   const [wizardModGroups, setWizardModGroups] = useState<WizardModifierGroup[]>([]);
+  const [modifierSizeQtys, setModifierSizeQtys] = useState<Record<string, Record<string, string>>>({});
   const [wizardBom, setWizardBom] = useState<WizardBomEntry[]>([]);
   const [bomSearch, setBomSearch] = useState("");
   const [selectedBomVariant, setSelectedBomVariant] = useState<string | null>(null);
@@ -109,6 +108,7 @@ export default function ProductWizard({
       { tempId: uid("tmp"), name: "Large", sku: "", basePrice: "" },
     ]);
     setWizardModGroups([]);
+    setModifierSizeQtys({});
     setWizardBom([]);
     setBomSearch("");
     setSelectedBomVariant(null);
@@ -245,6 +245,26 @@ export default function ProductWizard({
         }
       });
 
+      Object.entries(modifierSizeQtys).forEach(([modId, sizeMap]) => {
+        const mod = modifiers.find(m => m.id === modId);
+        if (!mod?.inventoryItemId) return;
+        const hasAnyQty = Object.values(sizeMap).some(v => Number(v) > 0);
+        if (!hasAnyQty) return;
+        const matrix: Record<string, number> = {};
+        wizardVariants.forEach(wv => {
+          const qty = Number(sizeMap[wv.name] || 0);
+          if (qty > 0) matrix[wv.name] = qty;
+        });
+        addBom({
+          id: uid("bom"),
+          sourceType: "MODIFIER",
+          sourceId: modId,
+          inventoryItemId: mod.inventoryItemId,
+          quantityDeducted: 1,
+          scaleFactorMatrix: JSON.stringify(matrix),
+        });
+      });
+
       toast({ title: "Product created", description: `Prepared item "${name.trim()}" with ${wizardVariants.length} variant(s) added` });
     }
 
@@ -272,8 +292,6 @@ export default function ProductWizard({
       newName: "",
       newMin: "0",
       newMax: "5",
-      sizeScaled: false,
-      scaleFactors: {},
     }]);
   }
 
@@ -283,6 +301,23 @@ export default function ProductWizard({
 
   function updateModGroupRow(tempId: string, updates: Partial<WizardModifierGroup>) {
     setWizardModGroups(prev => prev.map(m => m.tempId === tempId ? { ...m, ...updates } : m));
+  }
+
+  function updateModSizeQty(modifierId: string, variantName: string, value: string) {
+    setModifierSizeQtys(prev => ({
+      ...prev,
+      [modifierId]: { ...(prev[modifierId] || {}), [variantName]: value },
+    }));
+  }
+
+  function getResolvedGroupId(wmg: WizardModifierGroup): string | null {
+    return wmg.isNew ? null : wmg.groupId || null;
+  }
+
+  function getGroupModifiers(wmg: WizardModifierGroup): typeof modifiers {
+    const gid = getResolvedGroupId(wmg);
+    if (!gid) return [];
+    return modifiers.filter(m => m.modifierGroupId === gid);
   }
 
   function addBomEntry(variantTempId: string, inventoryItemId: string) {
@@ -528,13 +563,13 @@ export default function ProductWizard({
         <div className="flex items-center justify-between">
           <div>
             <h3 className="font-semibold text-sm">Modifier Groups</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">Attach existing modifier groups or create new ones.</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Attach existing modifier groups and set quantities per size.</p>
           </div>
           <Button size="sm" variant="outline" onClick={addModGroupRow} className="rounded-xl" data-testid="wizard-add-mod-group">
             <Plus className="h-3 w-3 mr-1" /> Add Group
           </Button>
         </div>
-        <ScrollArea className="max-h-[300px]">
+        <ScrollArea className="max-h-[400px]">
           {wizardModGroups.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 text-muted-foreground border-2 border-dashed rounded-xl">
               <p className="text-sm">No modifier groups added yet.</p>
@@ -542,75 +577,146 @@ export default function ProductWizard({
             </div>
           ) : (
             <div className="space-y-3">
-              {wizardModGroups.map((wmg, idx) => (
-                <Card key={wmg.tempId} className="shadow-sm" data-testid={`wizard-mod-group-${idx}`}>
-                  <CardContent className="p-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <Label className="text-xs flex items-center gap-2">
-                          <Switch
-                            checked={wmg.isNew}
-                            onCheckedChange={v => updateModGroupRow(wmg.tempId, { isNew: v })}
-                            data-testid={`wizard-mod-new-toggle-${idx}`}
-                          />
-                          {wmg.isNew ? "Create New" : "Use Existing"}
-                        </Label>
-                      </div>
-                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => removeModGroupRow(wmg.tempId)} data-testid={`wizard-mod-remove-${idx}`}>
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </div>
-                    {wmg.isNew ? (
-                      <div className="grid gap-3 sm:grid-cols-3">
-                        <div>
-                          <Label className="text-xs text-muted-foreground">Group Name</Label>
-                          <Input
-                            value={wmg.newName}
-                            onChange={e => updateModGroupRow(wmg.tempId, { newName: e.target.value })}
-                            className="mt-1 h-8 rounded-lg text-sm"
-                            placeholder="e.g., Milk Type"
-                            data-testid={`wizard-mod-name-${idx}`}
-                          />
+              {wizardModGroups.map((wmg, idx) => {
+                const groupMods = getGroupModifiers(wmg);
+                const groupName = wmg.isNew
+                  ? wmg.newName || "New Group"
+                  : modifierGroups.find(mg => mg.id === wmg.groupId)?.name || "";
+                return (
+                  <Card key={wmg.tempId} className="shadow-sm" data-testid={`wizard-mod-group-${idx}`}>
+                    <CardContent className="p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <Label className="text-xs flex items-center gap-2">
+                            <Switch
+                              checked={wmg.isNew}
+                              onCheckedChange={v => updateModGroupRow(wmg.tempId, { isNew: v })}
+                              data-testid={`wizard-mod-new-toggle-${idx}`}
+                            />
+                            {wmg.isNew ? "Create New" : "Use Existing"}
+                          </Label>
                         </div>
-                        <div>
-                          <Label className="text-xs text-muted-foreground">Min Selections</Label>
-                          <Input
-                            value={wmg.newMin}
-                            onChange={e => updateModGroupRow(wmg.tempId, { newMin: e.target.value })}
-                            className="mt-1 h-8 rounded-lg text-sm"
-                            inputMode="numeric"
-                            data-testid={`wizard-mod-min-${idx}`}
-                          />
-                        </div>
-                        <div>
-                          <Label className="text-xs text-muted-foreground">Max Selections</Label>
-                          <Input
-                            value={wmg.newMax}
-                            onChange={e => updateModGroupRow(wmg.tempId, { newMax: e.target.value })}
-                            className="mt-1 h-8 rounded-lg text-sm"
-                            inputMode="numeric"
-                            data-testid={`wizard-mod-max-${idx}`}
-                          />
-                        </div>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => removeModGroupRow(wmg.tempId)} data-testid={`wizard-mod-remove-${idx}`}>
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
                       </div>
-                    ) : (
-                      <div>
-                        <Label className="text-xs text-muted-foreground">Select Existing Group</Label>
-                        <Select value={wmg.groupId} onValueChange={v => updateModGroupRow(wmg.tempId, { groupId: v })}>
-                          <SelectTrigger className="mt-1 h-8 rounded-lg text-sm" data-testid={`wizard-mod-select-${idx}`}>
-                            <SelectValue placeholder="Choose a group" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {modifierGroups.map(mg => (
-                              <SelectItem key={mg.id} value={mg.id}>{mg.name}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              ))}
+                      {wmg.isNew ? (
+                        <div className="grid gap-3 sm:grid-cols-3">
+                          <div>
+                            <Label className="text-xs text-muted-foreground">Group Name</Label>
+                            <Input
+                              value={wmg.newName}
+                              onChange={e => updateModGroupRow(wmg.tempId, { newName: e.target.value })}
+                              className="mt-1 h-8 rounded-lg text-sm"
+                              placeholder="e.g., Milk Type"
+                              data-testid={`wizard-mod-name-${idx}`}
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs text-muted-foreground">Min Selections</Label>
+                            <Input
+                              value={wmg.newMin}
+                              onChange={e => updateModGroupRow(wmg.tempId, { newMin: e.target.value })}
+                              className="mt-1 h-8 rounded-lg text-sm"
+                              inputMode="numeric"
+                              data-testid={`wizard-mod-min-${idx}`}
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs text-muted-foreground">Max Selections</Label>
+                            <Input
+                              value={wmg.newMax}
+                              onChange={e => updateModGroupRow(wmg.tempId, { newMax: e.target.value })}
+                              className="mt-1 h-8 rounded-lg text-sm"
+                              inputMode="numeric"
+                              data-testid={`wizard-mod-max-${idx}`}
+                            />
+                          </div>
+                        </div>
+                      ) : (
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Select Existing Group</Label>
+                          <Select value={wmg.groupId} onValueChange={v => updateModGroupRow(wmg.tempId, { groupId: v })}>
+                            <SelectTrigger className="mt-1 h-8 rounded-lg text-sm" data-testid={`wizard-mod-select-${idx}`}>
+                              <SelectValue placeholder="Choose a group" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {modifierGroups.map(mg => (
+                                <SelectItem key={mg.id} value={mg.id}>{mg.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+
+                      {!wmg.isNew && wmg.groupId && groupMods.length > 0 && (
+                        <div className="mt-2">
+                          <Separator className="mb-3" />
+                          <p className="text-xs font-medium text-muted-foreground mb-2">
+                            Quantity per size for each option in "{groupName}"
+                          </p>
+                          <div className="overflow-x-auto rounded-lg border">
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="bg-muted/50">
+                                  <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Option</th>
+                                  <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Ingredient</th>
+                                  {wizardVariants.map((wv, vi) => (
+                                    <th key={wv.tempId} className="text-center text-xs font-medium text-muted-foreground px-2 py-2 whitespace-nowrap" data-testid={`wizard-mod-size-header-${vi}`}>
+                                      {wv.name || `Size ${vi + 1}`}
+                                    </th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {groupMods.map((mod, mi) => {
+                                  const invItem = mod.inventoryItemId ? inventory.find(i => i.id === mod.inventoryItemId) : null;
+                                  return (
+                                    <tr key={mod.id} className="border-t" data-testid={`wizard-mod-option-row-${mi}`}>
+                                      <td className="px-3 py-2 font-medium text-xs whitespace-nowrap">{mod.name}</td>
+                                      <td className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap">
+                                        {invItem ? (
+                                          <span>{invItem.name} <span className="opacity-60">({invItem.unitOfMeasure})</span></span>
+                                        ) : (
+                                          <span className="text-amber-500">No ingredient</span>
+                                        )}
+                                      </td>
+                                      {wizardVariants.map((wv, vi) => (
+                                        <td key={wv.tempId} className="px-1.5 py-1.5 text-center">
+                                          <Input
+                                            type="number"
+                                            step="0.1"
+                                            min="0"
+                                            value={modifierSizeQtys[mod.id]?.[wv.name] || ""}
+                                            onChange={e => updateModSizeQty(mod.id, wv.name, e.target.value)}
+                                            placeholder="0"
+                                            className="h-7 w-16 text-center text-xs mx-auto"
+                                            disabled={!invItem}
+                                            data-testid={`wizard-mod-qty-${mi}-${vi}`}
+                                          />
+                                        </td>
+                                      ))}
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground mt-1.5">
+                            Enter how much of each ingredient is consumed per size when this modifier is selected.
+                          </p>
+                        </div>
+                      )}
+
+                      {wmg.isNew && (
+                        <p className="text-xs text-muted-foreground italic">
+                          Size quantities can be configured after the group and its options are created in the Modifiers tab.
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
           )}
         </ScrollArea>
@@ -809,14 +915,37 @@ export default function ProductWizard({
               {wizardModGroups.length > 0 && (
                 <div>
                   <p className="text-xs font-medium text-muted-foreground mb-1">Modifier Groups ({wizardModGroups.length})</p>
-                  <div className="space-y-1">
+                  <div className="space-y-2">
                     {wizardModGroups.map((wmg, i) => {
                       const label = wmg.isNew
                         ? wmg.newName || "New Group"
                         : modifierGroups.find(mg => mg.id === wmg.groupId)?.name || "Unknown";
+                      const groupMods = getGroupModifiers(wmg);
+                      const modsWithQtys = groupMods.filter(mod => {
+                        const sizeMap = modifierSizeQtys[mod.id];
+                        return sizeMap && Object.values(sizeMap).some(v => Number(v) > 0);
+                      });
                       return (
-                        <div key={wmg.tempId} className="text-sm p-1.5 rounded-lg bg-muted/30" data-testid={`wizard-review-mod-${i}`}>
-                          {label} {wmg.isNew && <Badge variant="outline" className="text-[10px] ml-1">New</Badge>}
+                        <div key={wmg.tempId} data-testid={`wizard-review-mod-${i}`}>
+                          <div className="text-sm p-1.5 rounded-lg bg-muted/30">
+                            {label} {wmg.isNew && <Badge variant="outline" className="text-[10px] ml-1">New</Badge>}
+                          </div>
+                          {modsWithQtys.length > 0 && (
+                            <div className="ml-3 mt-1 space-y-0.5">
+                              {modsWithQtys.map(mod => {
+                                const sizeMap = modifierSizeQtys[mod.id] || {};
+                                const sizeStr = wizardVariants
+                                  .filter(wv => Number(sizeMap[wv.name] || 0) > 0)
+                                  .map(wv => `${wv.name}: ${sizeMap[wv.name]}`)
+                                  .join(", ");
+                                return (
+                                  <p key={mod.id} className="text-[11px] text-muted-foreground">
+                                    {mod.name} — {sizeStr}
+                                  </p>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
                       );
                     })}
