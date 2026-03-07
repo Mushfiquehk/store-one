@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Trash2, Plus, Search, X, Package, ChefHat } from "lucide-react";
+import { Trash2, Plus, Search, X, Package, ChefHat, Sliders } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -62,6 +62,8 @@ function ProductEditorInner({
     updateBom,
     deleteBom,
     setProductModifierGroups,
+    productModifierScaleFactors,
+    setProductModifierScaleFactors,
   } = useStore();
 
   const productVariants = useMemo(() => variants.filter(v => v.productId === product.id), [variants, product.id]);
@@ -94,6 +96,14 @@ function ProductEditorInner({
   const [bomSearch, setBomSearch] = useState("");
 
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+
+  const [modConfigGroupId, setModConfigGroupId] = useState<string | null>(null);
+  const [modConfigScaleData, setModConfigScaleData] = useState<Record<string, Record<string, string>>>({});
+  const [modConfigIngredientData, setModConfigIngredientData] = useState<Record<string, Record<string, string>>>({});
+
+  const modifierBom = useMemo(() => {
+    return bom.filter(b => b.sourceType === "MODIFIER");
+  }, [bom]);
 
   const filteredInventory = useMemo(() => {
     if (!bomSearch) return inventory;
@@ -174,6 +184,99 @@ function ProductEditorInner({
   function handleUnlinkGroup(groupId: string) {
     setProductModifierGroups(product.id, linkedGroupIds.filter(id => id !== groupId));
     toast({ title: "Modifier group unlinked" });
+  }
+
+  function openModConfigDialog(groupId: string) {
+    const groupMods = modifiers.filter(m => m.modifierGroupId === groupId);
+    const sfKey = `${product.id}::${groupId}`;
+    let existingScales: Record<string, Record<string, number>> | null = null;
+    try { existingScales = JSON.parse(productModifierScaleFactors[sfKey] || "null"); } catch {}
+
+    const scaleData: Record<string, Record<string, string>> = {};
+    const ingredientData: Record<string, Record<string, string>> = {};
+
+    for (const mod of groupMods) {
+      scaleData[mod.id] = {};
+      ingredientData[mod.id] = {};
+      for (const v of productVariants) {
+        scaleData[mod.id][v.name] = String(existingScales?.[mod.id]?.[v.name] ?? "1");
+      }
+
+      if (mod.inventoryItemId) {
+        const bomEntry = modifierBom.find(b => b.sourceId === mod.id && b.inventoryItemId === mod.inventoryItemId);
+        let matrix: Record<string, number> = {};
+        if (bomEntry?.scaleFactorMatrix) {
+          try { matrix = JSON.parse(bomEntry.scaleFactorMatrix); } catch {}
+        }
+        for (const v of productVariants) {
+          ingredientData[mod.id][v.name] = String(matrix[v.name] ?? "");
+        }
+      }
+    }
+
+    setModConfigScaleData(scaleData);
+    setModConfigIngredientData(ingredientData);
+    setModConfigGroupId(groupId);
+  }
+
+  function handleSaveModConfig() {
+    if (!modConfigGroupId) return;
+    const groupMods = modifiers.filter(m => m.modifierGroupId === modConfigGroupId);
+
+    const scaleResult: Record<string, Record<string, number>> = {};
+    let hasAnyNonDefault = false;
+    for (const [modId, sizeMap] of Object.entries(modConfigScaleData)) {
+      scaleResult[modId] = {};
+      for (const [sizeName, val] of Object.entries(sizeMap)) {
+        const num = parseFloat(val);
+        if (Number.isFinite(num) && num > 0 && num !== 1) {
+          scaleResult[modId][sizeName] = num;
+          hasAnyNonDefault = true;
+        } else {
+          scaleResult[modId][sizeName] = 1;
+        }
+      }
+    }
+    setProductModifierScaleFactors(
+      product.id,
+      modConfigGroupId,
+      hasAnyNonDefault ? JSON.stringify(scaleResult) : null
+    );
+
+    for (const mod of groupMods) {
+      if (!mod.inventoryItemId) continue;
+      const sizeMap = modConfigIngredientData[mod.id];
+      if (!sizeMap) continue;
+      const matrix: Record<string, number> = {};
+      let hasAny = false;
+      for (const [sizeName, val] of Object.entries(sizeMap)) {
+        const num = parseFloat(val);
+        if (Number.isFinite(num) && num > 0) {
+          matrix[sizeName] = num;
+          hasAny = true;
+        }
+      }
+      const existingBom = modifierBom.find(b => b.sourceId === mod.id && b.inventoryItemId === mod.inventoryItemId);
+      if (hasAny) {
+        if (existingBom) {
+          updateBom(existingBom.id, { scaleFactorMatrix: JSON.stringify(matrix) });
+        } else {
+          addBom({
+            id: uid("bom"),
+            sourceType: "MODIFIER",
+            sourceId: mod.id,
+            inventoryItemId: mod.inventoryItemId,
+            quantityDeducted: 1,
+            scaleFactorMatrix: JSON.stringify(matrix),
+          });
+        }
+      } else if (existingBom) {
+        updateBom(existingBom.id, { scaleFactorMatrix: null });
+      }
+    }
+
+    toast({ title: "Modifier configuration saved" });
+    setModConfigGroupId(null);
   }
 
   function handleAddBomEntry(inventoryItemId: string) {
@@ -347,9 +450,16 @@ function ProductEditorInner({
                       <p className="text-sm font-medium">{group.name}</p>
                       <p className="text-xs text-muted-foreground">Min: {group.minSelections}, Max: {group.maxSelections}</p>
                     </div>
-                    <Button variant="ghost" size="sm" className="text-destructive text-xs" onClick={() => handleUnlinkGroup(gid)} data-testid={`editor-mod-unlink-${gid}`}>
-                      <X className="h-3 w-3 mr-1" /> Unlink
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      {productVariants.length > 0 && groupMods.length > 0 && (
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openModConfigDialog(gid)} title="Size pricing & ingredient config" data-testid={`editor-mod-config-${gid}`}>
+                          <Sliders className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                      <Button variant="ghost" size="sm" className="text-destructive text-xs" onClick={() => handleUnlinkGroup(gid)} data-testid={`editor-mod-unlink-${gid}`}>
+                        <X className="h-3 w-3 mr-1" /> Unlink
+                      </Button>
+                    </div>
                   </div>
                   {groupMods.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1">
@@ -543,6 +653,135 @@ function ProductEditorInner({
               Delete Product
             </Button>
             <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!modConfigGroupId} onOpenChange={(v) => { if (!v) setModConfigGroupId(null); }}>
+        <DialogContent className="sm:max-w-[700px] max-h-[85vh] overflow-y-auto" data-testid="dialog-mod-config">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sliders className="h-5 w-5" />
+              Modifier Size Configuration
+            </DialogTitle>
+            <DialogDescription>
+              Configure size pricing multipliers and ingredient quantities for{" "}
+              <span className="font-medium">{modConfigGroupId ? modifierGroups.find(mg => mg.id === modConfigGroupId)?.name : ""}</span>{" "}
+              on <span className="font-medium">{product.name}</span>.
+            </DialogDescription>
+          </DialogHeader>
+
+          {modConfigGroupId && (() => {
+            const groupMods = modifiers.filter(m => m.modifierGroupId === modConfigGroupId);
+            const modsWithIngredients = groupMods.filter(m => m.inventoryItemId);
+            if (groupMods.length === 0) {
+              return <p className="text-sm text-muted-foreground text-center py-4">No modifier options in this group yet.</p>;
+            }
+            return (
+              <div className="space-y-5">
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-2">Size Pricing Multipliers</p>
+                  <p className="text-[11px] text-muted-foreground mb-3">
+                    Set how the base upcharge for each modifier scales by product size. A value of 1 means no change; 1.5 means 150% of the base price.
+                  </p>
+                  <div className="overflow-x-auto rounded-lg border">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-muted/50">
+                          <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap sticky left-0 bg-muted/50">Modifier</th>
+                          <th className="text-right text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Base Price</th>
+                          {productVariants.map(v => (
+                            <th key={v.id} className="text-center text-xs font-medium text-muted-foreground px-2 py-2 whitespace-nowrap">{v.name}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {groupMods.map(mod => (
+                          <tr key={mod.id} className="border-t" data-testid={`editor-scale-row-${mod.id}`}>
+                            <td className="px-3 py-2 font-medium text-xs whitespace-nowrap sticky left-0 bg-background">{mod.name}</td>
+                            <td className="px-3 py-2 text-xs text-muted-foreground text-right whitespace-nowrap">{formatMoney(mod.baseUpcharge || 0)}</td>
+                            {productVariants.map(v => (
+                              <td key={v.id} className="px-1.5 py-1.5 text-center">
+                                <Input
+                                  type="number"
+                                  step="0.1"
+                                  min="0"
+                                  value={modConfigScaleData[mod.id]?.[v.name] ?? "1"}
+                                  onChange={e => setModConfigScaleData(prev => ({
+                                    ...prev,
+                                    [mod.id]: { ...(prev[mod.id] || {}), [v.name]: e.target.value },
+                                  }))}
+                                  className="h-7 w-16 text-center text-xs mx-auto"
+                                  data-testid={`editor-scale-${mod.id}-${v.id}`}
+                                />
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {modsWithIngredients.length > 0 && (
+                  <div>
+                    <Separator className="mb-4" />
+                    <p className="text-xs font-medium text-muted-foreground mb-2">Ingredient Quantity Per Size</p>
+                    <p className="text-[11px] text-muted-foreground mb-3">
+                      Enter how much of each ingredient is consumed per size when this modifier is selected.
+                    </p>
+                    <div className="overflow-x-auto rounded-lg border">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="bg-muted/50">
+                            <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap sticky left-0 bg-muted/50">Modifier</th>
+                            <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Ingredient</th>
+                            {productVariants.map(v => (
+                              <th key={v.id} className="text-center text-xs font-medium text-muted-foreground px-2 py-2 whitespace-nowrap">{v.name}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {modsWithIngredients.map(mod => {
+                            const invItem = inventory.find(i => i.id === mod.inventoryItemId);
+                            return (
+                              <tr key={mod.id} className="border-t" data-testid={`editor-ingredient-row-${mod.id}`}>
+                                <td className="px-3 py-2 font-medium text-xs whitespace-nowrap sticky left-0 bg-background">{mod.name}</td>
+                                <td className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap">
+                                  {invItem ? <span>{invItem.name} <span className="opacity-60">({invItem.unitOfMeasure})</span></span> : "—"}
+                                </td>
+                                {productVariants.map(v => (
+                                  <td key={v.id} className="px-1.5 py-1.5 text-center">
+                                    <Input
+                                      type="number"
+                                      step="0.1"
+                                      min="0"
+                                      value={modConfigIngredientData[mod.id]?.[v.name] ?? ""}
+                                      onChange={e => setModConfigIngredientData(prev => ({
+                                        ...prev,
+                                        [mod.id]: { ...(prev[mod.id] || {}), [v.name]: e.target.value },
+                                      }))}
+                                      placeholder="0"
+                                      className="h-7 w-16 text-center text-xs mx-auto"
+                                      data-testid={`editor-ingredient-${mod.id}-${v.id}`}
+                                    />
+                                  </td>
+                                ))}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" onClick={() => setModConfigGroupId(null)} data-testid="editor-mod-config-cancel">Cancel</Button>
+            <Button onClick={handleSaveModConfig} data-testid="editor-mod-config-save">Save Configuration</Button>
           </div>
         </DialogContent>
       </Dialog>

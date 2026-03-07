@@ -58,7 +58,7 @@ Full-stack fuel station point-of-sale application built with React + Express + S
 - **Variants**: Edit (name/SKU/price), Delete (with BOM warning, last-variant guard deletes product)
 - **Modifier Groups**: Create, Edit (name/rules), Delete (with confirmation)
 - **Modifiers**: Create, Edit (name/price/ingredient), Delete (with confirmation)
-- **Product-Modifier Scale Factors**: Configure size pricing multipliers per product-modifier-group link via slider icon on linked products
+- **Product-Modifier Scale Factors**: Configure size pricing multipliers and ingredient quantities per size via slider icon — available on both the Modifiers page (per linked product) and the product editor (Modifiers tab, per linked group)
 - **Inventory Items**: Create, Edit (name/unit/low stock alert), Delete (with warnings for BOM/modifier/variant references)
 
 ## Seed Data
