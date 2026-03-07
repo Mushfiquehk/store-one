@@ -36,7 +36,7 @@ export default function ModifiersPageContent({ isTab = false }: { isTab?: boolea
 
   const [modifierDialogOpen, setModifierDialogOpen] = useState(false);
   const [editingModifier, setEditingModifier] = useState<Modifier | null>(null);
-  const [modifierForm, setModifierForm] = useState({ name: "", baseUpcharge: "", scaleFactor: "" });
+  const [modifierForm, setModifierForm] = useState({ name: "", baseUpcharge: "", scaleRows: [] as { size: string; factor: string }[] });
   const [modifierGroupId, setModifierGroupId] = useState<string>("");
 
   const [deleteTarget, setDeleteTarget] = useState<{ type: "group" | "modifier"; id: string; name: string } | null>(null);
@@ -102,17 +102,21 @@ export default function ModifiersPageContent({ isTab = false }: { isTab?: boolea
   function openCreateModifier(groupId: string) {
     setEditingModifier(null);
     setModifierGroupId(groupId);
-    setModifierForm({ name: "", baseUpcharge: "", scaleFactor: "" });
+    setModifierForm({ name: "", baseUpcharge: "", scaleRows: [] });
     setModifierDialogOpen(true);
   }
 
   function openEditModifier(mod: Modifier) {
     setEditingModifier(mod);
     setModifierGroupId(mod.modifierGroupId);
+    const parsed = parseScaleFactor(mod.scaleFactor);
+    const rows = parsed
+      ? Object.entries(parsed).map(([size, factor]) => ({ size, factor: String(factor) }))
+      : [];
     setModifierForm({
       name: mod.name,
       baseUpcharge: (mod.baseUpcharge / 100).toFixed(2),
-      scaleFactor: mod.scaleFactor || "",
+      scaleRows: rows,
     });
     setModifierDialogOpen(true);
   }
@@ -129,14 +133,19 @@ export default function ModifiersPageContent({ isTab = false }: { isTab?: boolea
       return;
     }
 
-    let scaleFactorStr: string | null = modifierForm.scaleFactor.trim() || null;
-    if (scaleFactorStr) {
-      try {
-        JSON.parse(scaleFactorStr);
-      } catch {
-        toast({ title: "Invalid scale factor", description: "Must be valid JSON, e.g. {\"SM\": 1.0, \"LG\": 2.0}" });
+    const validRows = modifierForm.scaleRows.filter(r => r.size.trim() && r.factor.trim());
+    for (const row of validRows) {
+      const num = parseFloat(row.factor);
+      if (!Number.isFinite(num) || num < 0) {
+        toast({ title: "Invalid multiplier", description: `"${row.size}" has an invalid value. Use a number like 1.0 or 2.5.` });
         return;
       }
+    }
+    let scaleFactorStr: string | null = null;
+    if (validRows.length > 0) {
+      const obj: Record<string, number> = {};
+      for (const row of validRows) obj[row.size.trim()] = parseFloat(row.factor);
+      scaleFactorStr = JSON.stringify(obj);
     }
 
     if (editingModifier) {
@@ -448,15 +457,80 @@ export default function ModifiersPageContent({ isTab = false }: { isTab?: boolea
               <p className="text-xs text-muted-foreground mt-1">Price adjustment in dollars (e.g., 0.50 = $0.50)</p>
             </div>
             <div>
-              <Label htmlFor="modifier-scalefactor">Scale Factor Matrix (JSON)</Label>
-              <Input
-                id="modifier-scalefactor"
-                value={modifierForm.scaleFactor}
-                onChange={e => setModifierForm(f => ({ ...f, scaleFactor: e.target.value }))}
-                placeholder='{"SM": 1.0, "MD": 1.5, "LG": 2.0}'
-                data-testid="input-modifier-scalefactor"
-              />
-              <p className="text-xs text-muted-foreground mt-1">Size-based pricing multipliers. Leave empty for flat pricing.</p>
+              <div className="flex items-center justify-between mb-2">
+                <Label>Size Pricing Multipliers</Label>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setModifierForm(f => ({ ...f, scaleRows: [...f.scaleRows, { size: "", factor: "1.0" }] }))}
+                  data-testid="button-add-scale-row"
+                >
+                  <Plus className="h-3 w-3 mr-1" /> Add Size
+                </Button>
+              </div>
+              {modifierForm.scaleRows.length === 0 ? (
+                <p className="text-xs text-muted-foreground py-3 text-center border rounded-lg bg-muted/30" data-testid="text-no-scale-rows">
+                  No size multipliers. This modifier will use flat pricing.
+                </p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-xs">Size Name</TableHead>
+                      <TableHead className="text-xs">Multiplier</TableHead>
+                      <TableHead className="text-xs w-[50px]"></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {modifierForm.scaleRows.map((row, idx) => (
+                      <TableRow key={idx} data-testid={`row-scale-${idx}`}>
+                        <TableCell className="py-1.5 px-2">
+                          <Input
+                            value={row.size}
+                            onChange={e => {
+                              const updated = [...modifierForm.scaleRows];
+                              updated[idx] = { ...updated[idx], size: e.target.value };
+                              setModifierForm(f => ({ ...f, scaleRows: updated }));
+                            }}
+                            placeholder="e.g. SM, MD, LG"
+                            className="h-8 text-sm"
+                            data-testid={`input-scale-size-${idx}`}
+                          />
+                        </TableCell>
+                        <TableCell className="py-1.5 px-2">
+                          <Input
+                            value={row.factor}
+                            onChange={e => {
+                              const updated = [...modifierForm.scaleRows];
+                              updated[idx] = { ...updated[idx], factor: e.target.value };
+                              setModifierForm(f => ({ ...f, scaleRows: updated }));
+                            }}
+                            type="number"
+                            step="0.1"
+                            min="0"
+                            placeholder="1.0"
+                            className="h-8 text-sm"
+                            data-testid={`input-scale-factor-${idx}`}
+                          />
+                        </TableCell>
+                        <TableCell className="py-1.5 px-2">
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7"
+                            onClick={() => setModifierForm(f => ({ ...f, scaleRows: f.scaleRows.filter((_, i) => i !== idx) }))}
+                            data-testid={`button-remove-scale-${idx}`}
+                          >
+                            <Trash2 className="h-3 w-3 text-destructive" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
             </div>
           </div>
           <DialogFooter>
