@@ -182,13 +182,12 @@ export default function MenuPage({ isTab = false }: { isTab?: boolean }) {
                     <TableHead>SKU</TableHead>
                     <TableHead>Tags</TableHead>
                     <TableHead className="text-right">Price</TableHead>
-                    <TableHead className="w-[100px]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filteredProducts.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center py-12 text-muted-foreground">
+                      <TableCell colSpan={5} className="text-center py-12 text-muted-foreground">
                         <div className="flex flex-col items-center gap-2">
                           <ClipboardList className="h-8 w-8 opacity-20" />
                           <p>No products yet. Click "Add Product" to get started.</p>
@@ -205,12 +204,18 @@ export default function MenuPage({ isTab = false }: { isTab?: boolean }) {
                       return pvariants.map((v, vi) => (
                         <TableRow
                           key={v.id}
-                          className={selected ? "bg-primary/5" : undefined}
-                          onClick={() => setSelectedProductId(p.id)}
+                          className={selected ? "bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors" : "cursor-pointer hover:bg-muted/50 transition-colors"}
+                          onClick={() => {
+                            setSelectedProductId(p.id);
+                            if (vi === 0) openEditProduct(p);
+                            else openEditVariant(v);
+                          }}
                           data-testid={`row-menu-${v.id}`}
                         >
                           <TableCell className="font-medium" data-testid={`text-menu-row-name-${v.id}`}>
-                            {vi === 0 ? p.name : ""} {pvariants.length > 1 ? `(${v.name})` : ""}
+                            <span className="text-primary hover:underline">
+                              {vi === 0 ? p.name : ""} {pvariants.length > 1 ? `(${v.name})` : ""}
+                            </span>
                             {vi === 0 && p.isComposite && (
                               <Badge variant="outline" className="ml-2 text-[10px]">Prepared</Badge>
                             )}
@@ -224,29 +229,6 @@ export default function MenuPage({ isTab = false }: { isTab?: boolean }) {
                           </TableCell>
                           <TableCell className="text-right" data-testid={`text-menu-row-price-${v.id}`}>
                             {formatMoney(v.basePrice)}
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex gap-1">
-                              {vi === 0 ? (
-                                <>
-                                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={e => { e.stopPropagation(); openEditProduct(p); }} data-testid={`button-edit-product-${p.id}`}>
-                                    <Pencil className="h-3 w-3" />
-                                  </Button>
-                                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={e => { e.stopPropagation(); requestDeleteProduct(p); }} data-testid={`button-delete-product-${p.id}`}>
-                                    <Trash2 className="h-3 w-3" />
-                                  </Button>
-                                </>
-                              ) : (
-                                <>
-                                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={e => { e.stopPropagation(); openEditVariant(v); }} data-testid={`button-edit-variant-${v.id}`}>
-                                    <Pencil className="h-3 w-3" />
-                                  </Button>
-                                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={e => { e.stopPropagation(); requestDeleteVariant(v, p.name); }} data-testid={`button-delete-variant-${v.id}`}>
-                                    <Trash2 className="h-3 w-3" />
-                                  </Button>
-                                </>
-                              )}
-                            </div>
                           </TableCell>
                         </TableRow>
                       ));
@@ -277,9 +259,15 @@ export default function MenuPage({ isTab = false }: { isTab?: boolean }) {
               <Input id="edit-product-tags" value={editProductForm.tags} onChange={e => setEditProductForm(f => ({ ...f, tags: e.target.value }))} placeholder="fuel, premium" data-testid="input-edit-product-tags" />
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditProductOpen(false)}>Cancel</Button>
-            <Button onClick={handleSaveProduct} data-testid="button-save-edit-product">Save</Button>
+          <DialogFooter className="flex justify-between items-center sm:justify-between">
+            <Button variant="destructive" onClick={() => { setEditProductOpen(false); requestDeleteProduct(editingProduct!); }} data-testid="button-delete-product-from-edit">
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete
+            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setEditProductOpen(false)}>Cancel</Button>
+              <Button onClick={handleSaveProduct} data-testid="button-save-edit-product">Save</Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -304,9 +292,15 @@ export default function MenuPage({ isTab = false }: { isTab?: boolean }) {
               <Input id="edit-variant-price" type="number" step="0.01" min="0" value={editVariantForm.basePrice} onChange={e => setEditVariantForm(f => ({ ...f, basePrice: e.target.value }))} data-testid="input-edit-variant-price" />
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditVariantOpen(false)}>Cancel</Button>
-            <Button onClick={handleSaveVariant} data-testid="button-save-edit-variant">Save</Button>
+          <DialogFooter className="flex justify-between items-center sm:justify-between">
+            <Button variant="destructive" onClick={() => { setEditVariantOpen(false); requestDeleteVariant(editingVariant!, products.find(p => p.id === editingVariant!.productId)?.name || ""); }} data-testid="button-delete-variant-from-edit">
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete
+            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setEditVariantOpen(false)}>Cancel</Button>
+              <Button onClick={handleSaveVariant} data-testid="button-save-edit-variant">Save</Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -162,7 +162,6 @@ export default function InventoryPage({ isTab = false }: { isTab?: boolean }) {
                   <TableHead>Item</TableHead>
                   <TableHead className="w-[120px] text-center">On hand</TableHead>
                   <TableHead className="w-[180px] text-center">Adjust</TableHead>
-                  <TableHead className="w-[80px]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -172,11 +171,11 @@ export default function InventoryPage({ isTab = false }: { isTab?: boolean }) {
                   const isLow = i.currentQuantity <= lowAlert;
 
                   return (
-                    <TableRow key={i.id} data-testid={`row-inventory-${i.id}`}>
+                    <TableRow key={i.id} data-testid={`row-inventory-${i.id}`} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => openEditItem(i)}>
                       <TableCell>
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <p className="truncate font-medium" data-testid={`text-inventory-name-${i.id}`}>{i.name}</p>
+                            <p className="truncate font-medium text-primary hover:underline" data-testid={`text-inventory-name-${i.id}`}>{i.name}</p>
                             <p className="text-xs text-muted-foreground">Low alert: {lowAlert} {i.unitOfMeasure}</p>
                           </div>
                           <span
@@ -190,26 +189,16 @@ export default function InventoryPage({ isTab = false }: { isTab?: boolean }) {
                           </span>
                         </div>
                       </TableCell>
-                      <TableCell className="text-center">
+                      <TableCell className="text-center" onClick={e => e.stopPropagation()}>
                         <span className="font-serif text-lg" data-testid={`text-inventory-onhand-${i.id}`}>
                           {i.currentQuantity} <span className="text-sm text-muted-foreground font-sans">{i.unitOfMeasure}</span>
                         </span>
                       </TableCell>
-                      <TableCell>
+                      <TableCell onClick={e => e.stopPropagation()}>
                         <div className="flex items-center justify-center gap-2">
                           <Button variant="secondary" size="sm" className="h-8 rounded-xl" onClick={() => adjustInventory(i.id, -1)} data-testid={`button-inventory-dec-${i.id}`}>-1</Button>
                           <Button variant="secondary" size="sm" className="h-8 rounded-xl" onClick={() => adjustInventory(i.id, 1)} data-testid={`button-inventory-inc-${i.id}`}>+1</Button>
                           <Button size="sm" className="h-8 rounded-xl" onClick={() => adjustInventory(i.id, 10)} data-testid={`button-inventory-plus10-${i.id}`}>+10</Button>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
-                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditItem(i)} data-testid={`button-edit-inventory-${i.id}`}>
-                            <Pencil className="h-3 w-3" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => requestDelete(i)} data-testid={`button-delete-inventory-${i.id}`}>
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -241,9 +230,15 @@ export default function InventoryPage({ isTab = false }: { isTab?: boolean }) {
               <Input id="edit-inv-low" type="number" min="0" value={editForm.lowStockAlert} onChange={e => setEditForm(f => ({ ...f, lowStockAlert: e.target.value }))} data-testid="input-edit-inventory-low" />
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
-            <Button onClick={handleSaveEdit} data-testid="button-save-edit-inventory">Save</Button>
+          <DialogFooter className="flex justify-between items-center sm:justify-between">
+            <Button variant="destructive" onClick={() => { setEditOpen(false); requestDelete(editingItem!); }} data-testid="button-delete-inventory-from-edit">
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete
+            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
+              <Button onClick={handleSaveEdit} data-testid="button-save-edit-inventory">Save</Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
