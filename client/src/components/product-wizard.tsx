@@ -45,7 +45,7 @@ type WizardBomEntry = {
 };
 
 const STEPS_RETAIL = ["Item Type", "Review & Create"];
-const STEPS_PREPARED = ["Item Type", "Variants", "Modifiers", "Recipes", "Review & Create"];
+const STEPS_PREPARED = ["Item Type", "Variants", "Recipes", "Modifiers", "Review & Create"];
 
 export default function ProductWizard({
   open,
@@ -67,6 +67,7 @@ export default function ProductWizard({
     addModifierGroup,
     addModifier,
     setProductModifierGroups,
+    setProductModifierScaleFactors,
   } = useStore();
 
   const [step, setStep] = useState(0);
@@ -85,6 +86,7 @@ export default function ProductWizard({
 
   const [wizardModGroups, setWizardModGroups] = useState<WizardModifierGroup[]>([]);
   const [modifierSizeQtys, setModifierSizeQtys] = useState<Record<string, Record<string, string>>>({});
+  const [wizardScaleFactors, setWizardScaleFactors] = useState<Record<string, Record<string, Record<string, string>>>>({});
   const [wizardBom, setWizardBom] = useState<WizardBomEntry[]>([]);
   const [bomSearch, setBomSearch] = useState("");
   const [selectedBomVariant, setSelectedBomVariant] = useState<string | null>(null);
@@ -109,6 +111,7 @@ export default function ProductWizard({
     ]);
     setWizardModGroups([]);
     setModifierSizeQtys({});
+    setWizardScaleFactors({});
     setWizardBom([]);
     setBomSearch("");
     setSelectedBomVariant(null);
@@ -145,8 +148,9 @@ export default function ProductWizard({
       return;
     }
     if (step < totalSteps - 1) {
-      setStep(step + 1);
-      if (!isRetail && step === 1 && wizardVariants.length > 0 && !selectedBomVariant) {
+      const nextStep = step + 1;
+      setStep(nextStep);
+      if (!isRetail && nextStep === 2 && wizardVariants.length > 0 && !selectedBomVariant) {
         setSelectedBomVariant(wizardVariants[0].tempId);
       }
     }
@@ -229,6 +233,31 @@ export default function ProductWizard({
       if (linkedGroupIds.length > 0) {
         setTimeout(() => {
           setProductModifierGroups(productId, linkedGroupIds);
+
+          setTimeout(() => {
+            wizardModGroups.forEach(wmg => {
+              const groupId = wmg.isNew ? linkedGroupIds[wizardModGroups.indexOf(wmg)] : wmg.groupId;
+              if (!groupId) return;
+              const groupScaleData = wizardScaleFactors[wmg.tempId];
+              if (!groupScaleData) return;
+              const scaleFactorsObj: Record<string, Record<string, number>> = {};
+              Object.entries(groupScaleData).forEach(([modId, sizeMap]) => {
+                const numMap: Record<string, number> = {};
+                Object.entries(sizeMap).forEach(([sizeName, val]) => {
+                  const num = Number(val);
+                  if (Number.isFinite(num) && num > 0) {
+                    numMap[sizeName] = num;
+                  }
+                });
+                if (Object.keys(numMap).length > 0) {
+                  scaleFactorsObj[modId] = numMap;
+                }
+              });
+              if (Object.keys(scaleFactorsObj).length > 0) {
+                setProductModifierScaleFactors(productId, groupId, JSON.stringify(scaleFactorsObj));
+              }
+            });
+          }, 300);
         }, 200);
       }
 
@@ -307,6 +336,19 @@ export default function ProductWizard({
     setModifierSizeQtys(prev => ({
       ...prev,
       [modifierId]: { ...(prev[modifierId] || {}), [variantName]: value },
+    }));
+  }
+
+  function updateWizardScaleFactor(groupTempId: string, modifierId: string, variantName: string, value: string) {
+    setWizardScaleFactors(prev => ({
+      ...prev,
+      [groupTempId]: {
+        ...(prev[groupTempId] || {}),
+        [modifierId]: {
+          ...((prev[groupTempId] || {})[modifierId] || {}),
+          [variantName]: value,
+        },
+      },
     }));
   }
 
@@ -459,7 +501,7 @@ export default function ProductWizard({
             <Info className="h-5 w-5 text-blue-500 shrink-0 mt-0.5" />
             <div className="text-sm text-blue-800 dark:text-blue-300">
               <p className="font-medium">Before you begin</p>
-              <p className="text-xs mt-0.5 opacity-90">Make sure all the raw ingredients and inventory items you need for this product's recipe have already been added in the Bulk Inventory tab. You'll link them to this item in Step 4.</p>
+              <p className="text-xs mt-0.5 opacity-90">Make sure all the raw ingredients and inventory items you need for this product's recipe have already been added in the Bulk Inventory tab. You'll link them to this item in Step 3.</p>
             </div>
           </div>
         )}
@@ -557,13 +599,13 @@ export default function ProductWizard({
     );
   }
 
-  function renderStep2Modifiers() {
+  function renderStep3Modifiers() {
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div>
             <h3 className="font-semibold text-sm">Modifier Groups</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">Attach existing modifier groups and set quantities per size.</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Attach modifier groups and configure size-based pricing multipliers.</p>
           </div>
           <Button size="sm" variant="outline" onClick={addModGroupRow} className="rounded-xl" data-testid="wizard-add-mod-group">
             <Plus className="h-3 w-3 mr-1" /> Add Group
@@ -650,36 +692,34 @@ export default function ProductWizard({
                       )}
 
                       {!wmg.isNew && wmg.groupId && groupMods.length > 0 && (
-                        <div className="mt-2">
-                          <Separator className="mb-3" />
-                          <p className="text-xs font-medium text-muted-foreground mb-2">
-                            Quantity per size for each option in "{groupName}"
-                          </p>
-                          <div className="overflow-x-auto rounded-lg border">
-                            <table className="w-full text-sm">
-                              <thead>
-                                <tr className="bg-muted/50">
-                                  <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Option</th>
-                                  <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Ingredient</th>
-                                  {wizardVariants.map((wv, vi) => (
-                                    <th key={wv.tempId} className="text-center text-xs font-medium text-muted-foreground px-2 py-2 whitespace-nowrap" data-testid={`wizard-mod-size-header-${vi}`}>
-                                      {wv.name || `Size ${vi + 1}`}
-                                    </th>
-                                  ))}
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {groupMods.map((mod, mi) => {
-                                  const invItem = mod.inventoryItemId ? inventory.find(i => i.id === mod.inventoryItemId) : null;
-                                  return (
-                                    <tr key={mod.id} className="border-t" data-testid={`wizard-mod-option-row-${mi}`}>
+                        <>
+                          <div className="mt-2">
+                            <Separator className="mb-3" />
+                            <p className="text-xs font-medium text-muted-foreground mb-2">
+                              Size pricing multipliers for "{groupName}"
+                            </p>
+                            <p className="text-[11px] text-muted-foreground mb-2">
+                              Set how the base upcharge for each modifier scales by product size. A value of 1 means no change; 1.5 means 150% of the base price.
+                            </p>
+                            <div className="overflow-x-auto rounded-lg border">
+                              <table className="w-full text-sm">
+                                <thead>
+                                  <tr className="bg-muted/50">
+                                    <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Modifier Option</th>
+                                    <th className="text-right text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Base Price</th>
+                                    {wizardVariants.map((wv, vi) => (
+                                      <th key={wv.tempId} className="text-center text-xs font-medium text-muted-foreground px-2 py-2 whitespace-nowrap" data-testid={`wizard-scale-size-header-${vi}`}>
+                                        {wv.name || `Size ${vi + 1}`}
+                                      </th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {groupMods.map((mod, mi) => (
+                                    <tr key={mod.id} className="border-t" data-testid={`wizard-scale-row-${mi}`}>
                                       <td className="px-3 py-2 font-medium text-xs whitespace-nowrap">{mod.name}</td>
-                                      <td className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap">
-                                        {invItem ? (
-                                          <span>{invItem.name} <span className="opacity-60">({invItem.unitOfMeasure})</span></span>
-                                        ) : (
-                                          <span className="text-amber-500">No ingredient</span>
-                                        )}
+                                      <td className="px-3 py-2 text-xs text-muted-foreground text-right whitespace-nowrap">
+                                        {formatMoney(mod.baseUpcharge || 0)}
                                       </td>
                                       {wizardVariants.map((wv, vi) => (
                                         <td key={wv.tempId} className="px-1.5 py-1.5 text-center">
@@ -687,30 +727,84 @@ export default function ProductWizard({
                                             type="number"
                                             step="0.1"
                                             min="0"
-                                            value={modifierSizeQtys[mod.id]?.[wv.name] || ""}
-                                            onChange={e => updateModSizeQty(mod.id, wv.name, e.target.value)}
-                                            placeholder="0"
+                                            value={wizardScaleFactors[wmg.tempId]?.[mod.id]?.[wv.name] || ""}
+                                            onChange={e => updateWizardScaleFactor(wmg.tempId, mod.id, wv.name, e.target.value)}
+                                            placeholder="1"
                                             className="h-7 w-16 text-center text-xs mx-auto"
-                                            disabled={!invItem}
-                                            data-testid={`wizard-mod-qty-${mi}-${vi}`}
+                                            data-testid={`wizard-scale-${mi}-${vi}`}
                                           />
                                         </td>
                                       ))}
                                     </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
                           </div>
-                          <p className="text-[11px] text-muted-foreground mt-1.5">
-                            Enter how much of each ingredient is consumed per size when this modifier is selected.
-                          </p>
-                        </div>
+
+                          {groupMods.some(m => m.inventoryItemId) && (
+                            <div className="mt-2">
+                              <Separator className="mb-3" />
+                              <p className="text-xs font-medium text-muted-foreground mb-2">
+                                Ingredient quantity per size for "{groupName}"
+                              </p>
+                              <div className="overflow-x-auto rounded-lg border">
+                                <table className="w-full text-sm">
+                                  <thead>
+                                    <tr className="bg-muted/50">
+                                      <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Option</th>
+                                      <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Ingredient</th>
+                                      {wizardVariants.map((wv, vi) => (
+                                        <th key={wv.tempId} className="text-center text-xs font-medium text-muted-foreground px-2 py-2 whitespace-nowrap" data-testid={`wizard-mod-size-header-${vi}`}>
+                                          {wv.name || `Size ${vi + 1}`}
+                                        </th>
+                                      ))}
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {groupMods.filter(m => m.inventoryItemId).map((mod, mi) => {
+                                      const invItem = inventory.find(i => i.id === mod.inventoryItemId);
+                                      return (
+                                        <tr key={mod.id} className="border-t" data-testid={`wizard-mod-option-row-${mi}`}>
+                                          <td className="px-3 py-2 font-medium text-xs whitespace-nowrap">{mod.name}</td>
+                                          <td className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap">
+                                            {invItem ? (
+                                              <span>{invItem.name} <span className="opacity-60">({invItem.unitOfMeasure})</span></span>
+                                            ) : (
+                                              <span className="text-amber-500">No ingredient</span>
+                                            )}
+                                          </td>
+                                          {wizardVariants.map((wv, vi) => (
+                                            <td key={wv.tempId} className="px-1.5 py-1.5 text-center">
+                                              <Input
+                                                type="number"
+                                                step="0.1"
+                                                min="0"
+                                                value={modifierSizeQtys[mod.id]?.[wv.name] || ""}
+                                                onChange={e => updateModSizeQty(mod.id, wv.name, e.target.value)}
+                                                placeholder="0"
+                                                className="h-7 w-16 text-center text-xs mx-auto"
+                                                data-testid={`wizard-mod-qty-${mi}-${vi}`}
+                                              />
+                                            </td>
+                                          ))}
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                              <p className="text-[11px] text-muted-foreground mt-1.5">
+                                Enter how much of each ingredient is consumed per size when this modifier is selected.
+                              </p>
+                            </div>
+                          )}
+                        </>
                       )}
 
                       {wmg.isNew && (
                         <p className="text-xs text-muted-foreground italic">
-                          Size quantities can be configured after the group and its options are created in the Modifiers tab.
+                          Size pricing and ingredient quantities can be configured after the group and its options are created in the Modifiers tab.
                         </p>
                       )}
                     </CardContent>
@@ -724,7 +818,7 @@ export default function ProductWizard({
     );
   }
 
-  function renderStep3Recipes() {
+  function renderStep2Recipes() {
     return (
       <div className="space-y-4">
         <div>
@@ -925,13 +1019,36 @@ export default function ProductWizard({
                         const sizeMap = modifierSizeQtys[mod.id];
                         return sizeMap && Object.values(sizeMap).some(v => Number(v) > 0);
                       });
+                      const scaleData = wizardScaleFactors[wmg.tempId] || {};
+                      const modsWithScales = groupMods.filter(mod => {
+                        const sf = scaleData[mod.id];
+                        return sf && Object.values(sf).some(v => Number(v) > 0 && Number(v) !== 1);
+                      });
                       return (
                         <div key={wmg.tempId} data-testid={`wizard-review-mod-${i}`}>
                           <div className="text-sm p-1.5 rounded-lg bg-muted/30">
                             {label} {wmg.isNew && <Badge variant="outline" className="text-[10px] ml-1">New</Badge>}
                           </div>
+                          {modsWithScales.length > 0 && (
+                            <div className="ml-3 mt-1 space-y-0.5">
+                              <p className="text-[10px] font-medium text-muted-foreground">Price multipliers:</p>
+                              {modsWithScales.map(mod => {
+                                const sf = scaleData[mod.id] || {};
+                                const scaleStr = wizardVariants
+                                  .filter(wv => sf[wv.name] && Number(sf[wv.name]) > 0)
+                                  .map(wv => `${wv.name}: ×${sf[wv.name]}`)
+                                  .join(", ");
+                                return (
+                                  <p key={mod.id} className="text-[11px] text-muted-foreground">
+                                    {mod.name} — {scaleStr}
+                                  </p>
+                                );
+                              })}
+                            </div>
+                          )}
                           {modsWithQtys.length > 0 && (
                             <div className="ml-3 mt-1 space-y-0.5">
+                              <p className="text-[10px] font-medium text-muted-foreground">Ingredient quantities:</p>
                               {modsWithQtys.map(mod => {
                                 const sizeMap = modifierSizeQtys[mod.id] || {};
                                 const sizeStr = wizardVariants
@@ -984,8 +1101,8 @@ export default function ProductWizard({
     if (step === 0) return renderStep0();
     if (isRetail) return renderReview();
     if (step === 1) return renderStep1Variants();
-    if (step === 2) return renderStep2Modifiers();
-    if (step === 3) return renderStep3Recipes();
+    if (step === 2) return renderStep2Recipes();
+    if (step === 3) return renderStep3Modifiers();
     if (step === 4) return renderReview();
     return null;
   }

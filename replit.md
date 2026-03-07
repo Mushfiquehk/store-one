@@ -44,13 +44,13 @@ Full-stack fuel station point-of-sale application built with React + Express + S
 - `/settings` — Tax rate configuration
 
 ## Frontend Patterns (per Research Paper)
-- **Wizard Design Pattern**: Product creation uses 5-step progressive disclosure (Item Type → Variants → Modifiers → BOM/Recipe → Review)
+- **Wizard Design Pattern**: Product creation uses 5-step progressive disclosure (Item Type → Variants → Recipes → Modifiers → Review)
 - **Retail vs Prepared Dichotomy**: Retail items use quick-add path; Prepared items trigger full wizard
 - **Size-Scaled Pricing**: Modifier upcharges scale by variant size via product-level scale factors stored on `product_modifier_groups.scale_factors`. Configured per product-modifier-group link, not on the modifier itself.
 - **Auto-Scale BOM**: Define base recipe for one size, proportionally scale to other sizes
 - **POS Modifier Selection**: Composite items prompt modifier selection with min/max validation
 - **Modifier Ingredient Assignment**: Each modifier option can have an inventory item + quantity per use; POS deducts via BOM entries first, then falls back to modifier's own inventoryItemId
-- **Wizard Modifier Size Grid**: When assigning an existing modifier group during product creation, a grid shows modifier options as rows × product sizes as columns for entering per-size ingredient quantities
+- **Wizard Modifier Size Grid**: When assigning an existing modifier group during product creation, two grids appear: (1) pricing multipliers grid (modifier options × product sizes) for scale factors, and (2) ingredient quantity grid for modifiers with assigned ingredients
 - **Price Calculation**: P_final = P_variant + Σ(U_modifier × S_price_matrix)
 
 ## CRUD Capabilities
