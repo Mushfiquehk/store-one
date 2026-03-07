@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Check, ChevronRight, ChevronLeft, Package, ChefHat, Plus, Trash2, Search, X } from "lucide-react";
+import { Check, ChevronRight, ChevronLeft, Package, ChefHat, Plus, Trash2, Search, X, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -418,6 +418,16 @@ export default function ProductWizard({
             </button>
           </div>
         </div>
+
+        {itemType === "PREPARED" && (
+          <div className="flex gap-3 items-start rounded-xl border border-blue-200 bg-blue-50/60 dark:border-blue-900 dark:bg-blue-950/30 p-3 animate-in fade-in slide-in-from-bottom-2 duration-300" data-testid="wizard-prepared-tip">
+            <Info className="h-5 w-5 text-blue-500 shrink-0 mt-0.5" />
+            <div className="text-sm text-blue-800 dark:text-blue-300">
+              <p className="font-medium">Before you begin</p>
+              <p className="text-xs mt-0.5 opacity-90">Make sure all the raw ingredients and inventory items you need for this product's recipe have already been added in the Bulk Inventory tab. You'll link them to this item in Step 4.</p>
+            </div>
+          </div>
+        )}
 
         {itemType && (
           <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
