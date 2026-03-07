@@ -64,12 +64,20 @@ export async function registerRoutes(
       res.status(400).json({ message: e.message });
     }
   });
+  app.patch("/api/modifier-groups/:id", (req, res) => {
+    const result = storage.updateModifierGroup(req.params.id, req.body);
+    if (!result) return res.status(404).json({ message: "Not found" });
+    res.json(result);
+  });
   app.delete("/api/modifier-groups/:id", (req, res) => {
     storage.deleteModifierGroup(req.params.id);
     res.status(204).end();
   });
 
   // --- Product Modifier Groups ---
+  app.get("/api/product-modifier-links", (_req, res) => {
+    res.json(storage.getAllProductModifierGroupLinks());
+  });
   app.get("/api/products/:id/modifier-groups", (req, res) => {
     res.json(storage.getProductModifierGroups(req.params.id));
   });

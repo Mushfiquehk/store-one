@@ -29,6 +29,7 @@ export interface IStorage {
 
   getModifierGroups(): ModifierGroup[];
   createModifierGroup(data: InsertModifierGroup): ModifierGroup;
+  updateModifierGroup(id: string, data: Partial<InsertModifierGroup>): ModifierGroup | undefined;
   deleteModifierGroup(id: string): void;
 
   getProductModifierGroups(productId: string): string[];
@@ -112,10 +113,23 @@ export class SqliteStorage implements IStorage {
     db.insert(modifierGroups).values(data).run();
     return db.select().from(modifierGroups).where(eq(modifierGroups.id, data.id)).get()!;
   }
+  updateModifierGroup(id: string, data: Partial<InsertModifierGroup>): ModifierGroup | undefined {
+    db.update(modifierGroups).set(data).where(eq(modifierGroups.id, id)).run();
+    return db.select().from(modifierGroups).where(eq(modifierGroups.id, id)).get();
+  }
   deleteModifierGroup(id: string): void {
     db.delete(modifierGroups).where(eq(modifierGroups.id, id)).run();
   }
 
+  getAllProductModifierGroupLinks(): Record<string, string[]> {
+    const rows = db.select().from(productModifierGroups).all();
+    const map: Record<string, string[]> = {};
+    for (const r of rows) {
+      if (!map[r.productId]) map[r.productId] = [];
+      map[r.productId].push(r.modifierGroupId);
+    }
+    return map;
+  }
   getProductModifierGroups(productId: string): string[] {
     return db.select().from(productModifierGroups)
       .where(eq(productModifierGroups.productId, productId))

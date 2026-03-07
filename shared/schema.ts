@@ -7,6 +7,7 @@ export const products = sqliteTable("products", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   type: text("type").notNull(),
+  isComposite: integer("is_composite", { mode: "boolean" }).notNull().default(false),
   attributes: text("attributes"),
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
@@ -17,12 +18,15 @@ export const variants = sqliteTable("variants", {
   sku: text("sku").unique(),
   name: text("name").notNull(),
   basePrice: integer("base_price").notNull(),
+  directInventoryId: text("direct_inventory_id"),
   config: text("config"),
 });
 
 export const modifierGroups = sqliteTable("modifier_groups", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
+  minSelections: integer("min_selections").notNull().default(0),
+  maxSelections: integer("max_selections").notNull().default(0),
   selectionRules: text("selection_rules"),
 });
 
@@ -35,6 +39,8 @@ export const modifiers = sqliteTable("modifiers", {
   id: text("id").primaryKey(),
   modifierGroupId: text("modifier_group_id").notNull().references(() => modifierGroups.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
+  baseUpcharge: integer("base_upcharge").notNull().default(0),
+  scaleFactor: text("scale_factor"),
   pricingLogic: text("pricing_logic"),
 });
 
@@ -52,6 +58,7 @@ export const billOfMaterials = sqliteTable("bill_of_materials", {
   sourceId: text("source_id").notNull(),
   inventoryItemId: text("inventory_item_id").notNull().references(() => inventoryItems.id),
   quantityDeducted: real("quantity_deducted").notNull(),
+  scaleFactorMatrix: text("scale_factor_matrix"),
 });
 
 export const employees = sqliteTable("employees", {

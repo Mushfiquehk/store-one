@@ -7,6 +7,7 @@ export type Product = {
   id: string;
   name: string;
   type: string;
+  isComposite: boolean;
   attributes: string | null;
   createdAt: string | null;
 };
@@ -17,12 +18,15 @@ export type Variant = {
   sku: string | null;
   name: string;
   basePrice: number;
+  directInventoryId: string | null;
   config: string | null;
 };
 
 export type ModifierGroup = {
   id: string;
   name: string;
+  minSelections: number;
+  maxSelections: number;
   selectionRules: string | null;
 };
 
@@ -30,6 +34,8 @@ export type Modifier = {
   id: string;
   modifierGroupId: string;
   name: string;
+  baseUpcharge: number;
+  scaleFactor: string | null;
   pricingLogic: string | null;
 };
 
@@ -47,6 +53,7 @@ export type BomEntry = {
   sourceId: string;
   inventoryItemId: string;
   quantityDeducted: number;
+  scaleFactorMatrix: string | null;
 };
 
 export type Employee = {
@@ -83,6 +90,11 @@ export type CartItem = {
   modifiers: { modifierId: string; qty: number }[];
 };
 
+export type ProductModifierGroupLink = {
+  productId: string;
+  groupIds: string[];
+};
+
 type StoreContextType = {
   products: Product[];
   variants: Variant[];
@@ -94,6 +106,7 @@ type StoreContextType = {
   timePunches: TimePunch[];
   sales: Sale[];
   integrations: string[];
+  productModifierLinks: Record<string, string[]>;
   isLoading: boolean;
 
   addProduct: (data: Partial<Product>) => void;
@@ -103,6 +116,16 @@ type StoreContextType = {
   addVariant: (data: Partial<Variant>) => void;
   updateVariant: (id: string, data: Partial<Variant>) => void;
   deleteVariant: (id: string) => void;
+
+  addModifierGroup: (data: Partial<ModifierGroup>) => void;
+  updateModifierGroup: (id: string, data: Partial<ModifierGroup>) => void;
+  deleteModifierGroup: (id: string) => void;
+
+  addModifier: (data: Partial<Modifier>) => void;
+  updateModifier: (id: string, data: Partial<Modifier>) => void;
+  deleteModifier: (id: string) => void;
+
+  setProductModifierGroups: (productId: string, groupIds: string[]) => void;
 
   addInventoryItem: (data: Partial<InventoryItem>) => void;
   updateInventoryItem: (id: string, data: Partial<InventoryItem>) => void;
@@ -139,6 +162,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const { data: timePunches = [] } = useQuery({ queryKey: ["timePunches"], queryFn: () => api.timePunches.list() });
   const { data: sales = [] } = useQuery({ queryKey: ["sales"], queryFn: api.sales.list });
 
+  const { data: productModifierLinksData = {} } = useQuery({ queryKey: ["productModifierLinks"], queryFn: api.productModifierGroups.listAll });
+  const [localProductModifierLinks, setLocalProductModifierLinks] = useState<Record<string, string[]>>({});
+  const productModifierLinks = { ...productModifierLinksData, ...localProductModifierLinks };
+
   const isLoading = loadingProducts || loadingVariants || loadingInventory;
 
   const inv = (keys: string[][]) => keys.forEach(k => qc.invalidateQueries({ queryKey: k }));
@@ -150,6 +177,23 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const addVariantMut = useMutation({ mutationFn: api.variants.create, onSuccess: () => inv([["variants"]]) });
   const updateVariantMut = useMutation({ mutationFn: ({ id, data }: { id: string; data: any }) => api.variants.update(id, data), onSuccess: () => inv([["variants"]]) });
   const deleteVariantMut = useMutation({ mutationFn: api.variants.delete, onSuccess: () => inv([["variants"]]) });
+
+  const addModGroupMut = useMutation({ mutationFn: api.modifierGroups.create, onSuccess: () => inv([["modifierGroups"]]) });
+  const updateModGroupMut = useMutation({ mutationFn: ({ id, data }: { id: string; data: any }) => api.modifierGroups.update(id, data), onSuccess: () => inv([["modifierGroups"]]) });
+  const deleteModGroupMut = useMutation({ mutationFn: api.modifierGroups.delete, onSuccess: () => inv([["modifierGroups"]]) });
+
+  const addModMut = useMutation({ mutationFn: api.modifiers.create, onSuccess: () => inv([["modifiers"]]) });
+  const updateModMut = useMutation({ mutationFn: ({ id, data }: { id: string; data: any }) => api.modifiers.update(id, data), onSuccess: () => inv([["modifiers"]]) });
+  const deleteModMut = useMutation({ mutationFn: api.modifiers.delete, onSuccess: () => inv([["modifiers"]]) });
+
+  const setProductModGroupsMut = useMutation({
+    mutationFn: ({ productId, groupIds }: { productId: string; groupIds: string[] }) =>
+      api.productModifierGroups.set(productId, groupIds),
+    onSuccess: (_data, variables) => {
+      setLocalProductModifierLinks(prev => ({ ...prev, [variables.productId]: variables.groupIds }));
+      inv([["productModifierLinks"]]);
+    },
+  });
 
   const addInvMut = useMutation({ mutationFn: api.inventory.create, onSuccess: () => inv([["inventory"]]) });
   const updateInvMut = useMutation({ mutationFn: ({ id, data }: { id: string; data: any }) => api.inventory.update(id, data), onSuccess: () => inv([["inventory"]]) });
@@ -178,6 +222,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     timePunches,
     sales,
     integrations,
+    productModifierLinks,
     isLoading,
 
     addProduct: (data) => addProductMut.mutate(data),
@@ -187,6 +232,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     addVariant: (data) => addVariantMut.mutate(data),
     updateVariant: (id, data) => updateVariantMut.mutate({ id, data }),
     deleteVariant: (id) => deleteVariantMut.mutate(id),
+
+    addModifierGroup: (data) => addModGroupMut.mutate(data),
+    updateModifierGroup: (id, data) => updateModGroupMut.mutate({ id, data }),
+    deleteModifierGroup: (id) => deleteModGroupMut.mutate(id),
+
+    addModifier: (data) => addModMut.mutate(data),
+    updateModifier: (id, data) => updateModMut.mutate({ id, data }),
+    deleteModifier: (id) => deleteModMut.mutate(id),
+
+    setProductModifierGroups: (productId, groupIds) => setProductModGroupsMut.mutate({ productId, groupIds }),
 
     addInventoryItem: (data) => addInvMut.mutate(data),
     updateInventoryItem: (id, data) => updateInvMut.mutate({ id, data }),

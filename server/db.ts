@@ -23,6 +23,7 @@ function initTables() {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       type TEXT NOT NULL,
+      is_composite INTEGER NOT NULL DEFAULT 0,
       attributes TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
@@ -33,6 +34,7 @@ function initTables() {
       sku TEXT UNIQUE,
       name TEXT NOT NULL,
       base_price INTEGER NOT NULL,
+      direct_inventory_id TEXT,
       config TEXT,
       FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
     );
@@ -40,6 +42,8 @@ function initTables() {
     CREATE TABLE IF NOT EXISTS modifier_groups (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
+      min_selections INTEGER NOT NULL DEFAULT 0,
+      max_selections INTEGER NOT NULL DEFAULT 0,
       selection_rules TEXT
     );
 
@@ -55,6 +59,8 @@ function initTables() {
       id TEXT PRIMARY KEY,
       modifier_group_id TEXT NOT NULL,
       name TEXT NOT NULL,
+      base_upcharge INTEGER NOT NULL DEFAULT 0,
+      scale_factor TEXT,
       pricing_logic TEXT,
       FOREIGN KEY (modifier_group_id) REFERENCES modifier_groups(id) ON DELETE CASCADE
     );
@@ -73,6 +79,7 @@ function initTables() {
       source_id TEXT NOT NULL,
       inventory_item_id TEXT NOT NULL,
       quantity_deducted REAL NOT NULL,
+      scale_factor_matrix TEXT,
       FOREIGN KEY (inventory_item_id) REFERENCES inventory_items(id)
     );
 
@@ -109,30 +116,30 @@ function seedIfEmpty() {
   const count = sqlite.prepare("SELECT COUNT(*) as c FROM products").get() as { c: number };
   if (count.c > 0) return;
 
-  const insertProduct = sqlite.prepare("INSERT INTO products (id, name, type, attributes) VALUES (?, ?, ?, ?)");
-  const insertVariant = sqlite.prepare("INSERT INTO variants (id, product_id, sku, name, base_price, config) VALUES (?, ?, ?, ?, ?, ?)");
+  const insertProduct = sqlite.prepare("INSERT INTO products (id, name, type, is_composite, attributes) VALUES (?, ?, ?, ?, ?)");
+  const insertVariant = sqlite.prepare("INSERT INTO variants (id, product_id, sku, name, base_price, direct_inventory_id, config) VALUES (?, ?, ?, ?, ?, ?, ?)");
   const insertInventory = sqlite.prepare("INSERT INTO inventory_items (id, name, unit_of_measure, current_quantity, tracking_config) VALUES (?, ?, ?, ?, ?)");
   const insertBom = sqlite.prepare("INSERT INTO bill_of_materials (id, source_type, source_id, inventory_item_id, quantity_deducted) VALUES (?, ?, ?, ?, ?)");
   const insertEmployee = sqlite.prepare("INSERT INTO employees (id, name, role, pay_rate, pin) VALUES (?, ?, ?, ?, ?)");
 
   const txn = sqlite.transaction(() => {
-    insertProduct.run("prod_91", "Regular 91", "RETAIL", JSON.stringify({ tax_exempt: false, tags: ["petrol", "fuel"] }));
-    insertProduct.run("prod_95", "Premium 95", "RETAIL", JSON.stringify({ tax_exempt: false, tags: ["petrol", "premium", "fuel"] }));
-    insertProduct.run("prod_98", "Ultimate 98", "RETAIL", JSON.stringify({ tax_exempt: false, tags: ["petrol", "premium", "fuel"] }));
-    insertProduct.run("prod_diesel", "Diesel", "RETAIL", JSON.stringify({ tax_exempt: false, tags: ["diesel", "fuel"] }));
-    insertProduct.run("prod_water", "Bottled Water", "RETAIL", JSON.stringify({ tax_exempt: false, tags: ["shop", "beverage"] }));
-
-    insertVariant.run("var_91_per_l", "prod_91", "FUEL-91", "Per Litre", 185, null);
-    insertVariant.run("var_95_per_l", "prod_95", "FUEL-95", "Per Litre", 205, null);
-    insertVariant.run("var_98_per_l", "prod_98", "FUEL-98", "Per Litre", 225, null);
-    insertVariant.run("var_diesel_per_l", "prod_diesel", "FUEL-DSL", "Per Litre", 195, null);
-    insertVariant.run("var_water_500", "prod_water", "SH-WTR", "500ml", 250, JSON.stringify({ size: "500ml" }));
+    insertProduct.run("prod_91", "Regular 91", "RETAIL", 0, JSON.stringify({ tax_exempt: false, tags: ["petrol", "fuel"] }));
+    insertProduct.run("prod_95", "Premium 95", "RETAIL", 0, JSON.stringify({ tax_exempt: false, tags: ["petrol", "premium", "fuel"] }));
+    insertProduct.run("prod_98", "Ultimate 98", "RETAIL", 0, JSON.stringify({ tax_exempt: false, tags: ["petrol", "premium", "fuel"] }));
+    insertProduct.run("prod_diesel", "Diesel", "RETAIL", 0, JSON.stringify({ tax_exempt: false, tags: ["diesel", "fuel"] }));
+    insertProduct.run("prod_water", "Bottled Water", "RETAIL", 0, JSON.stringify({ tax_exempt: false, tags: ["shop", "beverage"] }));
 
     insertInventory.run("inv_petrol_base", "Unleaded Petrol Base", "L", 50000, JSON.stringify({ low_stock_alert: 10000 }));
     insertInventory.run("inv_diesel_base", "Diesel Base", "L", 40000, JSON.stringify({ low_stock_alert: 8000 }));
     insertInventory.run("inv_octane_booster", "Octane Booster", "L", 5000, JSON.stringify({ low_stock_alert: 1000 }));
     insertInventory.run("inv_synthetic_oil", "Full Synthetic Oil", "bottle", 100, JSON.stringify({ low_stock_alert: 20 }));
     insertInventory.run("inv_water", "Spring Water 500ml", "each", 200, JSON.stringify({ low_stock_alert: 50 }));
+
+    insertVariant.run("var_91_per_l", "prod_91", "FUEL-91", "Per Litre", 185, "inv_petrol_base", null);
+    insertVariant.run("var_95_per_l", "prod_95", "FUEL-95", "Per Litre", 205, "inv_petrol_base", null);
+    insertVariant.run("var_98_per_l", "prod_98", "FUEL-98", "Per Litre", 225, "inv_petrol_base", null);
+    insertVariant.run("var_diesel_per_l", "prod_diesel", "FUEL-DSL", "Per Litre", 195, "inv_diesel_base", null);
+    insertVariant.run("var_water_500", "prod_water", "SH-WTR", "500ml", 250, "inv_water", JSON.stringify({ size: "500ml" }));
 
     insertBom.run("bom_91", "VARIANT", "var_91_per_l", "inv_petrol_base", 1);
     insertBom.run("bom_95_petrol", "VARIANT", "var_95_per_l", "inv_petrol_base", 0.95);

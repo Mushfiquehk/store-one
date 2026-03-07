@@ -29,7 +29,14 @@ export const api = {
   modifierGroups: {
     list: () => request<any[]>("/modifier-groups"),
     create: (data: any) => request<any>("/modifier-groups", { method: "POST", body: JSON.stringify(data) }),
+    update: (id: string, data: any) => request<any>(`/modifier-groups/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
     delete: (id: string) => request<void>(`/modifier-groups/${id}`, { method: "DELETE" }),
+  },
+  productModifierGroups: {
+    get: (productId: string) => request<string[]>(`/products/${productId}/modifier-groups`),
+    set: (productId: string, groupIds: string[]) =>
+      request<any>(`/products/${productId}/modifier-groups`, { method: "PUT", body: JSON.stringify({ groupIds }) }),
+    listAll: () => request<Record<string, string[]>>(`/product-modifier-links`),
   },
   modifiers: {
     list: (groupId?: string) => request<any[]>(`/modifiers${groupId ? `?groupId=${groupId}` : ""}`),

@@ -2,11 +2,12 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import AppShell from "@/components/app-shell";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { ClipboardList, Fuel, Package } from "lucide-react";
+import { ClipboardList, Fuel, Package, SlidersHorizontal } from "lucide-react";
 
 import MenuPageContent from "./menu";
 import RecipesPageContent from "./recipes";
 import InventoryPageContent from "./inventory";
+import ModifiersPageContent from "./modifiers";
 
 export default function ProductsPage() {
   const [activeTab, setActiveTab] = useState("menu");
@@ -21,6 +22,9 @@ export default function ProductsPage() {
                 <TabsTrigger value="menu" className="rounded-lg h-full px-4">
                   <ClipboardList className="h-4 w-4 mr-2" /> Station Menu
                 </TabsTrigger>
+                <TabsTrigger value="modifiers" className="rounded-lg h-full px-4" data-testid="tab-modifiers">
+                  <SlidersHorizontal className="h-4 w-4 mr-2" /> Modifiers
+                </TabsTrigger>
                 <TabsTrigger value="recipes" className="rounded-lg h-full px-4">
                   <Fuel className="h-4 w-4 mr-2" /> Bill of Materials
                 </TabsTrigger>
@@ -32,6 +36,10 @@ export default function ProductsPage() {
 
             <TabsContent value="menu" className="mt-0 space-y-6">
                <MenuPageContent isTab={true} />
+            </TabsContent>
+
+            <TabsContent value="modifiers" className="mt-0 space-y-6">
+               <ModifiersPageContent isTab={true} />
             </TabsContent>
 
             <TabsContent value="recipes" className="mt-0 space-y-6">

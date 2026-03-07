@@ -1,0 +1,526 @@
+import { useState, useMemo } from "react";
+import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, Link2, DollarSign } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Separator } from "@/components/ui/separator";
+import { useToast } from "@/hooks/use-toast";
+import { useStore, type ModifierGroup, type Modifier } from "@/lib/store";
+
+function formatMoney(cents: number) {
+  return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(cents / 100);
+}
+
+function uid(prefix: string) {
+  return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`;
+}
+
+export default function ModifiersPageContent({ isTab = false }: { isTab?: boolean }) {
+  const { toast } = useToast();
+  const {
+    modifierGroups, modifiers, products, variants,
+    addModifierGroup, updateModifierGroup, deleteModifierGroup,
+    addModifier, updateModifier, deleteModifier,
+    productModifierLinks, setProductModifierGroups,
+  } = useStore();
+
+  const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null);
+  const [groupDialogOpen, setGroupDialogOpen] = useState(false);
+  const [editingGroup, setEditingGroup] = useState<ModifierGroup | null>(null);
+  const [groupForm, setGroupForm] = useState({ name: "", minSelections: 0, maxSelections: 0 });
+
+  const [modifierDialogOpen, setModifierDialogOpen] = useState(false);
+  const [editingModifier, setEditingModifier] = useState<Modifier | null>(null);
+  const [modifierForm, setModifierForm] = useState({ name: "", baseUpcharge: "", scaleFactor: "" });
+  const [modifierGroupId, setModifierGroupId] = useState<string>("");
+
+  const [deleteTarget, setDeleteTarget] = useState<{ type: "group" | "modifier"; id: string; name: string } | null>(null);
+
+  const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+  const [linkGroupId, setLinkGroupId] = useState<string>("");
+  const [linkSelectedProducts, setLinkSelectedProducts] = useState<string[]>([]);
+
+  const productLinksForGroup = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    for (const [productId, groupIds] of Object.entries(productModifierLinks)) {
+      for (const gid of groupIds) {
+        if (!map[gid]) map[gid] = [];
+        map[gid].push(productId);
+      }
+    }
+    return map;
+  }, [productModifierLinks]);
+
+  const getModifiersForGroup = (groupId: string) => modifiers.filter(m => m.modifierGroupId === groupId);
+
+  function openCreateGroup() {
+    setEditingGroup(null);
+    setGroupForm({ name: "", minSelections: 0, maxSelections: 0 });
+    setGroupDialogOpen(true);
+  }
+
+  function openEditGroup(group: ModifierGroup) {
+    setEditingGroup(group);
+    setGroupForm({ name: group.name, minSelections: group.minSelections, maxSelections: group.maxSelections });
+    setGroupDialogOpen(true);
+  }
+
+  function handleSaveGroup() {
+    const name = groupForm.name.trim();
+    if (!name) {
+      toast({ title: "Name required" });
+      return;
+    }
+    if (groupForm.maxSelections > 0 && groupForm.minSelections > groupForm.maxSelections) {
+      toast({ title: "Invalid selection rules", description: "Min selections cannot exceed max selections" });
+      return;
+    }
+    if (editingGroup) {
+      updateModifierGroup(editingGroup.id, {
+        name,
+        minSelections: groupForm.minSelections,
+        maxSelections: groupForm.maxSelections,
+      });
+      toast({ title: "Modifier group updated" });
+    } else {
+      addModifierGroup({
+        id: uid("mg"),
+        name,
+        minSelections: groupForm.minSelections,
+        maxSelections: groupForm.maxSelections,
+      });
+      toast({ title: "Modifier group created" });
+    }
+    setGroupDialogOpen(false);
+  }
+
+  function openCreateModifier(groupId: string) {
+    setEditingModifier(null);
+    setModifierGroupId(groupId);
+    setModifierForm({ name: "", baseUpcharge: "", scaleFactor: "" });
+    setModifierDialogOpen(true);
+  }
+
+  function openEditModifier(mod: Modifier) {
+    setEditingModifier(mod);
+    setModifierGroupId(mod.modifierGroupId);
+    setModifierForm({
+      name: mod.name,
+      baseUpcharge: (mod.baseUpcharge / 100).toFixed(2),
+      scaleFactor: mod.scaleFactor || "",
+    });
+    setModifierDialogOpen(true);
+  }
+
+  function handleSaveModifier() {
+    const name = modifierForm.name.trim();
+    if (!name) {
+      toast({ title: "Name required" });
+      return;
+    }
+    const upcharge = Math.round(parseFloat(modifierForm.baseUpcharge || "0") * 100);
+    if (!Number.isFinite(upcharge)) {
+      toast({ title: "Invalid price" });
+      return;
+    }
+
+    let scaleFactorStr: string | null = modifierForm.scaleFactor.trim() || null;
+    if (scaleFactorStr) {
+      try {
+        JSON.parse(scaleFactorStr);
+      } catch {
+        toast({ title: "Invalid scale factor", description: "Must be valid JSON, e.g. {\"SM\": 1.0, \"LG\": 2.0}" });
+        return;
+      }
+    }
+
+    if (editingModifier) {
+      updateModifier(editingModifier.id, {
+        name,
+        baseUpcharge: upcharge,
+        scaleFactor: scaleFactorStr,
+      });
+      toast({ title: "Modifier updated" });
+    } else {
+      addModifier({
+        id: uid("mod"),
+        modifierGroupId: modifierGroupId,
+        name,
+        baseUpcharge: upcharge,
+        scaleFactor: scaleFactorStr,
+      });
+      toast({ title: "Modifier created" });
+    }
+    setModifierDialogOpen(false);
+  }
+
+  function handleDelete() {
+    if (!deleteTarget) return;
+    if (deleteTarget.type === "group") {
+      deleteModifierGroup(deleteTarget.id);
+      if (expandedGroupId === deleteTarget.id) setExpandedGroupId(null);
+      toast({ title: "Modifier group deleted" });
+    } else {
+      deleteModifier(deleteTarget.id);
+      toast({ title: "Modifier option deleted" });
+    }
+    setDeleteTarget(null);
+  }
+
+  function openLinkDialog(groupId: string) {
+    setLinkGroupId(groupId);
+    const linked = Object.entries(productModifierLinks)
+      .filter(([, gids]) => gids.includes(groupId))
+      .map(([pid]) => pid);
+    setLinkSelectedProducts(linked);
+    setLinkDialogOpen(true);
+  }
+
+  function handleToggleProductLink(productId: string) {
+    setLinkSelectedProducts(prev =>
+      prev.includes(productId) ? prev.filter(id => id !== productId) : [...prev, productId]
+    );
+  }
+
+  function handleSaveLinks() {
+    const allProductIds = products.map(p => p.id);
+    for (const pid of allProductIds) {
+      const currentLinks = productModifierLinks[pid] || [];
+      const isLinked = linkSelectedProducts.includes(pid);
+      const wasLinked = currentLinks.includes(linkGroupId);
+      if (isLinked && !wasLinked) {
+        setProductModifierGroups(pid, [...currentLinks, linkGroupId]);
+      } else if (!isLinked && wasLinked) {
+        setProductModifierGroups(pid, currentLinks.filter(g => g !== linkGroupId));
+      }
+    }
+    toast({ title: "Product links updated" });
+    setLinkDialogOpen(false);
+  }
+
+  function parseScaleFactor(sf: string | null): Record<string, number> | null {
+    if (!sf) return null;
+    try { return JSON.parse(sf); } catch { return null; }
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold" data-testid="text-modifiers-title">Modifier Groups</h2>
+          <p className="text-sm text-muted-foreground">Manage modifier groups, options, pricing, and product assignments</p>
+        </div>
+        <Button onClick={openCreateGroup} data-testid="button-create-modifier-group">
+          <Plus className="h-4 w-4 mr-1" /> New Group
+        </Button>
+      </div>
+
+      {modifierGroups.length === 0 ? (
+        <Card>
+          <CardContent className="py-12 text-center">
+            <p className="text-muted-foreground" data-testid="text-no-modifier-groups">No modifier groups yet. Create one to get started.</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {modifierGroups.map(group => {
+            const isExpanded = expandedGroupId === group.id;
+            const groupModifiers = getModifiersForGroup(group.id);
+            const linkedProducts = productLinksForGroup[group.id] || [];
+
+            return (
+              <Card key={group.id} data-testid={`card-modifier-group-${group.id}`}>
+                <CardHeader className="py-4 px-5">
+                  <div className="flex items-center justify-between">
+                    <div
+                      className="flex items-center gap-2 cursor-pointer flex-1"
+                      onClick={() => setExpandedGroupId(isExpanded ? null : group.id)}
+                      data-testid={`button-toggle-group-${group.id}`}
+                    >
+                      {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                      <CardTitle className="text-base" data-testid={`text-group-name-${group.id}`}>{group.name}</CardTitle>
+                      <Badge variant="outline" data-testid={`text-group-selections-${group.id}`}>
+                        {group.minSelections === 0 && group.maxSelections === 0
+                          ? "Unlimited"
+                          : `${group.minSelections}–${group.maxSelections || "∞"}`}
+                      </Badge>
+                      <Badge variant="secondary" data-testid={`text-group-option-count-${group.id}`}>
+                        {groupModifiers.length} option{groupModifiers.length !== 1 ? "s" : ""}
+                      </Badge>
+                      {linkedProducts.length > 0 && (
+                        <Badge variant="secondary" data-testid={`text-group-linked-count-${group.id}`}>
+                          <Link2 className="h-3 w-3 mr-1" />
+                          {linkedProducts.length} product{linkedProducts.length !== 1 ? "s" : ""}
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button variant="ghost" size="icon" onClick={() => openLinkDialog(group.id)} data-testid={`button-link-group-${group.id}`}>
+                        <Link2 className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => openEditGroup(group)} data-testid={`button-edit-group-${group.id}`}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => setDeleteTarget({ type: "group", id: group.id, name: group.name })} data-testid={`button-delete-group-${group.id}`}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  {linkedProducts.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-2 ml-6">
+                      {linkedProducts.map(pid => {
+                        const p = products.find(pp => pp.id === pid);
+                        return p ? (
+                          <Badge key={pid} variant="outline" className="text-xs" data-testid={`badge-linked-product-${pid}`}>
+                            {p.name}
+                          </Badge>
+                        ) : null;
+                      })}
+                    </div>
+                  )}
+                </CardHeader>
+
+                {isExpanded && (
+                  <CardContent className="pt-0 px-5 pb-4">
+                    <Separator className="mb-4" />
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-sm font-medium">Modifier Options</h3>
+                      <Button size="sm" variant="outline" onClick={() => openCreateModifier(group.id)} data-testid={`button-add-modifier-${group.id}`}>
+                        <Plus className="h-3 w-3 mr-1" /> Add Option
+                      </Button>
+                    </div>
+
+                    {groupModifiers.length === 0 ? (
+                      <p className="text-sm text-muted-foreground py-4 text-center" data-testid={`text-no-modifiers-${group.id}`}>
+                        No options yet. Add one above.
+                      </p>
+                    ) : (
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Name</TableHead>
+                            <TableHead>Base Upcharge</TableHead>
+                            <TableHead>Scale Factor Matrix</TableHead>
+                            <TableHead className="w-[100px]">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {groupModifiers.map(mod => {
+                            const sfObj = parseScaleFactor(mod.scaleFactor);
+                            return (
+                              <TableRow key={mod.id} data-testid={`row-modifier-${mod.id}`}>
+                                <TableCell data-testid={`text-modifier-name-${mod.id}`}>{mod.name}</TableCell>
+                                <TableCell data-testid={`text-modifier-upcharge-${mod.id}`}>
+                                  <span className="flex items-center gap-1">
+                                    <DollarSign className="h-3 w-3 text-muted-foreground" />
+                                    {formatMoney(mod.baseUpcharge)}
+                                  </span>
+                                </TableCell>
+                                <TableCell data-testid={`text-modifier-scalefactor-${mod.id}`}>
+                                  {sfObj ? (
+                                    <div className="flex flex-wrap gap-1">
+                                      {Object.entries(sfObj).map(([key, val]) => (
+                                        <Badge key={key} variant="outline" className="text-xs font-mono">
+                                          {key}: {val}×
+                                        </Badge>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <span className="text-muted-foreground text-xs">—</span>
+                                  )}
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex gap-1">
+                                    <Button variant="ghost" size="icon" onClick={() => openEditModifier(mod)} data-testid={`button-edit-modifier-${mod.id}`}>
+                                      <Pencil className="h-3 w-3" />
+                                    </Button>
+                                    <Button variant="ghost" size="icon" onClick={() => setDeleteTarget({ type: "modifier", id: mod.id, name: mod.name })} data-testid={`button-delete-modifier-${mod.id}`}>
+                                      <Trash2 className="h-3 w-3" />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    )}
+                  </CardContent>
+                )}
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      <Dialog open={groupDialogOpen} onOpenChange={setGroupDialogOpen}>
+        <DialogContent data-testid="dialog-modifier-group">
+          <DialogHeader>
+            <DialogTitle>{editingGroup ? "Edit Modifier Group" : "New Modifier Group"}</DialogTitle>
+            <DialogDescription>
+              {editingGroup ? "Update the modifier group details below." : "Create a new modifier group with selection rules."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="group-name">Group Name</Label>
+              <Input
+                id="group-name"
+                value={groupForm.name}
+                onChange={e => setGroupForm(f => ({ ...f, name: e.target.value }))}
+                placeholder="e.g. Toppings, Size Add-Ons"
+                data-testid="input-group-name"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="min-selections">Min Selections</Label>
+                <Input
+                  id="min-selections"
+                  type="number"
+                  min={0}
+                  value={groupForm.minSelections}
+                  onChange={e => setGroupForm(f => ({ ...f, minSelections: parseInt(e.target.value) || 0 }))}
+                  data-testid="input-min-selections"
+                />
+                <p className="text-xs text-muted-foreground mt-1">0 = optional</p>
+              </div>
+              <div>
+                <Label htmlFor="max-selections">Max Selections</Label>
+                <Input
+                  id="max-selections"
+                  type="number"
+                  min={0}
+                  value={groupForm.maxSelections}
+                  onChange={e => setGroupForm(f => ({ ...f, maxSelections: parseInt(e.target.value) || 0 }))}
+                  data-testid="input-max-selections"
+                />
+                <p className="text-xs text-muted-foreground mt-1">0 = unlimited</p>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setGroupDialogOpen(false)} data-testid="button-cancel-group">Cancel</Button>
+            <Button onClick={handleSaveGroup} data-testid="button-save-group">
+              {editingGroup ? "Update" : "Create"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={modifierDialogOpen} onOpenChange={setModifierDialogOpen}>
+        <DialogContent data-testid="dialog-modifier">
+          <DialogHeader>
+            <DialogTitle>{editingModifier ? "Edit Modifier Option" : "New Modifier Option"}</DialogTitle>
+            <DialogDescription>
+              {editingModifier ? "Update the modifier option details below." : "Add a new option with pricing to this group."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="modifier-name">Option Name</Label>
+              <Input
+                id="modifier-name"
+                value={modifierForm.name}
+                onChange={e => setModifierForm(f => ({ ...f, name: e.target.value }))}
+                placeholder="e.g. Extra Cheese, Whipped Cream"
+                data-testid="input-modifier-name"
+              />
+            </div>
+            <div>
+              <Label htmlFor="modifier-upcharge">Base Upcharge ($)</Label>
+              <Input
+                id="modifier-upcharge"
+                type="number"
+                step="0.01"
+                min="0"
+                value={modifierForm.baseUpcharge}
+                onChange={e => setModifierForm(f => ({ ...f, baseUpcharge: e.target.value }))}
+                placeholder="0.00"
+                data-testid="input-modifier-upcharge"
+              />
+              <p className="text-xs text-muted-foreground mt-1">Price adjustment in dollars (e.g., 0.50 = $0.50)</p>
+            </div>
+            <div>
+              <Label htmlFor="modifier-scalefactor">Scale Factor Matrix (JSON)</Label>
+              <Input
+                id="modifier-scalefactor"
+                value={modifierForm.scaleFactor}
+                onChange={e => setModifierForm(f => ({ ...f, scaleFactor: e.target.value }))}
+                placeholder='{"SM": 1.0, "MD": 1.5, "LG": 2.0}'
+                data-testid="input-modifier-scalefactor"
+              />
+              <p className="text-xs text-muted-foreground mt-1">Size-based pricing multipliers. Leave empty for flat pricing.</p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setModifierDialogOpen(false)} data-testid="button-cancel-modifier">Cancel</Button>
+            <Button onClick={handleSaveModifier} data-testid="button-save-modifier">
+              {editingModifier ? "Update" : "Create"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={linkDialogOpen} onOpenChange={setLinkDialogOpen}>
+        <DialogContent className="max-w-md" data-testid="dialog-link-products">
+          <DialogHeader>
+            <DialogTitle>Link Products</DialogTitle>
+            <DialogDescription>
+              Select which products this modifier group applies to.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[300px] overflow-y-auto space-y-2">
+            {products.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">No products available</p>
+            ) : (
+              products.map(p => (
+                <label
+                  key={p.id}
+                  className="flex items-center gap-3 p-2 rounded-lg hover:bg-muted cursor-pointer"
+                  data-testid={`checkbox-link-product-${p.id}`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={linkSelectedProducts.includes(p.id)}
+                    onChange={() => handleToggleProductLink(p.id)}
+                    className="rounded"
+                  />
+                  <span className="text-sm">{p.name}</span>
+                  <Badge variant="outline" className="text-xs ml-auto">{p.type}</Badge>
+                </label>
+              ))
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLinkDialogOpen(false)} data-testid="button-cancel-link">Cancel</Button>
+            <Button onClick={handleSaveLinks} data-testid="button-save-links">Save Links</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent data-testid="dialog-confirm-delete">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {deleteTarget?.type === "group" ? "Modifier Group" : "Modifier Option"}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete "{deleteTarget?.name}"?
+              {deleteTarget?.type === "group" && " This will also delete all options within this group."}
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-delete">Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} data-testid="button-confirm-delete">Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}

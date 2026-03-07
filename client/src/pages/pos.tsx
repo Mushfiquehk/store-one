@@ -6,10 +6,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useStore, type CartItem } from "@/lib/store";
+import ModifierSelector, { type SelectedModifier } from "@/components/modifier-selector";
 import { format } from "date-fns";
 
 function formatMoney(cents: number) {
@@ -25,12 +27,18 @@ function uid(prefix: string) {
 
 export default function PosPage() {
   const { toast } = useToast();
-  const { products, variants, inventory, bom, sales, addSale, adjustInventory, integrations, isLoading } = useStore();
+  const {
+    products, variants, inventory, bom, sales, modifierGroups, modifiers,
+    productModifierLinks, addSale, adjustInventory, integrations, isLoading,
+  } = useStore();
 
   const [taxRatePct, setTaxRatePct] = useState(8.25);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
   const [paymentType, setPaymentType] = useState<"Cash" | "Card">("Cash");
+
+  const [modSelectorOpen, setModSelectorOpen] = useState(false);
+  const [modSelectorProduct, setModSelectorProduct] = useState<typeof products[0] | null>(null);
 
   const tags = useMemo(() => {
     const tagSet = new Set<string>();
@@ -70,13 +78,38 @@ export default function PosPage() {
 
   const hasPaymentIntegration = useMemo(() => integrations.some(id => id.startsWith('pay_')), [integrations]);
 
-  function addToCart(variantId: string, productId: string) {
-    const existing = cart.find(c => c.variantId === variantId);
-    if (existing) {
-      setCart(prev => prev.map(c => c.variantId === variantId ? { ...c, qty: c.qty + 1 } : c));
+  function getLinkedGroupIds(productId: string): string[] {
+    return productModifierLinks[productId] || [];
+  }
+
+  function hasModifiers(productId: string): boolean {
+    const groupIds = getLinkedGroupIds(productId);
+    return groupIds.length > 0;
+  }
+
+  function handleProductTap(product: typeof products[0], variantId: string) {
+    if (product.isComposite && hasModifiers(product.id)) {
+      setModSelectorProduct(product);
+      setModSelectorOpen(true);
     } else {
-      setCart(prev => [...prev, { instanceId: uid("line"), variantId, productId, qty: 1, modifiers: [] }]);
+      addToCart(variantId, product.id, []);
     }
+  }
+
+  function addToCart(variantId: string, productId: string, selectedModifiers: SelectedModifier[]) {
+    if (selectedModifiers.length === 0) {
+      const existing = cart.find(c => c.variantId === variantId && c.modifiers.length === 0);
+      if (existing) {
+        setCart(prev => prev.map(c => c.instanceId === existing.instanceId ? { ...c, qty: c.qty + 1 } : c));
+        return;
+      }
+    }
+    setCart(prev => [...prev, { instanceId: uid("line"), variantId, productId, qty: 1, modifiers: selectedModifiers }]);
+  }
+
+  function handleModifierAdd(variantId: string, selectedModifiers: SelectedModifier[]) {
+    if (!modSelectorProduct) return;
+    addToCart(variantId, modSelectorProduct.id, selectedModifiers);
   }
 
   function removeFromCart(instanceId: string) {
@@ -87,9 +120,36 @@ export default function PosPage() {
     setCart([]);
   }
 
-  const subtotalCents = cart.reduce((acc, item) => {
+  function getModifierPrice(mod: typeof modifiers[0], variantId: string): number {
+    if (!mod.scaleFactor) return mod.baseUpcharge;
+    try {
+      const sf: Record<string, number> = JSON.parse(mod.scaleFactor);
+      const variant = variants.find(v => v.id === variantId);
+      if (variant) {
+        if (sf[variant.name] !== undefined) return Math.round(mod.baseUpcharge * sf[variant.name]);
+        if (sf[variant.id] !== undefined) return Math.round(mod.baseUpcharge * sf[variant.id]);
+      }
+    } catch {}
+    return mod.baseUpcharge;
+  }
+
+  function getCartItemModifierTotal(item: CartItem): number {
+    return item.modifiers.reduce((sum, sel) => {
+      const mod = modifiers.find(m => m.id === sel.modifierId);
+      if (!mod) return sum;
+      return sum + getModifierPrice(mod, item.variantId) * sel.qty;
+    }, 0);
+  }
+
+  function getCartItemPrice(item: CartItem): number {
     const v = variants.find(x => x.id === item.variantId);
-    return acc + (v?.basePrice ?? 0) * item.qty;
+    const basePrice = v?.basePrice ?? 0;
+    const modTotal = getCartItemModifierTotal(item);
+    return basePrice + modTotal;
+  }
+
+  const subtotalCents = cart.reduce((acc, item) => {
+    return acc + getCartItemPrice(item) * item.qty;
   }, 0);
 
   const taxCents = Math.round((subtotalCents * taxRatePct) / 100);
@@ -107,8 +167,45 @@ export default function PosPage() {
   function handleRecordSale() {
     cart.forEach(line => {
       const bomEntries = bom.filter(b => b.sourceType === "VARIANT" && b.sourceId === line.variantId);
-      bomEntries.forEach(entry => {
-        adjustInventory(entry.inventoryItemId, -(entry.quantityDeducted * line.qty));
+
+      if (bomEntries.length === 0) {
+        const variant = variants.find(v => v.id === line.variantId);
+        if (variant?.directInventoryId) {
+          adjustInventory(variant.directInventoryId, -line.qty);
+        }
+      } else {
+        bomEntries.forEach(entry => {
+          let qty = entry.quantityDeducted * line.qty;
+          if (entry.scaleFactorMatrix) {
+            try {
+              const sfm: Record<string, number> = JSON.parse(entry.scaleFactorMatrix);
+              const variant = variants.find(v => v.id === line.variantId);
+              if (variant) {
+                const scale = sfm[variant.name] ?? sfm[variant.id] ?? 1;
+                qty = entry.quantityDeducted * scale * line.qty;
+              }
+            } catch {}
+          }
+          adjustInventory(entry.inventoryItemId, -qty);
+        });
+      }
+
+      line.modifiers.forEach(sel => {
+        const modBomEntries = bom.filter(b => b.sourceType === "MODIFIER" && b.sourceId === sel.modifierId);
+        modBomEntries.forEach(entry => {
+          let qty = entry.quantityDeducted * sel.qty * line.qty;
+          if (entry.scaleFactorMatrix) {
+            try {
+              const sfm: Record<string, number> = JSON.parse(entry.scaleFactorMatrix);
+              const variant = variants.find(v => v.id === line.variantId);
+              if (variant) {
+                const scale = sfm[variant.name] ?? sfm[variant.id] ?? 1;
+                qty = entry.quantityDeducted * scale * sel.qty * line.qty;
+              }
+            } catch {}
+          }
+          adjustInventory(entry.inventoryItemId, -qty);
+        });
       });
     });
 
@@ -124,6 +221,16 @@ export default function PosPage() {
         variantId: c.variantId,
         productId: c.productId,
         qty: c.qty,
+        modifiers: c.modifiers.map(sel => {
+          const mod = modifiers.find(m => m.id === sel.modifierId);
+          return {
+            modifierId: sel.modifierId,
+            name: mod?.name ?? "",
+            qty: sel.qty,
+            unitPrice: mod ? getModifierPrice(mod, c.variantId) : 0,
+          };
+        }),
+        unitPrice: getCartItemPrice(c),
       }))),
     });
 
@@ -174,12 +281,43 @@ export default function PosPage() {
                 {filteredProducts.length > 0 ? (
                   filteredProducts.map(p => {
                     const pvariants = variantsByProduct[p.id] || [];
+                    const isCompositeWithMods = p.isComposite && hasModifiers(p.id);
+
+                    if (isCompositeWithMods) {
+                      return (
+                        <Button
+                          key={p.id}
+                          variant="secondary"
+                          className="h-auto flex-col items-start gap-1 rounded-2xl p-3 text-left hover-lift transition-all bg-secondary/50 hover:bg-secondary relative"
+                          onClick={() => handleProductTap(p, pvariants[0]?.id)}
+                          data-testid={`button-add-menu-${p.id}`}
+                        >
+                          <div className="w-full">
+                            <p className="font-semibold leading-tight line-clamp-2 text-base">{p.name}</p>
+                            {pvariants.length > 1 && (
+                              <p className="text-xs text-muted-foreground mt-0.5">
+                                {pvariants.length} sizes
+                              </p>
+                            )}
+                            <p className="text-sm font-medium text-primary mt-1">
+                              {pvariants.length > 1
+                                ? `from ${formatMoney(Math.min(...pvariants.map(v => v.basePrice)))}`
+                                : formatMoney(pvariants[0]?.basePrice ?? 0)}
+                            </p>
+                          </div>
+                          <Badge variant="outline" className="absolute top-2 right-2 text-[9px] px-1.5 py-0">
+                            customize
+                          </Badge>
+                        </Button>
+                      );
+                    }
+
                     return pvariants.map(v => (
                       <Button
                         key={v.id}
                         variant="secondary"
                         className="h-auto flex-col items-start gap-1 rounded-2xl p-3 text-left hover-lift transition-all bg-secondary/50 hover:bg-secondary"
-                        onClick={() => addToCart(v.id, p.id)}
+                        onClick={() => handleProductTap(p, v.id)}
                         data-testid={`button-add-menu-${v.id}`}
                       >
                         <div className="w-full">
@@ -222,12 +360,14 @@ export default function PosPage() {
                         {[...cart].reverse().map(item => {
                           const v = variants.find(x => x.id === item.variantId);
                           const p = products.find(x => x.id === item.productId);
+                          const itemPrice = getCartItemPrice(item);
+                          const hasItemModifiers = item.modifiers.length > 0;
                           return (
                             <li key={item.instanceId} className="flex flex-col gap-1 rounded-xl border bg-background p-3" data-testid={`cart-item-${item.instanceId}`}>
                               <div className="flex items-start justify-between">
                                 <div>
                                   <p className="font-medium">{p?.name} {v?.name !== "Per Litre" && v?.name !== p?.name ? `(${v?.name})` : ""}</p>
-                                  <p className="text-xs text-muted-foreground">{formatMoney(v?.basePrice ?? 0)} x {item.qty}</p>
+                                  <p className="text-xs text-muted-foreground">{formatMoney(itemPrice)} x {item.qty}</p>
                                 </div>
                                 <div className="flex items-center gap-2">
                                   <div className="flex items-center gap-1">
@@ -240,6 +380,25 @@ export default function PosPage() {
                                   </Button>
                                 </div>
                               </div>
+                              {hasItemModifiers && (
+                                <div className="ml-1 mt-1 space-y-0.5">
+                                  {item.modifiers.map(sel => {
+                                    const mod = modifiers.find(m => m.id === sel.modifierId);
+                                    if (!mod) return null;
+                                    const price = getModifierPrice(mod, item.variantId);
+                                    return (
+                                      <div key={sel.modifierId} className="flex items-center justify-between text-xs text-muted-foreground" data-testid={`cart-modifier-${item.instanceId}-${sel.modifierId}`}>
+                                        <span className="flex items-center gap-1">
+                                          <span className="text-primary/60">+</span>
+                                          {mod.name}
+                                          {sel.qty > 1 && <span className="font-medium">x{sel.qty}</span>}
+                                        </span>
+                                        {price > 0 && <span>{formatMoney(price * sel.qty)}</span>}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
                             </li>
                           );
                         })}
@@ -356,6 +515,19 @@ export default function PosPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {modSelectorProduct && (
+          <ModifierSelector
+            open={modSelectorOpen}
+            onOpenChange={setModSelectorOpen}
+            product={modSelectorProduct}
+            variants={variants}
+            modifierGroups={modifierGroups}
+            modifiers={modifiers}
+            linkedGroupIds={getLinkedGroupIds(modSelectorProduct.id)}
+            onAddToCart={handleModifierAdd}
+          />
+        )}
       </AppShell>
     </motion.div>
   );

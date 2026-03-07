@@ -1,42 +1,55 @@
 # Fuel Station POS
 
 ## Overview
-Full-stack fuel station point-of-sale application built with React + Express + SQLite. Designed to work entirely locally on iPad/iPhone.
+Full-stack fuel station point-of-sale application built with React + Express + SQLite. Designed to work entirely locally on iPad/iPhone. Supports both simple retail (1:1 SKU) and complex composite/restaurant items with modifiers, BOM recipes, and size-scaled pricing per the unified POS architecture paper.
 
 ## Architecture
-- **Frontend**: React 18 + TypeScript, Vite, TanStack Query, Wouter routing, shadcn/ui components, Framer Motion
+- **Frontend**: React 19 + TypeScript, Vite, TanStack Query, Wouter routing, shadcn/ui components, Framer Motion
 - **Backend**: Express.js on port 5000, serves both API and static frontend
 - **Database**: SQLite via better-sqlite3 + Drizzle ORM, stored at `./data/pos.db`
 - **No PostgreSQL** — the app uses SQLite exclusively for offline/local operation
+- **Headless/Composable**: Backend handles pricing logic, inventory BOM traversal; frontend abstracts complexity via Wizard pattern
 
 ## Data Model
-- `products` — catalog items (fuel types, shop items) with type (RETAIL/RESTAURANT) and JSON attributes (tags, tax_exempt)
-- `variants` — SKU-level pricing (e.g., "Per Litre" variant of Regular 91 at $1.85)
-- `modifier_groups` — groupings for modifiers (selection rules in JSON)
-- `modifiers` — individual modifiers with pricing logic
-- `inventory_items` — raw materials/stock with current_quantity and tracking_config JSON (low_stock_alert)
-- `bill_of_materials` — links variants to inventory items with quantity_deducted per sale
+- `products` — catalog items with `type` (RETAIL/RESTAURANT), `is_composite` flag, and JSON `attributes` (tags, tax_exempt)
+- `variants` — SKU-level pricing with `direct_inventory_id` for 1:1 retail mapping
+- `modifier_groups` — groupings for modifiers with `min_selections` / `max_selections` constraints
+- `modifiers` — individual options with `base_upcharge` (cents) and `scale_factor` JSON (size-based pricing matrix)
+- `product_modifier_groups` — many-to-many link between products and modifier groups
+- `inventory_items` — raw materials/stock with current_quantity and tracking_config JSON
+- `bill_of_materials` — links variants/modifiers to inventory items with `quantity_deducted` and `scale_factor_matrix` JSON
 - `employees` — staff with role, pay_rate, and PIN access
 - `time_punches` — clock in/out records
-- `sales` — completed transactions with lines_json
+- `sales` — completed transactions with `lines_json` (includes full modifier tree)
 
 ## Key Files
 - `shared/schema.ts` — Drizzle SQLite table definitions and Zod schemas
 - `server/db.ts` — SQLite connection, DDL, and seed data
 - `server/storage.ts` — Full CRUD storage layer using Drizzle ORM
 - `server/routes.ts` — REST API endpoints (`/api/products`, `/api/variants`, etc.)
-- `client/src/lib/store.tsx` — TanStack Query-backed store provider
+- `client/src/lib/store.tsx` — TanStack Query-backed store provider with all CRUD operations
 - `client/src/lib/api.ts` — Fetch API client
+- `client/src/components/product-wizard.tsx` — 5-step progressive disclosure wizard for product creation
+- `client/src/components/modifier-selector.tsx` — POS modifier selection dialog with size-scaled pricing
+- `client/src/pages/modifiers.tsx` — Modifier group & option management UI
 - `drizzle.config.ts` — SQLite Drizzle config
 
 ## Pages
-- `/` — Onboarding/getting started
-- `/pos` — Point of sale register
-- `/products` — Tabbed view: Station Menu, Bill of Materials, Bulk Inventory
+- `/` — POS register (with modifier selection for composite items)
+- `/start` — Onboarding/getting started
+- `/products` — Tabbed view: Station Menu (with Wizard), Modifiers, Bill of Materials, Bulk Inventory
 - `/employees` — Staff management
 - `/reports` — Sales trends, product mix, inventory status
 - `/integrations` — Third-party connections (mock)
 - `/settings` — Tax rate configuration
 
+## Frontend Patterns (per Research Paper)
+- **Wizard Design Pattern**: Product creation uses 5-step progressive disclosure (Item Type → Variants → Modifiers → BOM/Recipe → Review)
+- **Retail vs Prepared Dichotomy**: Retail items use quick-add path; Prepared items trigger full wizard
+- **Size-Scaled Pricing**: Modifier upcharges scale by variant size via `scaleFactor` JSON
+- **Auto-Scale BOM**: Define base recipe for one size, proportionally scale to other sizes
+- **POS Modifier Selection**: Composite items prompt modifier selection with min/max validation
+- **Price Calculation**: P_final = P_variant + Σ(U_modifier × S_price_matrix)
+
 ## Seed Data
-5 products (Regular 91, Premium 95, Ultimate 98, Diesel, Bottled Water), 5 variants, 5 inventory items, 7 BOM entries, 2 employees
+5 products (Regular 91, Premium 95, Ultimate 98, Diesel, Bottled Water), 5 variants with direct_inventory_id, 5 inventory items, 7 BOM entries, 2 employees
