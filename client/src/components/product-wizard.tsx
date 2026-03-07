@@ -649,7 +649,7 @@ export default function ProductWizard({
             <Plus className="h-3 w-3 mr-1" /> Add Group
           </Button>
         </div>
-        <ScrollArea className="max-h-[400px]">
+        <div>
           {wizardModGroups.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 text-muted-foreground border-2 border-dashed rounded-xl">
               <p className="text-sm">No modifier groups added yet.</p>
@@ -850,7 +850,7 @@ export default function ProductWizard({
               })}
             </div>
           )}
-        </ScrollArea>
+        </div>
 
         {wizardModGroups.length > 0 && wizardBom.length > 0 && (
           <div className="border rounded-xl p-3 space-y-2">
@@ -1297,7 +1297,7 @@ export default function ProductWizard({
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) handleClose(); else onOpenChange(v); }}>
-      <DialogContent className="sm:max-w-[640px] max-h-[90vh] overflow-y-auto" data-testid="wizard-dialog">
+      <DialogContent className="sm:max-w-[640px] max-h-[92vh] overflow-y-auto" data-testid="wizard-dialog">
         <DialogHeader>
           <DialogTitle className="font-serif" data-testid="wizard-title">
             {step === 0 ? "New Product" : `New Product — ${steps[step]}`}
