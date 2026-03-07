@@ -190,8 +190,8 @@ function ProductEditorInner({
   function openModConfigDialog(groupId: string) {
     const groupMods = modifiers.filter(m => m.modifierGroupId === groupId);
     const sfKey = `${product.id}::${groupId}`;
-    let existingScales: Record<string, Record<string, number>> | null = null;
-    try { existingScales = JSON.parse(productModifierScaleFactors[sfKey] || "null"); } catch {}
+    let existingPrices: Record<string, Record<string, number>> | null = null;
+    try { existingPrices = JSON.parse(productModifierScaleFactors[sfKey] || "null"); } catch {}
 
     const scaleData: Record<string, Record<string, string>> = {};
     const ingredientData: Record<string, Record<string, string>> = {};
@@ -200,7 +200,8 @@ function ProductEditorInner({
       scaleData[mod.id] = {};
       ingredientData[mod.id] = {};
       for (const v of productVariants) {
-        scaleData[mod.id][v.name] = String(existingScales?.[mod.id]?.[v.name] ?? "1");
+        const centsVal = existingPrices?.[mod.id]?.[v.name];
+        scaleData[mod.id][v.name] = centsVal !== undefined ? (centsVal / 100).toFixed(2) : "0";
       }
 
       if (mod.inventoryItemId) {
@@ -224,24 +225,24 @@ function ProductEditorInner({
     if (!modConfigGroupId) return;
     const groupMods = modifiers.filter(m => m.modifierGroupId === modConfigGroupId);
 
-    const scaleResult: Record<string, Record<string, number>> = {};
-    let hasAnyNonDefault = false;
+    const priceResult: Record<string, Record<string, number>> = {};
+    let hasAnyPrice = false;
     for (const [modId, sizeMap] of Object.entries(modConfigScaleData)) {
-      scaleResult[modId] = {};
+      priceResult[modId] = {};
       for (const [sizeName, val] of Object.entries(sizeMap)) {
-        const num = parseFloat(val);
-        if (Number.isFinite(num) && num > 0 && num !== 1) {
-          scaleResult[modId][sizeName] = num;
-          hasAnyNonDefault = true;
+        const dollars = parseFloat(val);
+        if (Number.isFinite(dollars) && dollars >= 0) {
+          priceResult[modId][sizeName] = Math.round(dollars * 100);
+          if (dollars > 0) hasAnyPrice = true;
         } else {
-          scaleResult[modId][sizeName] = 1;
+          priceResult[modId][sizeName] = 0;
         }
       }
     }
     setProductModifierScaleFactors(
       product.id,
       modConfigGroupId,
-      hasAnyNonDefault ? JSON.stringify(scaleResult) : null
+      hasAnyPrice || Object.keys(priceResult).length > 0 ? JSON.stringify(priceResult) : null
     );
 
     for (const mod of groupMods) {
@@ -705,7 +706,7 @@ function ProductEditorInner({
               Modifier Size Configuration
             </DialogTitle>
             <DialogDescription>
-              Configure size pricing multipliers and ingredient quantities for{" "}
+              Configure modifier prices and ingredient quantities for{" "}
               <span className="font-medium">{modConfigGroupId ? modifierGroups.find(mg => mg.id === modConfigGroupId)?.name : ""}</span>{" "}
               on <span className="font-medium">{product.name}</span>.
             </DialogDescription>
@@ -720,16 +721,15 @@ function ProductEditorInner({
             return (
               <div className="space-y-5">
                 <div>
-                  <p className="text-xs font-medium text-muted-foreground mb-2">Size Pricing Multipliers</p>
+                  <p className="text-xs font-medium text-muted-foreground mb-2">Modifier Pricing ($)</p>
                   <p className="text-[11px] text-muted-foreground mb-3">
-                    Set how the base upcharge for each modifier scales by product size. A value of 1 means no change; 1.5 means 150% of the base price.
+                    Set the upcharge price for each modifier option per product size.
                   </p>
                   <div className="overflow-x-auto rounded-lg border">
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="bg-muted/50">
                           <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap sticky left-0 bg-muted/50">Modifier</th>
-                          <th className="text-right text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Base Price</th>
                           {productVariants.map(v => (
                             <th key={v.id} className="text-center text-xs font-medium text-muted-foreground px-2 py-2 whitespace-nowrap">{v.name}</th>
                           ))}
@@ -737,23 +737,25 @@ function ProductEditorInner({
                       </thead>
                       <tbody>
                         {groupMods.map(mod => (
-                          <tr key={mod.id} className="border-t" data-testid={`editor-scale-row-${mod.id}`}>
+                          <tr key={mod.id} className="border-t" data-testid={`editor-price-row-${mod.id}`}>
                             <td className="px-3 py-2 font-medium text-xs whitespace-nowrap sticky left-0 bg-background">{mod.name}</td>
-                            <td className="px-3 py-2 text-xs text-muted-foreground text-right whitespace-nowrap">{formatMoney(mod.baseUpcharge || 0)}</td>
                             {productVariants.map(v => (
                               <td key={v.id} className="px-1.5 py-1.5 text-center">
-                                <Input
-                                  type="number"
-                                  step="0.1"
-                                  min="0"
-                                  value={modConfigScaleData[mod.id]?.[v.name] ?? "1"}
-                                  onChange={e => setModConfigScaleData(prev => ({
-                                    ...prev,
-                                    [mod.id]: { ...(prev[mod.id] || {}), [v.name]: e.target.value },
-                                  }))}
-                                  className="h-7 w-16 text-center text-xs mx-auto"
-                                  data-testid={`editor-scale-${mod.id}-${v.id}`}
-                                />
+                                <div className="relative mx-auto w-20">
+                                  <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">$</span>
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    value={modConfigScaleData[mod.id]?.[v.name] ?? "0"}
+                                    onChange={e => setModConfigScaleData(prev => ({
+                                      ...prev,
+                                      [mod.id]: { ...(prev[mod.id] || {}), [v.name]: e.target.value },
+                                    }))}
+                                    className="h-7 w-20 text-center text-xs pl-4 mx-auto"
+                                    data-testid={`editor-price-${mod.id}-${v.id}`}
+                                  />
+                                </div>
                               </td>
                             ))}
                           </tr>

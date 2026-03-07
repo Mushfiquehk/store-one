@@ -66,30 +66,11 @@ export default function ModifierSelector({
     const sfJson = productModifierScaleFactors[sfKey];
     if (sfJson) {
       try {
-        const allScaleFactors: Record<string, Record<string, number>> = JSON.parse(sfJson);
-        const modScaleFactors = allScaleFactors[mod.id];
-        if (modScaleFactors) {
-          const variantName = activeVariant.name;
-          if (modScaleFactors[variantName] !== undefined) {
-            return Math.round(mod.baseUpcharge * modScaleFactors[variantName]);
-          }
-          const variantId = activeVariant.id;
-          if (modScaleFactors[variantId] !== undefined) {
-            return Math.round(mod.baseUpcharge * modScaleFactors[variantId]);
-          }
-        }
-      } catch {}
-    }
-    if (mod.scaleFactor) {
-      try {
-        const sf: Record<string, number> = JSON.parse(mod.scaleFactor);
-        const variantName = activeVariant.name;
-        if (sf[variantName] !== undefined) {
-          return Math.round(mod.baseUpcharge * sf[variantName]);
-        }
-        const variantId = activeVariant.id;
-        if (sf[variantId] !== undefined) {
-          return Math.round(mod.baseUpcharge * sf[variantId]);
+        const allPrices: Record<string, Record<string, number>> = JSON.parse(sfJson);
+        const modPrices = allPrices[mod.id];
+        if (modPrices) {
+          if (modPrices[activeVariant.name] !== undefined) return Math.round(modPrices[activeVariant.name]);
+          if (modPrices[activeVariant.id] !== undefined) return Math.round(modPrices[activeVariant.id]);
         }
       } catch {}
     }

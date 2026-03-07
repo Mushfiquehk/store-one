@@ -1,5 +1,5 @@
-import { useState, useMemo, useCallback } from "react";
-import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, Link2, DollarSign, Sliders } from "lucide-react";
+import { useState, useMemo } from "react";
+import { Plus, Pencil, Trash2, ChevronDown, ChevronRight, Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -23,11 +23,10 @@ function uid(prefix: string) {
 export default function ModifiersPageContent({ isTab = false }: { isTab?: boolean }) {
   const { toast } = useToast();
   const {
-    modifierGroups, modifiers, products, variants, inventory,
+    modifierGroups, modifiers, products, inventory,
     addModifierGroup, updateModifierGroup, deleteModifierGroup,
     addModifier, updateModifier, deleteModifier,
     productModifierLinks, setProductModifierGroups,
-    productModifierScaleFactors, setProductModifierScaleFactors,
   } = useStore();
 
   const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null);
@@ -37,7 +36,7 @@ export default function ModifiersPageContent({ isTab = false }: { isTab?: boolea
 
   const [modifierDialogOpen, setModifierDialogOpen] = useState(false);
   const [editingModifier, setEditingModifier] = useState<Modifier | null>(null);
-  const [modifierForm, setModifierForm] = useState({ name: "", baseUpcharge: "", inventoryItemId: "", quantityPerUse: "" });
+  const [modifierForm, setModifierForm] = useState({ name: "", inventoryItemId: "", quantityPerUse: "" });
   const [modifierGroupId, setModifierGroupId] = useState<string>("");
 
   const [deleteTarget, setDeleteTarget] = useState<{ type: "group" | "modifier"; id: string; name: string } | null>(null);
@@ -46,10 +45,6 @@ export default function ModifiersPageContent({ isTab = false }: { isTab?: boolea
   const [linkGroupId, setLinkGroupId] = useState<string>("");
   const [linkSelectedProducts, setLinkSelectedProducts] = useState<string[]>([]);
 
-  const [scaleDialogOpen, setScaleDialogOpen] = useState(false);
-  const [scaleProductId, setScaleProductId] = useState("");
-  const [scaleGroupId, setScaleGroupId] = useState("");
-  const [scaleFormData, setScaleFormData] = useState<Record<string, Record<string, string>>>({});
 
   const productLinksForGroup = useMemo(() => {
     const map: Record<string, string[]> = {};
@@ -108,7 +103,7 @@ export default function ModifiersPageContent({ isTab = false }: { isTab?: boolea
   function openCreateModifier(groupId: string) {
     setEditingModifier(null);
     setModifierGroupId(groupId);
-    setModifierForm({ name: "", baseUpcharge: "", inventoryItemId: "", quantityPerUse: "" });
+    setModifierForm({ name: "", inventoryItemId: "", quantityPerUse: "" });
     setModifierDialogOpen(true);
   }
 
@@ -117,7 +112,6 @@ export default function ModifiersPageContent({ isTab = false }: { isTab?: boolea
     setModifierGroupId(mod.modifierGroupId);
     setModifierForm({
       name: mod.name,
-      baseUpcharge: (mod.baseUpcharge / 100).toFixed(2),
       inventoryItemId: mod.inventoryItemId || "",
       quantityPerUse: mod.quantityPerUse ? String(mod.quantityPerUse) : "",
     });
@@ -128,11 +122,6 @@ export default function ModifiersPageContent({ isTab = false }: { isTab?: boolea
     const name = modifierForm.name.trim();
     if (!name) {
       toast({ title: "Name required" });
-      return;
-    }
-    const upcharge = Math.round(parseFloat(modifierForm.baseUpcharge || "0") * 100);
-    if (!Number.isFinite(upcharge)) {
-      toast({ title: "Invalid price" });
       return;
     }
 
@@ -146,7 +135,7 @@ export default function ModifiersPageContent({ isTab = false }: { isTab?: boolea
     if (editingModifier) {
       updateModifier(editingModifier.id, {
         name,
-        baseUpcharge: upcharge,
+        baseUpcharge: 0,
         inventoryItemId: invItemId,
         quantityPerUse: qtyPerUse,
       });
@@ -156,7 +145,7 @@ export default function ModifiersPageContent({ isTab = false }: { isTab?: boolea
         id: uid("mod"),
         modifierGroupId: modifierGroupId,
         name,
-        baseUpcharge: upcharge,
+        baseUpcharge: 0,
         inventoryItemId: invItemId,
         quantityPerUse: qtyPerUse,
       });
@@ -209,57 +198,6 @@ export default function ModifiersPageContent({ isTab = false }: { isTab?: boolea
     setLinkDialogOpen(false);
   }
 
-  function parseScaleFactor(sf: string | null): Record<string, number> | null {
-    if (!sf) return null;
-    try { return JSON.parse(sf); } catch { return null; }
-  }
-
-  function parseScaleFactorsJson(sf: string | null): Record<string, Record<string, number>> | null {
-    if (!sf) return null;
-    try { return JSON.parse(sf); } catch { return null; }
-  }
-
-  function openScaleDialog(productId: string, groupId: string) {
-    setScaleProductId(productId);
-    setScaleGroupId(groupId);
-    const key = `${productId}::${groupId}`;
-    const existing = parseScaleFactorsJson(productModifierScaleFactors[key] || null);
-    const groupMods = modifiers.filter(m => m.modifierGroupId === groupId);
-    const productVariants = variants.filter(v => v.productId === productId);
-    const formData: Record<string, Record<string, string>> = {};
-    for (const mod of groupMods) {
-      formData[mod.id] = {};
-      for (const v of productVariants) {
-        formData[mod.id][v.name] = existing?.[mod.id]?.[v.name]?.toString() ?? "1";
-      }
-    }
-    setScaleFormData(formData);
-    setScaleDialogOpen(true);
-  }
-
-  function handleSaveScaleFactors() {
-    const result: Record<string, Record<string, number>> = {};
-    let hasAnyNonDefault = false;
-    for (const [modId, sizeMap] of Object.entries(scaleFormData)) {
-      result[modId] = {};
-      for (const [sizeName, val] of Object.entries(sizeMap)) {
-        const num = parseFloat(val);
-        if (Number.isFinite(num) && num >= 0) {
-          result[modId][sizeName] = num;
-          if (num !== 1) hasAnyNonDefault = true;
-        } else {
-          result[modId][sizeName] = 1;
-        }
-      }
-    }
-    setProductModifierScaleFactors(
-      scaleProductId,
-      scaleGroupId,
-      hasAnyNonDefault || Object.keys(result).length > 0 ? JSON.stringify(result) : null
-    );
-    toast({ title: "Scale factors saved" });
-    setScaleDialogOpen(false);
-  }
 
   return (
     <div className="space-y-6">
@@ -329,27 +267,10 @@ export default function ModifiersPageContent({ isTab = false }: { isTab?: boolea
                     <div className="flex flex-wrap gap-1.5 mt-2 ml-6">
                       {linkedProducts.map(pid => {
                         const p = products.find(pp => pp.id === pid);
-                        const pVariants = variants.filter(v => v.productId === pid);
-                        const sfKey = `${pid}::${group.id}`;
-                        const hasSf = !!productModifierScaleFactors[sfKey];
                         return p ? (
-                          <div key={pid} className="flex items-center gap-0.5">
-                            <Badge variant="outline" className="text-xs" data-testid={`badge-linked-product-${pid}`}>
-                              {p.name}
-                            </Badge>
-                            {pVariants.length > 1 && (
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className={`h-5 w-5 ${hasSf ? "text-primary" : "text-muted-foreground"}`}
-                                onClick={(e) => { e.stopPropagation(); openScaleDialog(pid, group.id); }}
-                                title="Configure size pricing multipliers"
-                                data-testid={`button-scale-factors-${pid}-${group.id}`}
-                              >
-                                <Sliders className="h-3 w-3" />
-                              </Button>
-                            )}
-                          </div>
+                          <Badge key={pid} variant="outline" className="text-xs" data-testid={`badge-linked-product-${pid}`}>
+                            {p.name}
+                          </Badge>
                         ) : null;
                       })}
                     </div>
@@ -375,7 +296,6 @@ export default function ModifiersPageContent({ isTab = false }: { isTab?: boolea
                         <TableHeader>
                           <TableRow>
                             <TableHead>Name</TableHead>
-                            <TableHead>Upcharge</TableHead>
                             <TableHead>Ingredient</TableHead>
                             <TableHead className="w-[100px]">Actions</TableHead>
                           </TableRow>
@@ -386,12 +306,6 @@ export default function ModifiersPageContent({ isTab = false }: { isTab?: boolea
                             return (
                               <TableRow key={mod.id} data-testid={`row-modifier-${mod.id}`}>
                                 <TableCell data-testid={`text-modifier-name-${mod.id}`}>{mod.name}</TableCell>
-                                <TableCell data-testid={`text-modifier-upcharge-${mod.id}`}>
-                                  <span className="flex items-center gap-1">
-                                    <DollarSign className="h-3 w-3 text-muted-foreground" />
-                                    {formatMoney(mod.baseUpcharge)}
-                                  </span>
-                                </TableCell>
                                 <TableCell data-testid={`text-modifier-ingredient-${mod.id}`}>
                                   {invItem ? (
                                     <div className="text-xs">
@@ -486,7 +400,7 @@ export default function ModifiersPageContent({ isTab = false }: { isTab?: boolea
           <DialogHeader>
             <DialogTitle>{editingModifier ? "Edit Modifier Option" : "New Modifier Option"}</DialogTitle>
             <DialogDescription>
-              {editingModifier ? "Update the modifier option details below." : "Add a new option with pricing to this group."}
+              {editingModifier ? "Update the modifier option details below." : "Add a new option to this group. Pricing is set per product in the product wizard."}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -499,20 +413,6 @@ export default function ModifiersPageContent({ isTab = false }: { isTab?: boolea
                 placeholder="e.g. Extra Cheese, Whipped Cream"
                 data-testid="input-modifier-name"
               />
-            </div>
-            <div>
-              <Label htmlFor="modifier-upcharge">Base Upcharge ($)</Label>
-              <Input
-                id="modifier-upcharge"
-                type="number"
-                step="0.01"
-                min="0"
-                value={modifierForm.baseUpcharge}
-                onChange={e => setModifierForm(f => ({ ...f, baseUpcharge: e.target.value }))}
-                placeholder="0.00"
-                data-testid="input-modifier-upcharge"
-              />
-              <p className="text-xs text-muted-foreground mt-1">Price adjustment in dollars (e.g., 0.50 = $0.50)</p>
             </div>
             <Separator />
             <div>
@@ -594,77 +494,6 @@ export default function ModifiersPageContent({ isTab = false }: { isTab?: boolea
           <DialogFooter>
             <Button variant="outline" onClick={() => setLinkDialogOpen(false)} data-testid="button-cancel-link">Cancel</Button>
             <Button onClick={handleSaveLinks} data-testid="button-save-links">Save Links</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={scaleDialogOpen} onOpenChange={setScaleDialogOpen}>
-        <DialogContent className="sm:max-w-[600px]" data-testid="dialog-scale-factors">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Sliders className="h-5 w-5" />
-              Size Pricing Multipliers
-            </DialogTitle>
-            <DialogDescription>
-              Set how modifier upcharges scale for each size of{" "}
-              <span className="font-medium">{products.find(p => p.id === scaleProductId)?.name}</span>.
-              A multiplier of 1 means the base upcharge, 2 means double, etc.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="max-h-[400px] overflow-auto">
-            {(() => {
-              const productVars = variants.filter(v => v.productId === scaleProductId);
-              const groupMods = modifiers.filter(m => m.modifierGroupId === scaleGroupId);
-              if (groupMods.length === 0) {
-                return <p className="text-sm text-muted-foreground text-center py-4">No modifier options in this group yet.</p>;
-              }
-              return (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="text-xs sticky left-0 bg-background">Modifier</TableHead>
-                      {productVars.map(v => (
-                        <TableHead key={v.id} className="text-xs text-center">{v.name}</TableHead>
-                      ))}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {groupMods.map(mod => (
-                      <TableRow key={mod.id} data-testid={`row-scale-mod-${mod.id}`}>
-                        <TableCell className="text-sm font-medium sticky left-0 bg-background">
-                          <div>
-                            {mod.name}
-                            <span className="text-xs text-muted-foreground ml-1">({formatMoney(mod.baseUpcharge)})</span>
-                          </div>
-                        </TableCell>
-                        {productVars.map(v => (
-                          <TableCell key={v.id} className="py-1.5 px-2">
-                            <Input
-                              value={scaleFormData[mod.id]?.[v.name] ?? "1"}
-                              onChange={e => {
-                                setScaleFormData(prev => ({
-                                  ...prev,
-                                  [mod.id]: { ...(prev[mod.id] || {}), [v.name]: e.target.value },
-                                }));
-                              }}
-                              type="number"
-                              step="0.1"
-                              min="0"
-                              className="h-8 text-sm text-center w-20"
-                              data-testid={`input-scale-${mod.id}-${v.id}`}
-                            />
-                          </TableCell>
-                        ))}
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              );
-            })()}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setScaleDialogOpen(false)} data-testid="button-cancel-scale">Cancel</Button>
-            <Button onClick={handleSaveScaleFactors} data-testid="button-save-scale">Save Multipliers</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

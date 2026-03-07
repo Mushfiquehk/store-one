@@ -225,4 +225,4 @@ function migrateBomColumns() {
 }
 migrateBomColumns();
 
-seedIfEmpty();
+// seedIfEmpty();

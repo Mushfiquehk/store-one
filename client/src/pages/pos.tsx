@@ -131,16 +131,9 @@ export default function PosPage() {
           const allSf: Record<string, Record<string, number>> = JSON.parse(sfJson);
           const modSf = allSf[mod.id];
           if (modSf) {
-            if (modSf[variant.name] !== undefined) return Math.round(mod.baseUpcharge * modSf[variant.name]);
-            if (modSf[variant.id] !== undefined) return Math.round(mod.baseUpcharge * modSf[variant.id]);
+            if (modSf[variant.name] !== undefined) return Math.round(modSf[variant.name]);
+            if (modSf[variant.id] !== undefined) return Math.round(modSf[variant.id]);
           }
-        } catch {}
-      }
-      if (mod.scaleFactor) {
-        try {
-          const sf: Record<string, number> = JSON.parse(mod.scaleFactor);
-          if (sf[variant.name] !== undefined) return Math.round(mod.baseUpcharge * sf[variant.name]);
-          if (sf[variant.id] !== undefined) return Math.round(mod.baseUpcharge * sf[variant.id]);
         } catch {}
       }
     }

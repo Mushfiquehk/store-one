@@ -249,8 +249,8 @@ export default function ProductWizard({
                 const numMap: Record<string, number> = {};
                 Object.entries(sizeMap).forEach(([sizeName, val]) => {
                   const num = Number(val);
-                  if (Number.isFinite(num) && num > 0) {
-                    numMap[sizeName] = num;
+                  if (Number.isFinite(num) && num >= 0) {
+                    numMap[sizeName] = Math.round(num * 100);
                   }
                 });
                 if (Object.keys(numMap).length > 0) {
@@ -709,19 +709,18 @@ export default function ProductWizard({
                           <div className="mt-2">
                             <Separator className="mb-3" />
                             <p className="text-xs font-medium text-muted-foreground mb-2">
-                              Size pricing multipliers for "{groupName}"
+                              Modifier pricing for "{groupName}"
                             </p>
                             <p className="text-[11px] text-muted-foreground mb-2">
-                              Set how the base upcharge for each modifier scales by product size. A value of 1 means no change; 1.5 means 150% of the base price.
+                              Set the upcharge price ($) for each modifier option per product size.
                             </p>
                             <div className="overflow-x-auto rounded-lg border">
                               <table className="w-full text-sm">
                                 <thead>
                                   <tr className="bg-muted/50">
                                     <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Modifier Option</th>
-                                    <th className="text-right text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Base Price</th>
                                     {wizardVariants.map((wv, vi) => (
-                                      <th key={wv.tempId} className="text-center text-xs font-medium text-muted-foreground px-2 py-2 whitespace-nowrap" data-testid={`wizard-scale-size-header-${vi}`}>
+                                      <th key={wv.tempId} className="text-center text-xs font-medium text-muted-foreground px-2 py-2 whitespace-nowrap" data-testid={`wizard-price-size-header-${vi}`}>
                                         {wv.name || `Size ${vi + 1}`}
                                       </th>
                                     ))}
@@ -729,23 +728,23 @@ export default function ProductWizard({
                                 </thead>
                                 <tbody>
                                   {groupMods.map((mod, mi) => (
-                                    <tr key={mod.id} className="border-t" data-testid={`wizard-scale-row-${mi}`}>
+                                    <tr key={mod.id} className="border-t" data-testid={`wizard-price-row-${mi}`}>
                                       <td className="px-3 py-2 font-medium text-xs whitespace-nowrap">{mod.name}</td>
-                                      <td className="px-3 py-2 text-xs text-muted-foreground text-right whitespace-nowrap">
-                                        {formatMoney(mod.baseUpcharge || 0)}
-                                      </td>
                                       {wizardVariants.map((wv, vi) => (
                                         <td key={wv.tempId} className="px-1.5 py-1.5 text-center">
-                                          <Input
-                                            type="number"
-                                            step="0.1"
-                                            min="0"
-                                            value={wizardScaleFactors[wmg.tempId]?.[mod.id]?.[wv.name] || ""}
-                                            onChange={e => updateWizardScaleFactor(wmg.tempId, mod.id, wv.name, e.target.value)}
-                                            placeholder="1"
-                                            className="h-7 w-16 text-center text-xs mx-auto"
-                                            data-testid={`wizard-scale-${mi}-${vi}`}
-                                          />
+                                          <div className="relative mx-auto w-20">
+                                            <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">$</span>
+                                            <Input
+                                              type="number"
+                                              step="0.01"
+                                              min="0"
+                                              value={wizardScaleFactors[wmg.tempId]?.[mod.id]?.[wv.name] || ""}
+                                              onChange={e => updateWizardScaleFactor(wmg.tempId, mod.id, wv.name, e.target.value)}
+                                              placeholder="0.00"
+                                              className="h-7 w-20 text-center text-xs pl-4"
+                                              data-testid={`wizard-price-${mi}-${vi}`}
+                                            />
+                                          </div>
                                         </td>
                                       ))}
                                     </tr>
@@ -817,7 +816,7 @@ export default function ProductWizard({
 
                       {wmg.isNew && (
                         <p className="text-xs text-muted-foreground italic">
-                          Size pricing and ingredient quantities can be configured after the group and its options are created in the Modifiers tab.
+                          Pricing and ingredient quantities can be configured after the group and its options are created in the Modifiers tab.
                         </p>
                       )}
                     </CardContent>
@@ -1080,23 +1079,23 @@ export default function ProductWizard({
                         return sizeMap && Object.values(sizeMap).some(v => Number(v) > 0);
                       });
                       const scaleData = wizardScaleFactors[wmg.tempId] || {};
-                      const modsWithScales = groupMods.filter(mod => {
+                      const modsWithPricing = groupMods.filter(mod => {
                         const sf = scaleData[mod.id];
-                        return sf && Object.values(sf).some(v => Number(v) > 0 && Number(v) !== 1);
+                        return sf && Object.values(sf).some(v => Number(v) > 0);
                       });
                       return (
                         <div key={wmg.tempId} data-testid={`wizard-review-mod-${i}`}>
                           <div className="text-sm p-1.5 rounded-lg bg-muted/30">
                             {label} {wmg.isNew && <Badge variant="outline" className="text-[10px] ml-1">New</Badge>}
                           </div>
-                          {modsWithScales.length > 0 && (
+                          {modsWithPricing.length > 0 && (
                             <div className="ml-3 mt-1 space-y-0.5">
-                              <p className="text-[10px] font-medium text-muted-foreground">Price multipliers:</p>
-                              {modsWithScales.map(mod => {
+                              <p className="text-[10px] font-medium text-muted-foreground">Pricing:</p>
+                              {modsWithPricing.map(mod => {
                                 const sf = scaleData[mod.id] || {};
                                 const scaleStr = wizardVariants
                                   .filter(wv => sf[wv.name] && Number(sf[wv.name]) > 0)
-                                  .map(wv => `${wv.name}: ×${sf[wv.name]}`)
+                                  .map(wv => `${wv.name}: $${Number(sf[wv.name]).toFixed(2)}`)
                                   .join(", ");
                                 return (
                                   <p key={mod.id} className="text-[11px] text-muted-foreground">
