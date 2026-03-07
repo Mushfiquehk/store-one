@@ -882,7 +882,7 @@ export default function ProductWizard({
                 )}
 
                 <Separator />
-                <ScrollArea className="flex-1 max-h-[120px]">
+                <ScrollArea className="flex-1 max-h-[280px]">
                   <div className="space-y-0.5">
                     {filteredInventory.map(inv => {
                       const alreadyLinked = currentBomForVariant.some(b => b.inventoryItemId === inv.id);
