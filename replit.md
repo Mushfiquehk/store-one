@@ -45,7 +45,7 @@ Full-stack fuel station point-of-sale application built with React + Express + S
 
 ## Frontend Patterns (per Research Paper)
 - **Wizard Design Pattern**: Product creation uses 5-step progressive disclosure (Item Type → Variants → Recipes → Modifiers → Review)
-- **Retail vs Prepared Dichotomy**: Retail items use quick-add path; Prepared items trigger full wizard
+- **Retail vs Prepared Dichotomy**: Retail items use 3-step path (Item Type → Inventory → Review); Prepared items trigger full 5-step wizard
 - **Product-Specific Modifier Pricing**: Modifier prices are set per product, not globally on the modifier. Stored on `product_modifier_groups.scale_factors` as `{ modifierId: { variantName: priceInCents } }`. The modifier creation form has no price field — pricing is configured in the product wizard (step 4) and product editor (Modifiers tab).
 - **Auto-Scale BOM**: Define base recipe for one size, proportionally scale to other sizes
 - **POS Modifier Selection**: Composite items prompt modifier selection with min/max validation
@@ -55,6 +55,7 @@ Full-stack fuel station point-of-sale application built with React + Express + S
 - **Price Calculation**: P_final = P_variant + Σ(productModifierPrice[modId][variantName])
 
 ## CRUD Capabilities
+- **Tags**: View all tags with product counts, remove tag from all products at once (Menu page → Tags button)
 - **Products**: Create (wizard), Edit (name/tags), Delete (with dependency warnings for sales, BOM)
 - **Variants**: Edit (name/SKU/price), Delete (with BOM warning, last-variant guard deletes product)
 - **Modifier Groups**: Create, Edit (name/rules), Delete (with confirmation)

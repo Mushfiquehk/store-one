@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { ClipboardList, Plus, Filter } from "lucide-react";
+import { ClipboardList, Plus, Filter, Tag, Trash2, X } from "lucide-react";
 import AppShell from "@/components/app-shell";
 import ProductWizard from "@/components/product-wizard";
 import ProductEditor from "@/components/product-editor";
@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useToast } from "@/hooks/use-toast";
 import { useStore, type Product } from "@/lib/store";
 
 function formatMoney(cents: number) {
@@ -17,11 +18,13 @@ function formatMoney(cents: number) {
 }
 
 export default function MenuPage({ isTab = false }: { isTab?: boolean }) {
-  const { products, variants } = useStore();
+  const { products, variants, updateProduct } = useStore();
+  const { toast } = useToast();
 
   const [filterType, setFilterType] = useState<string>("all");
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [showTagManager, setShowTagManager] = useState(false);
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -30,6 +33,44 @@ export default function MenuPage({ isTab = false }: { isTab?: boolean }) {
     if (filterType === "all") return products;
     return products.filter(p => p.type === filterType);
   }, [products, filterType]);
+
+  const tagStats = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    products.forEach(p => {
+      try {
+        const attrs = p.attributes ? JSON.parse(p.attributes) : {};
+        (attrs.tags || []).forEach((t: string) => {
+          if (!map[t]) map[t] = [];
+          map[t].push(p.id);
+        });
+      } catch {}
+    });
+    return Object.entries(map)
+      .map(([tag, productIds]) => ({ tag, productIds, count: productIds.length }))
+      .sort((a, b) => a.tag.localeCompare(b.tag));
+  }, [products]);
+
+  function removeTag(tag: string) {
+    const affected = products.filter(p => {
+      try {
+        const attrs = p.attributes ? JSON.parse(p.attributes) : {};
+        return (attrs.tags || []).includes(tag);
+      } catch { return false; }
+    });
+
+    affected.forEach(p => {
+      try {
+        const attrs = p.attributes ? JSON.parse(p.attributes) : {};
+        const newTags = (attrs.tags || []).filter((t: string) => t !== tag);
+        updateProduct(p.id, { attributes: JSON.stringify({ ...attrs, tags: newTags }) });
+      } catch {}
+    });
+
+    toast({
+      title: "Tag removed",
+      description: `"${tag}" removed from ${affected.length} product(s)`,
+    });
+  }
 
   useEffect(() => {
     if (!selectedProductId && products.length > 0) {
@@ -64,6 +105,16 @@ export default function MenuPage({ isTab = false }: { isTab?: boolean }) {
             <div className="flex justify-between items-center px-1">
               <p className="text-sm text-muted-foreground">{products.length} product(s), {variants.length} variant(s)</p>
               <div className="flex items-center gap-2">
+                <Button
+                  variant={showTagManager ? "default" : "outline"}
+                  size="sm"
+                  className="rounded-xl"
+                  onClick={() => setShowTagManager(!showTagManager)}
+                  data-testid="button-toggle-tag-manager"
+                >
+                  <Tag className="h-4 w-4 mr-1" />
+                  Tags{tagStats.length > 0 ? ` (${tagStats.length})` : ""}
+                </Button>
                 <Filter className="h-4 w-4 text-muted-foreground" />
                 <Select value={filterType} onValueChange={setFilterType}>
                   <SelectTrigger className="w-[180px] h-9 rounded-xl">
@@ -144,6 +195,54 @@ export default function MenuPage({ isTab = false }: { isTab?: boolean }) {
           </div>
         </CardContent>
       </Card>
+
+      {showTagManager && (
+        <Card className="border bg-card shadow-soft lg:col-span-12">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center justify-between font-serif">
+              <div className="flex items-center gap-2">
+                <Tag className="h-5 w-5" />
+                Tag Manager
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => setShowTagManager(false)} data-testid="button-close-tag-manager">
+                <X className="h-4 w-4" />
+              </Button>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {tagStats.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-6" data-testid="text-no-tags">No tags in use.</p>
+            ) : (
+              <div className="space-y-2">
+                {tagStats.map(({ tag, count }) => (
+                  <div
+                    key={tag}
+                    className="flex items-center justify-between p-2.5 rounded-xl border bg-background/40"
+                    data-testid={`tag-row-${tag}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="inline-block px-2.5 py-0.5 rounded-full bg-primary/10 text-primary text-sm font-medium">{tag}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {count} product{count !== 1 ? "s" : ""}
+                      </span>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-destructive hover:text-destructive hover:bg-destructive/10 rounded-xl"
+                      onClick={() => removeTag(tag)}
+                      data-testid={`button-delete-tag-${tag}`}
+                    >
+                      <Trash2 className="h-4 w-4 mr-1" />
+                      Remove
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <ProductWizard open={wizardOpen} onOpenChange={setWizardOpen} />
       <ProductEditor product={editingProduct} open={editorOpen} onOpenChange={setEditorOpen} />
