@@ -35,6 +35,10 @@ type WizardModifierGroup = {
   newName: string;
   newMin: string;
   newMax: string;
+  productMin: string;
+  productMax: string;
+  modifierPrices: Record<string, string>;
+  overrideInventoryItemId: string;
 };
 
 type WizardBomEntry = {
@@ -69,6 +73,7 @@ export default function ProductWizard({
     addModifier,
     setProductModifierGroups,
     setProductModifierScaleFactors,
+    updateProductModifierGroupSettings,
   } = useStore();
 
   const [step, setStep] = useState(0);
@@ -243,22 +248,42 @@ export default function ProductWizard({
               const groupId = tempIdToGroupId[wmg.tempId];
               if (!groupId) return;
               const groupScaleData = wizardScaleFactors[wmg.tempId];
-              if (!groupScaleData) return;
-              const scaleFactorsObj: Record<string, Record<string, number>> = {};
-              Object.entries(groupScaleData).forEach(([modId, sizeMap]) => {
-                const numMap: Record<string, number> = {};
-                Object.entries(sizeMap).forEach(([sizeName, val]) => {
-                  const num = Number(val);
-                  if (Number.isFinite(num) && num > 0) {
-                    numMap[sizeName] = num;
+              if (groupScaleData) {
+                const scaleFactorsObj: Record<string, Record<string, number>> = {};
+                Object.entries(groupScaleData).forEach(([modId, sizeMap]) => {
+                  const numMap: Record<string, number> = {};
+                  Object.entries(sizeMap).forEach(([sizeName, val]) => {
+                    const num = Number(val);
+                    if (Number.isFinite(num) && num > 0) {
+                      numMap[sizeName] = num;
+                    }
+                  });
+                  if (Object.keys(numMap).length > 0) {
+                    scaleFactorsObj[modId] = numMap;
                   }
                 });
-                if (Object.keys(numMap).length > 0) {
-                  scaleFactorsObj[modId] = numMap;
+                if (Object.keys(scaleFactorsObj).length > 0) {
+                  setProductModifierScaleFactors(productId, groupId, JSON.stringify(scaleFactorsObj));
                 }
+              }
+
+              const settingsData: any = {};
+              const pMin = wmg.isNew ? Number(wmg.newMin) || 0 : Number(wmg.productMin);
+              const pMax = wmg.isNew ? Number(wmg.newMax) || 0 : Number(wmg.productMax);
+              if (pMin > 0 || !wmg.isNew) settingsData.minSelections = pMin || 0;
+              if (pMax > 0 || !wmg.isNew) settingsData.maxSelections = pMax || 0;
+
+              const pricesObj: Record<string, number> = {};
+              Object.entries(wmg.modifierPrices || {}).forEach(([modId, val]) => {
+                const cents = Math.round(Number(val) * 100);
+                if (Number.isFinite(cents) && cents >= 0) pricesObj[modId] = cents;
               });
-              if (Object.keys(scaleFactorsObj).length > 0) {
-                setProductModifierScaleFactors(productId, groupId, JSON.stringify(scaleFactorsObj));
+              if (Object.keys(pricesObj).length > 0) settingsData.modifierPrices = JSON.stringify(pricesObj);
+
+              if (wmg.overrideInventoryItemId) settingsData.overrideInventoryItemId = wmg.overrideInventoryItemId;
+
+              if (Object.keys(settingsData).length > 0) {
+                updateProductModifierGroupSettings(productId, groupId, settingsData);
               }
             });
           }, 300);
@@ -330,6 +355,10 @@ export default function ProductWizard({
       newName: "",
       newMin: "0",
       newMax: "5",
+      productMin: "",
+      productMax: "",
+      modifierPrices: {},
+      overrideInventoryItemId: "",
     }]);
   }
 
@@ -689,18 +718,46 @@ export default function ProductWizard({
                           </div>
                         </div>
                       ) : (
-                        <div>
-                          <Label className="text-xs text-muted-foreground">Select Existing Group</Label>
-                          <Select value={wmg.groupId} onValueChange={v => updateModGroupRow(wmg.tempId, { groupId: v })}>
-                            <SelectTrigger className="mt-1 h-8 rounded-lg text-sm" data-testid={`wizard-mod-select-${idx}`}>
-                              <SelectValue placeholder="Choose a group" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {modifierGroups.map(mg => (
-                                <SelectItem key={mg.id} value={mg.id}>{mg.name}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                        <div className="space-y-3">
+                          <div>
+                            <Label className="text-xs text-muted-foreground">Select Existing Group</Label>
+                            <Select value={wmg.groupId} onValueChange={v => updateModGroupRow(wmg.tempId, { groupId: v })}>
+                              <SelectTrigger className="mt-1 h-8 rounded-lg text-sm" data-testid={`wizard-mod-select-${idx}`}>
+                                <SelectValue placeholder="Choose a group" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {modifierGroups.map(mg => (
+                                  <SelectItem key={mg.id} value={mg.id}>{mg.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          {wmg.groupId && (
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              <div>
+                                <Label className="text-xs text-muted-foreground">Min Selections (this product)</Label>
+                                <Input
+                                  value={wmg.productMin}
+                                  onChange={e => updateModGroupRow(wmg.tempId, { productMin: e.target.value })}
+                                  className="mt-1 h-8 rounded-lg text-sm"
+                                  inputMode="numeric"
+                                  placeholder={String(modifierGroups.find(mg => mg.id === wmg.groupId)?.minSelections ?? 0)}
+                                  data-testid={`wizard-mod-pmin-${idx}`}
+                                />
+                              </div>
+                              <div>
+                                <Label className="text-xs text-muted-foreground">Max Selections (this product)</Label>
+                                <Input
+                                  value={wmg.productMax}
+                                  onChange={e => updateModGroupRow(wmg.tempId, { productMax: e.target.value })}
+                                  className="mt-1 h-8 rounded-lg text-sm"
+                                  inputMode="numeric"
+                                  placeholder={String(modifierGroups.find(mg => mg.id === wmg.groupId)?.maxSelections ?? 0)}
+                                  data-testid={`wizard-mod-pmax-${idx}`}
+                                />
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -709,17 +766,17 @@ export default function ProductWizard({
                           <div className="mt-2">
                             <Separator className="mb-3" />
                             <p className="text-xs font-medium text-muted-foreground mb-2">
-                              Size pricing multipliers for "{groupName}"
+                              Pricing for "{groupName}"
                             </p>
                             <p className="text-[11px] text-muted-foreground mb-2">
-                              Set how the base upcharge for each modifier scales by product size. A value of 1 means no change; 1.5 means 150% of the base price.
+                              Set a product-specific base price and size multipliers. Leave base price empty to use the modifier's default.
                             </p>
                             <div className="overflow-x-auto rounded-lg border">
                               <table className="w-full text-sm">
                                 <thead>
                                   <tr className="bg-muted/50">
                                     <th className="text-left text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Modifier Option</th>
-                                    <th className="text-right text-xs font-medium text-muted-foreground px-3 py-2 whitespace-nowrap">Base Price</th>
+                                    <th className="text-center text-xs font-medium text-muted-foreground px-2 py-2 whitespace-nowrap">Base Price ($)</th>
                                     {wizardVariants.map((wv, vi) => (
                                       <th key={wv.tempId} className="text-center text-xs font-medium text-muted-foreground px-2 py-2 whitespace-nowrap" data-testid={`wizard-scale-size-header-${vi}`}>
                                         {wv.name || `Size ${vi + 1}`}
@@ -731,8 +788,19 @@ export default function ProductWizard({
                                   {groupMods.map((mod, mi) => (
                                     <tr key={mod.id} className="border-t" data-testid={`wizard-scale-row-${mi}`}>
                                       <td className="px-3 py-2 font-medium text-xs whitespace-nowrap">{mod.name}</td>
-                                      <td className="px-3 py-2 text-xs text-muted-foreground text-right whitespace-nowrap">
-                                        {formatMoney(mod.baseUpcharge || 0)}
+                                      <td className="px-1.5 py-1.5 text-center">
+                                        <Input
+                                          type="number"
+                                          step="0.01"
+                                          min="0"
+                                          value={wmg.modifierPrices[mod.id] || ""}
+                                          onChange={e => updateModGroupRow(wmg.tempId, {
+                                            modifierPrices: { ...wmg.modifierPrices, [mod.id]: e.target.value }
+                                          })}
+                                          placeholder={((mod.baseUpcharge || 0) / 100).toFixed(2)}
+                                          className="h-7 w-20 text-center text-xs mx-auto"
+                                          data-testid={`wizard-mod-price-${mi}`}
+                                        />
                                       </td>
                                       {wizardVariants.map((wv, vi) => (
                                         <td key={wv.tempId} className="px-1.5 py-1.5 text-center">
@@ -812,6 +880,32 @@ export default function ProductWizard({
                               </p>
                             </div>
                           )}
+
+                          {wizardBom.length > 0 && (
+                            <div className="mt-2">
+                              <Separator className="mb-3" />
+                              <div className="flex items-center gap-2 text-xs" data-testid={`wizard-override-group-${idx}`}>
+                                <Label className="text-xs text-muted-foreground shrink-0">Override</Label>
+                                <ArrowRightLeft className="h-3 w-3 text-muted-foreground shrink-0" />
+                                <Select
+                                  value={wmg.overrideInventoryItemId || "__none__"}
+                                  onValueChange={v => updateModGroupRow(wmg.tempId, { overrideInventoryItemId: v === "__none__" ? "" : v })}
+                                >
+                                  <SelectTrigger className="h-7 text-[10px] rounded flex-1" data-testid={`wizard-override-select-${idx}`}>
+                                    <SelectValue placeholder="No override" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="__none__">No override</SelectItem>
+                                    {[...new Set(wizardBom.map(b => b.inventoryItemId))].map(invId => {
+                                      const invItem = inventory.find(i => i.id === invId);
+                                      return <SelectItem key={invId} value={invId}>{invItem?.name || "Unknown"}</SelectItem>;
+                                    })}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              <p className="text-[10px] text-muted-foreground mt-1">When a modifier from this group is selected, it replaces the chosen recipe ingredient.</p>
+                            </div>
+                          )}
                         </>
                       )}
 
@@ -827,53 +921,6 @@ export default function ProductWizard({
             </div>
           )}
         </ScrollArea>
-
-        {wizardModGroups.length > 0 && wizardBom.length > 0 && (
-          <div className="border rounded-xl p-3 space-y-2">
-            <div>
-              <p className="text-xs font-medium">Recipe Overrides</p>
-              <p className="text-[10px] text-muted-foreground">Link recipe ingredients to modifier groups. When a modifier is selected at POS, it replaces the original ingredient.</p>
-            </div>
-            <div className="space-y-1.5">
-              {(() => {
-                const uniqueInvIds = [...new Set(wizardBom.map(b => b.inventoryItemId))];
-                return uniqueInvIds.map(invId => {
-                  const invItem = inventory.find(i => i.id === invId);
-                  const firstEntry = wizardBom.find(b => b.inventoryItemId === invId);
-                  const currentOverride = firstEntry?.overrideModifierGroupId || "";
-                  return (
-                    <div key={invId} className="flex items-center gap-2 text-xs" data-testid={`wizard-override-${invId}`}>
-                      <span className="flex-1 truncate font-medium">{invItem?.name || "Unknown"}</span>
-                      <ArrowRightLeft className="h-3 w-3 text-muted-foreground shrink-0" />
-                      <Select
-                        value={currentOverride || "__none__"}
-                        onValueChange={v => {
-                          const val = v === "__none__" ? undefined : v;
-                          wizardBom.filter(b => b.inventoryItemId === invId).forEach(b => {
-                            updateBomOverride(b.tempId, val);
-                          });
-                        }}
-                      >
-                        <SelectTrigger className="h-6 text-[10px] rounded w-[160px]" data-testid={`wizard-override-select-${invId}`}>
-                          <SelectValue placeholder="No override" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__none__">No override</SelectItem>
-                          {wizardModGroups.map(wmg => {
-                            const label = wmg.isNew
-                              ? wmg.newName || "New Group"
-                              : modifierGroups.find(mg => mg.id === wmg.groupId)?.name || "Unknown";
-                            return <SelectItem key={wmg.tempId} value={wmg.tempId}>{label}</SelectItem>;
-                          })}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  );
-                });
-              })()}
-            </div>
-          </div>
-        )}
       </div>
     );
   }
@@ -1084,10 +1131,17 @@ export default function ProductWizard({
                         const sf = scaleData[mod.id];
                         return sf && Object.values(sf).some(v => Number(v) > 0 && Number(v) !== 1);
                       });
+                      const reviewMin = wmg.isNew ? wmg.newMin : wmg.productMin;
+                      const reviewMax = wmg.isNew ? wmg.newMax : wmg.productMax;
+                      const overrideItem = wmg.overrideInventoryItemId ? inventory.find(i => i.id === wmg.overrideInventoryItemId) : null;
+                      const hasPrices = Object.values(wmg.modifierPrices || {}).some(v => Number(v) > 0);
                       return (
                         <div key={wmg.tempId} data-testid={`wizard-review-mod-${i}`}>
-                          <div className="text-sm p-1.5 rounded-lg bg-muted/30">
-                            {label} {wmg.isNew && <Badge variant="outline" className="text-[10px] ml-1">New</Badge>}
+                          <div className="text-sm p-1.5 rounded-lg bg-muted/30 flex items-center justify-between">
+                            <span>{label} {wmg.isNew && <Badge variant="outline" className="text-[10px] ml-1">New</Badge>}</span>
+                            <span className="text-[10px] text-muted-foreground">
+                              {(Number(reviewMin) > 0 || Number(reviewMax) > 0) && `min ${reviewMin || 0} / max ${reviewMax || 0}`}
+                            </span>
                           </div>
                           {modsWithScales.length > 0 && (
                             <div className="ml-3 mt-1 space-y-0.5">
@@ -1122,6 +1176,21 @@ export default function ProductWizard({
                                 );
                               })}
                             </div>
+                          )}
+                          {hasPrices && (
+                            <div className="ml-3 mt-1 space-y-0.5">
+                              <p className="text-[10px] font-medium text-muted-foreground">Product prices:</p>
+                              {groupMods.filter(mod => Number(wmg.modifierPrices[mod.id] || 0) > 0).map(mod => (
+                                <p key={mod.id} className="text-[11px] text-muted-foreground">
+                                  {mod.name} — ${wmg.modifierPrices[mod.id]}
+                                </p>
+                              ))}
+                            </div>
+                          )}
+                          {overrideItem && (
+                            <p className="ml-3 mt-1 text-[11px] text-amber-600">
+                              Override: {overrideItem.name}
+                            </p>
                           )}
                         </div>
                       );

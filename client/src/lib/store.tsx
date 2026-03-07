@@ -98,6 +98,15 @@ export type ProductModifierGroupLink = {
   groupIds: string[];
 };
 
+export type ProductModifierGroupSetting = {
+  productId: string;
+  modifierGroupId: string;
+  minSelections: number | null;
+  maxSelections: number | null;
+  modifierPrices: string | null;
+  overrideInventoryItemId: string | null;
+};
+
 type StoreContextType = {
   products: Product[];
   variants: Variant[];
@@ -111,6 +120,7 @@ type StoreContextType = {
   integrations: string[];
   productModifierLinks: Record<string, string[]>;
   productModifierScaleFactors: Record<string, string | null>;
+  productModifierGroupSettings: ProductModifierGroupSetting[];
   isLoading: boolean;
 
   addProduct: (data: Partial<Product>) => void;
@@ -131,6 +141,7 @@ type StoreContextType = {
 
   setProductModifierGroups: (productId: string, groupIds: string[]) => void;
   setProductModifierScaleFactors: (productId: string, groupId: string, scaleFactors: string | null) => void;
+  updateProductModifierGroupSettings: (productId: string, groupId: string, data: Partial<ProductModifierGroupSetting>) => void;
 
   addInventoryItem: (data: Partial<InventoryItem>) => void;
   updateInventoryItem: (id: string, data: Partial<InventoryItem>) => void;
@@ -176,6 +187,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [localScaleFactors, setLocalScaleFactors] = useState<Record<string, string | null>>({});
   const productModifierScaleFactors = { ...productModifierScaleFactorsData, ...localScaleFactors };
 
+  const { data: productModifierGroupSettings = [] } = useQuery({ queryKey: ["pmgSettings"], queryFn: api.productModifierGroups.listAllSettings });
+
   const isLoading = loadingProducts || loadingVariants || loadingInventory;
 
   const inv = (keys: string[][]) => keys.forEach(k => qc.invalidateQueries({ queryKey: k }));
@@ -215,6 +228,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     },
   });
 
+  const updatePmgSettingsMut = useMutation({
+    mutationFn: ({ productId, groupId, data }: { productId: string; groupId: string; data: any }) =>
+      api.productModifierGroups.updateSettings(productId, groupId, data),
+    onSuccess: () => inv([["pmgSettings"]]),
+  });
+
   const addInvMut = useMutation({ mutationFn: api.inventory.create, onSuccess: () => inv([["inventory"]]) });
   const updateInvMut = useMutation({ mutationFn: ({ id, data }: { id: string; data: any }) => api.inventory.update(id, data), onSuccess: () => inv([["inventory"]]) });
   const adjustInvMut = useMutation({ mutationFn: ({ id, delta }: { id: string; delta: number }) => api.inventory.adjust(id, delta), onSuccess: () => inv([["inventory"]]) });
@@ -245,6 +264,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     integrations,
     productModifierLinks,
     productModifierScaleFactors,
+    productModifierGroupSettings,
     isLoading,
 
     addProduct: (data) => addProductMut.mutate(data),
@@ -265,6 +285,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
     setProductModifierGroups: (productId, groupIds) => setProductModGroupsMut.mutate({ productId, groupIds }),
     setProductModifierScaleFactors: (productId, groupId, scaleFactors) => setScaleFactorsMut.mutate({ productId, groupId, scaleFactors }),
+    updateProductModifierGroupSettings: (productId, groupId, data) => updatePmgSettingsMut.mutate({ productId, groupId, data }),
 
     addInventoryItem: (data) => addInvMut.mutate(data),
     updateInventoryItem: (id, data) => updateInvMut.mutate({ id, data }),
