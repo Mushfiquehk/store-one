@@ -181,6 +181,12 @@ export default function PosPage() {
   function handleRecordSale() {
     cart.forEach(line => {
       const bomEntries = bom.filter(b => b.sourceType === "VARIANT" && b.sourceId === line.variantId);
+      const selectedModGroupIds = new Set(
+        line.modifiers.map(sel => {
+          const mod = modifiers.find(m => m.id === sel.modifierId);
+          return mod?.modifierGroupId;
+        }).filter(Boolean)
+      );
 
       if (bomEntries.length === 0) {
         const variant = variants.find(v => v.id === line.variantId);
@@ -189,6 +195,9 @@ export default function PosPage() {
         }
       } else {
         bomEntries.forEach(entry => {
+          if (entry.overrideModifierGroupId && selectedModGroupIds.has(entry.overrideModifierGroupId)) {
+            return;
+          }
           let qty = entry.quantityDeducted * line.qty;
           if (entry.scaleFactorMatrix) {
             try {

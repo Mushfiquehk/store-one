@@ -17,7 +17,7 @@ Full-stack fuel station point-of-sale application built with React + Express + S
 - `modifiers` — individual options with `base_upcharge` (cents), `inventory_item_id` (assigned ingredient), and `quantity_per_use` (deduction amount). Legacy `scale_factor` column exists but is no longer used for new data.
 - `product_modifier_groups` — many-to-many link between products and modifier groups, with `scale_factors` TEXT column storing per-product size pricing multipliers as JSON: `{ modifierId: { variantName: factor } }`
 - `inventory_items` — raw materials/stock with current_quantity and tracking_config JSON
-- `bill_of_materials` — links variants/modifiers to inventory items with `quantity_deducted` and `scale_factor_matrix` JSON
+- `bill_of_materials` — links variants/modifiers to inventory items with `quantity_deducted`, `scale_factor_matrix` JSON, and `override_modifier_group_id` (recipe override feature)
 - `employees` — staff with role, pay_rate, and PIN access
 - `time_punches` — clock in/out records
 - `sales` — completed transactions with `lines_json` (includes full modifier tree)
@@ -50,6 +50,7 @@ Full-stack fuel station point-of-sale application built with React + Express + S
 - **Auto-Scale BOM**: Define base recipe for one size, proportionally scale to other sizes
 - **POS Modifier Selection**: Composite items prompt modifier selection with min/max validation
 - **Modifier Ingredient Assignment**: Each modifier option can have an inventory item + quantity per use; POS deducts via BOM entries first, then falls back to modifier's own inventoryItemId
+- **Recipe Override by Modifier Group**: BOM entries can be linked to a modifier group via `overrideModifierGroupId`. When a modifier from that group is selected at POS, the BOM entry's ingredient deduction is skipped (the modifier's own ingredient handles it). Configured in both product editor (Recipes tab) and product wizard (Modifiers step → Recipe Overrides section).
 - **Wizard Modifier Size Grid**: When assigning an existing modifier group during product creation, two grids appear: (1) pricing multipliers grid (modifier options × product sizes) for scale factors, and (2) ingredient quantity grid for modifiers with assigned ingredients
 - **Price Calculation**: P_final = P_variant + Σ(U_modifier × S_price_matrix)
 

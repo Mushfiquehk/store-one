@@ -83,6 +83,7 @@ function initTables() {
       inventory_item_id TEXT NOT NULL,
       quantity_deducted REAL NOT NULL,
       scale_factor_matrix TEXT,
+      override_modifier_group_id TEXT,
       FOREIGN KEY (inventory_item_id) REFERENCES inventory_items(id)
     );
 
@@ -212,5 +213,16 @@ function backfillScaleFactorsFromModifiers() {
   } catch {}
 }
 backfillScaleFactorsFromModifiers();
+
+function migrateBomColumns() {
+  try {
+    const cols = sqlite.prepare("PRAGMA table_info(bill_of_materials)").all() as { name: string }[];
+    const colNames = cols.map(c => c.name);
+    if (!colNames.includes("override_modifier_group_id")) {
+      sqlite.exec("ALTER TABLE bill_of_materials ADD COLUMN override_modifier_group_id TEXT");
+    }
+  } catch {}
+}
+migrateBomColumns();
 
 seedIfEmpty();

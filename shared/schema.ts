@@ -62,6 +62,7 @@ export const billOfMaterials = sqliteTable("bill_of_materials", {
   inventoryItemId: text("inventory_item_id").notNull().references(() => inventoryItems.id),
   quantityDeducted: real("quantity_deducted").notNull(),
   scaleFactorMatrix: text("scale_factor_matrix"),
+  overrideModifierGroupId: text("override_modifier_group_id"),
 });
 
 export const employees = sqliteTable("employees", {

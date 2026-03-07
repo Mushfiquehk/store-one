@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
-import { Trash2, Plus, Search, X, Package, ChefHat, Sliders } from "lucide-react";
+import { Trash2, Plus, Search, X, Package, ChefHat, Sliders, ArrowRightLeft } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -538,26 +539,65 @@ function ProductEditorInner({
                 </div>
 
                 {currentBomForVariant.length > 0 && (
-                  <div className="space-y-1">
+                  <div className="space-y-1.5">
                     <p className="text-xs font-medium text-muted-foreground">Linked Materials</p>
                     {currentBomForVariant.map(entry => {
                       const item = inventory.find(i => i.id === entry.inventoryItemId);
+                      const overrideGroup = entry.overrideModifierGroupId ? modifierGroups.find(mg => mg.id === entry.overrideModifierGroupId) : null;
                       return (
-                        <div key={entry.id} className="flex items-center gap-2 p-1.5 rounded-lg bg-muted/30 text-xs" data-testid={`editor-bom-entry-${entry.id}`}>
-                          <span className="flex-1 truncate font-medium">{item?.name || "Unknown"}</span>
-                          <Input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            defaultValue={entry.quantityDeducted}
-                            onBlur={e => handleUpdateBomQty(entry, e.target.value)}
-                            className="w-16 h-6 rounded text-xs text-center"
-                            data-testid={`editor-bom-qty-${entry.id}`}
-                          />
-                          <span className="text-muted-foreground">{item?.unitOfMeasure}</span>
-                          <Button variant="ghost" size="icon" className="h-5 w-5 text-destructive" onClick={() => handleRemoveBomEntry(entry)} data-testid={`editor-bom-remove-${entry.id}`}>
-                            <X className="h-3 w-3" />
-                          </Button>
+                        <div key={entry.id} className="rounded-lg bg-muted/30 text-xs" data-testid={`editor-bom-entry-${entry.id}`}>
+                          <div className="flex items-center gap-2 p-1.5">
+                            <span className="flex-1 truncate font-medium">{item?.name || "Unknown"}</span>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              defaultValue={entry.quantityDeducted}
+                              onBlur={e => handleUpdateBomQty(entry, e.target.value)}
+                              className="w-16 h-6 rounded text-xs text-center"
+                              data-testid={`editor-bom-qty-${entry.id}`}
+                            />
+                            <span className="text-muted-foreground">{item?.unitOfMeasure}</span>
+                            <Button variant="ghost" size="icon" className="h-5 w-5 text-destructive" onClick={() => handleRemoveBomEntry(entry)} data-testid={`editor-bom-remove-${entry.id}`}>
+                              <X className="h-3 w-3" />
+                            </Button>
+                          </div>
+                          {linkedGroupIds.length > 0 && (
+                            <div className="px-1.5 pb-1.5">
+                              <div className="flex items-center gap-1.5">
+                                <TooltipProvider>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <ArrowRightLeft className="h-3 w-3 text-muted-foreground shrink-0" />
+                                    </TooltipTrigger>
+                                    <TooltipContent side="bottom" className="max-w-[200px]">
+                                      <p className="text-xs">When a modifier from the selected group is chosen at POS, it replaces this ingredient.</p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                                <Select
+                                  value={entry.overrideModifierGroupId || "__none__"}
+                                  onValueChange={v => updateBom(entry.id, { overrideModifierGroupId: v === "__none__" ? null : v })}
+                                >
+                                  <SelectTrigger className="h-5 text-[10px] rounded border-dashed flex-1" data-testid={`editor-bom-override-${entry.id}`}>
+                                    <SelectValue placeholder="No override" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="__none__">No override</SelectItem>
+                                    {linkedGroupIds.map(gid => {
+                                      const g = modifierGroups.find(mg => mg.id === gid);
+                                      return g ? <SelectItem key={gid} value={gid}>{g.name} overrides</SelectItem> : null;
+                                    })}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                              {overrideGroup && (
+                                <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5 ml-4.5">
+                                  Replaced by "{overrideGroup.name}" selection at POS
+                                </p>
+                              )}
+                            </div>
+                          )}
                         </div>
                       );
                     })}

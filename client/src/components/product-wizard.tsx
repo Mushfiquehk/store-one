@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Check, ChevronRight, ChevronLeft, Package, ChefHat, Plus, Trash2, Search, X, Info } from "lucide-react";
+import { Check, ChevronRight, ChevronLeft, Package, ChefHat, Plus, Trash2, Search, X, Info, ArrowRightLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -42,6 +42,7 @@ type WizardBomEntry = {
   variantTempId: string;
   inventoryItemId: string;
   quantity: string;
+  overrideModifierGroupId?: string;
 };
 
 const STEPS_RETAIL = ["Item Type", "Review & Create"];
@@ -215,6 +216,7 @@ export default function ProductWizard({
       });
 
       const linkedGroupIds: string[] = [];
+      const tempIdToGroupId: Record<string, string> = {};
       wizardModGroups.forEach(wmg => {
         if (wmg.isNew && wmg.newName.trim()) {
           const groupId = uid("mg");
@@ -225,8 +227,10 @@ export default function ProductWizard({
             maxSelections: Number(wmg.newMax) || 0,
           });
           linkedGroupIds.push(groupId);
+          tempIdToGroupId[wmg.tempId] = groupId;
         } else if (!wmg.isNew && wmg.groupId) {
           linkedGroupIds.push(wmg.groupId);
+          tempIdToGroupId[wmg.tempId] = wmg.groupId;
         }
       });
 
@@ -236,7 +240,7 @@ export default function ProductWizard({
 
           setTimeout(() => {
             wizardModGroups.forEach(wmg => {
-              const groupId = wmg.isNew ? linkedGroupIds[wizardModGroups.indexOf(wmg)] : wmg.groupId;
+              const groupId = tempIdToGroupId[wmg.tempId];
               if (!groupId) return;
               const groupScaleData = wizardScaleFactors[wmg.tempId];
               if (!groupScaleData) return;
@@ -264,13 +268,18 @@ export default function ProductWizard({
       wizardBom.forEach(wb => {
         const realVariantId = variantIdMap[wb.variantTempId];
         if (realVariantId && wb.inventoryItemId && Number(wb.quantity) > 0) {
-          addBom({
+          const bomData: any = {
             id: uid("bom"),
             sourceType: "VARIANT",
             sourceId: realVariantId,
             inventoryItemId: wb.inventoryItemId,
             quantityDeducted: Number(wb.quantity),
-          });
+          };
+          if (wb.overrideModifierGroupId) {
+            const resolvedGroupId = tempIdToGroupId[wb.overrideModifierGroupId] || wb.overrideModifierGroupId;
+            if (resolvedGroupId) bomData.overrideModifierGroupId = resolvedGroupId;
+          }
+          addBom(bomData);
         }
       });
 
@@ -360,6 +369,10 @@ export default function ProductWizard({
     const gid = getResolvedGroupId(wmg);
     if (!gid) return [];
     return modifiers.filter(m => m.modifierGroupId === gid);
+  }
+
+  function updateBomOverride(tempId: string, overrideGroupTempId: string | undefined) {
+    setWizardBom(prev => prev.map(b => b.tempId === tempId ? { ...b, overrideModifierGroupId: overrideGroupTempId } : b));
   }
 
   function addBomEntry(variantTempId: string, inventoryItemId: string) {
@@ -814,6 +827,53 @@ export default function ProductWizard({
             </div>
           )}
         </ScrollArea>
+
+        {wizardModGroups.length > 0 && wizardBom.length > 0 && (
+          <div className="border rounded-xl p-3 space-y-2">
+            <div>
+              <p className="text-xs font-medium">Recipe Overrides</p>
+              <p className="text-[10px] text-muted-foreground">Link recipe ingredients to modifier groups. When a modifier is selected at POS, it replaces the original ingredient.</p>
+            </div>
+            <div className="space-y-1.5">
+              {(() => {
+                const uniqueInvIds = [...new Set(wizardBom.map(b => b.inventoryItemId))];
+                return uniqueInvIds.map(invId => {
+                  const invItem = inventory.find(i => i.id === invId);
+                  const firstEntry = wizardBom.find(b => b.inventoryItemId === invId);
+                  const currentOverride = firstEntry?.overrideModifierGroupId || "";
+                  return (
+                    <div key={invId} className="flex items-center gap-2 text-xs" data-testid={`wizard-override-${invId}`}>
+                      <span className="flex-1 truncate font-medium">{invItem?.name || "Unknown"}</span>
+                      <ArrowRightLeft className="h-3 w-3 text-muted-foreground shrink-0" />
+                      <Select
+                        value={currentOverride || "__none__"}
+                        onValueChange={v => {
+                          const val = v === "__none__" ? undefined : v;
+                          wizardBom.filter(b => b.inventoryItemId === invId).forEach(b => {
+                            updateBomOverride(b.tempId, val);
+                          });
+                        }}
+                      >
+                        <SelectTrigger className="h-6 text-[10px] rounded w-[160px]" data-testid={`wizard-override-select-${invId}`}>
+                          <SelectValue placeholder="No override" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">No override</SelectItem>
+                          {wizardModGroups.map(wmg => {
+                            const label = wmg.isNew
+                              ? wmg.newName || "New Group"
+                              : modifierGroups.find(mg => mg.id === wmg.groupId)?.name || "Unknown";
+                            return <SelectItem key={wmg.tempId} value={wmg.tempId}>{label}</SelectItem>;
+                          })}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -1080,10 +1140,15 @@ export default function ProductWizard({
                       return (
                         <div key={wv.tempId} className="text-xs">
                           <span className="font-medium">{wv.name}:</span>{" "}
-                          {entries.map(e => {
+                          {entries.map((e, ei) => {
                             const item = inventory.find(i => i.id === e.inventoryItemId);
-                            return `${item?.name || "?"} ×${e.quantity}`;
-                          }).join(", ")}
+                            const overrideLabel = e.overrideModifierGroupId ? (() => {
+                              const wmg = wizardModGroups.find(wm => wm.tempId === e.overrideModifierGroupId || wm.groupId === e.overrideModifierGroupId);
+                              if (wmg) return wmg.isNew ? wmg.newName : modifierGroups.find(mg => mg.id === wmg.groupId)?.name;
+                              return null;
+                            })() : null;
+                            return <span key={ei}>{ei > 0 && ", "}{item?.name || "?"} ×{e.quantity}{overrideLabel && <span className="text-amber-600"> (→ {overrideLabel})</span>}</span>;
+                          })}
                         </div>
                       );
                     })}

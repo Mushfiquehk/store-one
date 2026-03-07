@@ -56,6 +56,7 @@ export type BomEntry = {
   inventoryItemId: string;
   quantityDeducted: number;
   scaleFactorMatrix: string | null;
+  overrideModifierGroupId: string | null;
 };
 
 export type Employee = {
