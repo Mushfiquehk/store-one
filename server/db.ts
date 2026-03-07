@@ -50,6 +50,7 @@ function initTables() {
     CREATE TABLE IF NOT EXISTS product_modifier_groups (
       product_id TEXT NOT NULL,
       modifier_group_id TEXT NOT NULL,
+      scale_factors TEXT,
       PRIMARY KEY (product_id, modifier_group_id),
       FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
       FOREIGN KEY (modifier_group_id) REFERENCES modifier_groups(id) ON DELETE CASCADE
@@ -173,5 +174,43 @@ function migrateModifiersColumns() {
   } catch {}
 }
 migrateModifiersColumns();
+
+function migrateProductModifierGroupsColumns() {
+  try {
+    const cols = sqlite.prepare("PRAGMA table_info(product_modifier_groups)").all() as { name: string }[];
+    const colNames = cols.map(c => c.name);
+    if (!colNames.includes("scale_factors")) {
+      sqlite.exec("ALTER TABLE product_modifier_groups ADD COLUMN scale_factors TEXT");
+    }
+  } catch {}
+}
+migrateProductModifierGroupsColumns();
+
+function backfillScaleFactorsFromModifiers() {
+  try {
+    const links = sqlite.prepare("SELECT product_id, modifier_group_id, scale_factors FROM product_modifier_groups WHERE scale_factors IS NULL").all() as { product_id: string; modifier_group_id: string; scale_factors: string | null }[];
+    if (links.length === 0) return;
+    const mods = sqlite.prepare("SELECT id, modifier_group_id, scale_factor FROM modifiers WHERE scale_factor IS NOT NULL AND scale_factor != ''").all() as { id: string; modifier_group_id: string; scale_factor: string }[];
+    if (mods.length === 0) return;
+    const update = sqlite.prepare("UPDATE product_modifier_groups SET scale_factors = ? WHERE product_id = ? AND modifier_group_id = ?");
+    for (const link of links) {
+      const groupMods = mods.filter(m => m.modifier_group_id === link.modifier_group_id);
+      if (groupMods.length === 0) continue;
+      const scaleFactors: Record<string, Record<string, number>> = {};
+      for (const mod of groupMods) {
+        try {
+          const parsed = JSON.parse(mod.scale_factor);
+          if (typeof parsed === "object" && parsed !== null) {
+            scaleFactors[mod.id] = parsed;
+          }
+        } catch {}
+      }
+      if (Object.keys(scaleFactors).length > 0) {
+        update.run(JSON.stringify(scaleFactors), link.product_id, link.modifier_group_id);
+      }
+    }
+  } catch {}
+}
+backfillScaleFactorsFromModifiers();
 
 seedIfEmpty();

@@ -37,6 +37,12 @@ export const api = {
     set: (productId: string, groupIds: string[]) =>
       request<any>(`/products/${productId}/modifier-groups`, { method: "PUT", body: JSON.stringify({ groupIds }) }),
     listAll: () => request<Record<string, string[]>>(`/product-modifier-links`),
+    listAllScaleFactors: () => request<Record<string, string | null>>(`/product-modifier-scale-factors`),
+    setScaleFactors: (productId: string, groupId: string, scaleFactors: string | null) =>
+      request<any>(`/products/${productId}/modifier-groups/${groupId}/scale-factors`, {
+        method: "PUT",
+        body: JSON.stringify({ scaleFactors }),
+      }),
   },
   modifiers: {
     list: (groupId?: string) => request<any[]>(`/modifiers${groupId ? `?groupId=${groupId}` : ""}`),

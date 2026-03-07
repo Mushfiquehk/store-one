@@ -34,6 +34,8 @@ export interface IStorage {
 
   getProductModifierGroups(productId: string): string[];
   setProductModifierGroups(productId: string, groupIds: string[]): void;
+  getAllProductModifierScaleFactors(): Record<string, string | null>;
+  setProductModifierScaleFactors(productId: string, modifierGroupId: string, scaleFactors: string | null): void;
 
   getModifiers(groupId?: string): Modifier[];
   createModifier(data: InsertModifier): Modifier;
@@ -137,10 +139,38 @@ export class SqliteStorage implements IStorage {
       .map(r => r.modifierGroupId);
   }
   setProductModifierGroups(productId: string, groupIds: string[]): void {
+    const existingRows = db.select().from(productModifierGroups)
+      .where(eq(productModifierGroups.productId, productId)).all();
+    const existingScaleFactors: Record<string, string | null> = {};
+    for (const row of existingRows) {
+      existingScaleFactors[row.modifierGroupId] = row.scaleFactors;
+    }
     db.delete(productModifierGroups).where(eq(productModifierGroups.productId, productId)).run();
     for (const gid of groupIds) {
-      db.insert(productModifierGroups).values({ productId, modifierGroupId: gid }).run();
+      db.insert(productModifierGroups).values({
+        productId,
+        modifierGroupId: gid,
+        scaleFactors: existingScaleFactors[gid] || null,
+      }).run();
     }
+  }
+
+  getAllProductModifierScaleFactors(): Record<string, string | null> {
+    const rows = db.select().from(productModifierGroups).all();
+    const map: Record<string, string | null> = {};
+    for (const r of rows) {
+      if (r.scaleFactors) {
+        map[`${r.productId}::${r.modifierGroupId}`] = r.scaleFactors;
+      }
+    }
+    return map;
+  }
+
+  setProductModifierScaleFactors(productId: string, modifierGroupId: string, scaleFactors: string | null): void {
+    db.update(productModifierGroups)
+      .set({ scaleFactors })
+      .where(sql`${productModifierGroups.productId} = ${productId} AND ${productModifierGroups.modifierGroupId} = ${modifierGroupId}`)
+      .run();
   }
 
   getModifiers(groupId?: string): Modifier[] {

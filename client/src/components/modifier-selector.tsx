@@ -23,6 +23,7 @@ type Props = {
   modifierGroups: ModifierGroup[];
   modifiers: Modifier[];
   linkedGroupIds: string[];
+  productModifierScaleFactors?: Record<string, string | null>;
   onAddToCart: (variantId: string, modifiers: SelectedModifier[]) => void;
 };
 
@@ -34,6 +35,7 @@ export default function ModifierSelector({
   modifierGroups,
   modifiers,
   linkedGroupIds,
+  productModifierScaleFactors = {},
   onAddToCart,
 }: Props) {
   const [selectedVariantId, setSelectedVariantId] = useState<string>("");
@@ -58,18 +60,39 @@ export default function ModifierSelector({
   }, [groups, modifiers]);
 
   function getModifierPrice(mod: Modifier): number {
-    if (!activeVariant || !mod.scaleFactor) return mod.baseUpcharge;
-    try {
-      const sf: Record<string, number> = JSON.parse(mod.scaleFactor);
-      const variantName = activeVariant.name;
-      if (sf[variantName] !== undefined) {
-        return Math.round(mod.baseUpcharge * sf[variantName]);
-      }
-      const variantId = activeVariant.id;
-      if (sf[variantId] !== undefined) {
-        return Math.round(mod.baseUpcharge * sf[variantId]);
-      }
-    } catch {}
+    if (!activeVariant) return mod.baseUpcharge;
+    const modGroup = mod.modifierGroupId;
+    const sfKey = `${product.id}::${modGroup}`;
+    const sfJson = productModifierScaleFactors[sfKey];
+    if (sfJson) {
+      try {
+        const allScaleFactors: Record<string, Record<string, number>> = JSON.parse(sfJson);
+        const modScaleFactors = allScaleFactors[mod.id];
+        if (modScaleFactors) {
+          const variantName = activeVariant.name;
+          if (modScaleFactors[variantName] !== undefined) {
+            return Math.round(mod.baseUpcharge * modScaleFactors[variantName]);
+          }
+          const variantId = activeVariant.id;
+          if (modScaleFactors[variantId] !== undefined) {
+            return Math.round(mod.baseUpcharge * modScaleFactors[variantId]);
+          }
+        }
+      } catch {}
+    }
+    if (mod.scaleFactor) {
+      try {
+        const sf: Record<string, number> = JSON.parse(mod.scaleFactor);
+        const variantName = activeVariant.name;
+        if (sf[variantName] !== undefined) {
+          return Math.round(mod.baseUpcharge * sf[variantName]);
+        }
+        const variantId = activeVariant.id;
+        if (sf[variantId] !== undefined) {
+          return Math.round(mod.baseUpcharge * sf[variantId]);
+        }
+      } catch {}
+    }
     return mod.baseUpcharge;
   }
 

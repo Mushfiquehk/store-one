@@ -14,8 +14,8 @@ Full-stack fuel station point-of-sale application built with React + Express + S
 - `products` — catalog items with `type` (RETAIL/RESTAURANT), `is_composite` flag, and JSON `attributes` (tags, tax_exempt)
 - `variants` — SKU-level pricing with `direct_inventory_id` for 1:1 retail mapping
 - `modifier_groups` — groupings for modifiers with `min_selections` / `max_selections` constraints
-- `modifiers` — individual options with `base_upcharge` (cents), `scale_factor` JSON (size-based pricing matrix), `inventory_item_id` (assigned ingredient), and `quantity_per_use` (deduction amount)
-- `product_modifier_groups` — many-to-many link between products and modifier groups
+- `modifiers` — individual options with `base_upcharge` (cents), `inventory_item_id` (assigned ingredient), and `quantity_per_use` (deduction amount). Legacy `scale_factor` column exists but is no longer used for new data.
+- `product_modifier_groups` — many-to-many link between products and modifier groups, with `scale_factors` TEXT column storing per-product size pricing multipliers as JSON: `{ modifierId: { variantName: factor } }`
 - `inventory_items` — raw materials/stock with current_quantity and tracking_config JSON
 - `bill_of_materials` — links variants/modifiers to inventory items with `quantity_deducted` and `scale_factor_matrix` JSON
 - `employees` — staff with role, pay_rate, and PIN access
@@ -46,7 +46,7 @@ Full-stack fuel station point-of-sale application built with React + Express + S
 ## Frontend Patterns (per Research Paper)
 - **Wizard Design Pattern**: Product creation uses 5-step progressive disclosure (Item Type → Variants → Modifiers → BOM/Recipe → Review)
 - **Retail vs Prepared Dichotomy**: Retail items use quick-add path; Prepared items trigger full wizard
-- **Size-Scaled Pricing**: Modifier upcharges scale by variant size via `scaleFactor` JSON
+- **Size-Scaled Pricing**: Modifier upcharges scale by variant size via product-level scale factors stored on `product_modifier_groups.scale_factors`. Configured per product-modifier-group link, not on the modifier itself.
 - **Auto-Scale BOM**: Define base recipe for one size, proportionally scale to other sizes
 - **POS Modifier Selection**: Composite items prompt modifier selection with min/max validation
 - **Modifier Ingredient Assignment**: Each modifier option can have an inventory item + quantity per use; POS deducts via BOM entries first, then falls back to modifier's own inventoryItemId
@@ -57,7 +57,8 @@ Full-stack fuel station point-of-sale application built with React + Express + S
 - **Products**: Create (wizard), Edit (name/tags), Delete (with dependency warnings for sales, BOM)
 - **Variants**: Edit (name/SKU/price), Delete (with BOM warning, last-variant guard deletes product)
 - **Modifier Groups**: Create, Edit (name/rules), Delete (with confirmation)
-- **Modifiers**: Create, Edit (name/price/ingredient/scale factors), Delete (with confirmation)
+- **Modifiers**: Create, Edit (name/price/ingredient), Delete (with confirmation)
+- **Product-Modifier Scale Factors**: Configure size pricing multipliers per product-modifier-group link via slider icon on linked products
 - **Inventory Items**: Create, Edit (name/unit/low stock alert), Delete (with warnings for BOM/modifier/variant references)
 
 ## Seed Data

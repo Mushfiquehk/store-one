@@ -33,6 +33,7 @@ export const modifierGroups = sqliteTable("modifier_groups", {
 export const productModifierGroups = sqliteTable("product_modifier_groups", {
   productId: text("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
   modifierGroupId: text("modifier_group_id").notNull().references(() => modifierGroups.id, { onDelete: "cascade" }),
+  scaleFactors: text("scale_factors"),
 });
 
 export const modifiers = sqliteTable("modifiers", {

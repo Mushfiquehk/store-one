@@ -109,6 +109,7 @@ type StoreContextType = {
   sales: Sale[];
   integrations: string[];
   productModifierLinks: Record<string, string[]>;
+  productModifierScaleFactors: Record<string, string | null>;
   isLoading: boolean;
 
   addProduct: (data: Partial<Product>) => void;
@@ -128,6 +129,7 @@ type StoreContextType = {
   deleteModifier: (id: string) => void;
 
   setProductModifierGroups: (productId: string, groupIds: string[]) => void;
+  setProductModifierScaleFactors: (productId: string, groupId: string, scaleFactors: string | null) => void;
 
   addInventoryItem: (data: Partial<InventoryItem>) => void;
   updateInventoryItem: (id: string, data: Partial<InventoryItem>) => void;
@@ -169,6 +171,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [localProductModifierLinks, setLocalProductModifierLinks] = useState<Record<string, string[]>>({});
   const productModifierLinks = { ...productModifierLinksData, ...localProductModifierLinks };
 
+  const { data: productModifierScaleFactorsData = {} } = useQuery({ queryKey: ["productModifierScaleFactors"], queryFn: api.productModifierGroups.listAllScaleFactors });
+  const [localScaleFactors, setLocalScaleFactors] = useState<Record<string, string | null>>({});
+  const productModifierScaleFactors = { ...productModifierScaleFactorsData, ...localScaleFactors };
+
   const isLoading = loadingProducts || loadingVariants || loadingInventory;
 
   const inv = (keys: string[][]) => keys.forEach(k => qc.invalidateQueries({ queryKey: k }));
@@ -195,6 +201,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     onSuccess: (_data, variables) => {
       setLocalProductModifierLinks(prev => ({ ...prev, [variables.productId]: variables.groupIds }));
       inv([["productModifierLinks"]]);
+    },
+  });
+
+  const setScaleFactorsMut = useMutation({
+    mutationFn: ({ productId, groupId, scaleFactors }: { productId: string; groupId: string; scaleFactors: string | null }) =>
+      api.productModifierGroups.setScaleFactors(productId, groupId, scaleFactors),
+    onSuccess: (_data, variables) => {
+      const key = `${variables.productId}::${variables.groupId}`;
+      setLocalScaleFactors(prev => ({ ...prev, [key]: variables.scaleFactors }));
+      inv([["productModifierScaleFactors"]]);
     },
   });
 
@@ -227,6 +243,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     sales,
     integrations,
     productModifierLinks,
+    productModifierScaleFactors,
     isLoading,
 
     addProduct: (data) => addProductMut.mutate(data),
@@ -246,6 +263,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     deleteModifier: (id) => deleteModMut.mutate(id),
 
     setProductModifierGroups: (productId, groupIds) => setProductModGroupsMut.mutate({ productId, groupIds }),
+    setProductModifierScaleFactors: (productId, groupId, scaleFactors) => setScaleFactorsMut.mutate({ productId, groupId, scaleFactors }),
 
     addInventoryItem: (data) => addInvMut.mutate(data),
     updateInventoryItem: (id, data) => updateInvMut.mutate({ id, data }),

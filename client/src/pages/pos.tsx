@@ -29,7 +29,7 @@ export default function PosPage() {
   const { toast } = useToast();
   const {
     products, variants, inventory, bom, sales, modifierGroups, modifiers,
-    productModifierLinks, addSale, adjustInventory, integrations, isLoading,
+    productModifierLinks, productModifierScaleFactors, addSale, adjustInventory, integrations, isLoading,
   } = useStore();
 
   const [taxRatePct, setTaxRatePct] = useState(8.25);
@@ -121,15 +121,29 @@ export default function PosPage() {
   }
 
   function getModifierPrice(mod: typeof modifiers[0], variantId: string): number {
-    if (!mod.scaleFactor) return mod.baseUpcharge;
-    try {
-      const sf: Record<string, number> = JSON.parse(mod.scaleFactor);
-      const variant = variants.find(v => v.id === variantId);
-      if (variant) {
-        if (sf[variant.name] !== undefined) return Math.round(mod.baseUpcharge * sf[variant.name]);
-        if (sf[variant.id] !== undefined) return Math.round(mod.baseUpcharge * sf[variant.id]);
+    const variant = variants.find(v => v.id === variantId);
+    if (variant) {
+      const productId = variant.productId;
+      const sfKey = `${productId}::${mod.modifierGroupId}`;
+      const sfJson = productModifierScaleFactors[sfKey];
+      if (sfJson) {
+        try {
+          const allSf: Record<string, Record<string, number>> = JSON.parse(sfJson);
+          const modSf = allSf[mod.id];
+          if (modSf) {
+            if (modSf[variant.name] !== undefined) return Math.round(mod.baseUpcharge * modSf[variant.name]);
+            if (modSf[variant.id] !== undefined) return Math.round(mod.baseUpcharge * modSf[variant.id]);
+          }
+        } catch {}
       }
-    } catch {}
+      if (mod.scaleFactor) {
+        try {
+          const sf: Record<string, number> = JSON.parse(mod.scaleFactor);
+          if (sf[variant.name] !== undefined) return Math.round(mod.baseUpcharge * sf[variant.name]);
+          if (sf[variant.id] !== undefined) return Math.round(mod.baseUpcharge * sf[variant.id]);
+        } catch {}
+      }
+    }
     return mod.baseUpcharge;
   }
 
@@ -532,6 +546,7 @@ export default function PosPage() {
             modifierGroups={modifierGroups}
             modifiers={modifiers}
             linkedGroupIds={getLinkedGroupIds(modSelectorProduct.id)}
+            productModifierScaleFactors={productModifierScaleFactors}
             onAddToCart={handleModifierAdd}
           />
         )}

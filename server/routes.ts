@@ -78,11 +78,18 @@ export async function registerRoutes(
   app.get("/api/product-modifier-links", (_req, res) => {
     res.json(storage.getAllProductModifierGroupLinks());
   });
+  app.get("/api/product-modifier-scale-factors", (_req, res) => {
+    res.json(storage.getAllProductModifierScaleFactors());
+  });
   app.get("/api/products/:id/modifier-groups", (req, res) => {
     res.json(storage.getProductModifierGroups(req.params.id));
   });
   app.put("/api/products/:id/modifier-groups", (req, res) => {
     storage.setProductModifierGroups(req.params.id, req.body.groupIds || []);
+    res.json({ ok: true });
+  });
+  app.put("/api/products/:productId/modifier-groups/:groupId/scale-factors", (req, res) => {
+    storage.setProductModifierScaleFactors(req.params.productId, req.params.groupId, req.body.scaleFactors ?? null);
     res.json({ ok: true });
   });
 
