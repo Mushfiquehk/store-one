@@ -1,0 +1,18 @@
+If I were starting this over, here are the things I'd do differently:
+1. True offline-first architecture
+This is the biggest gap right now. The app says offline-first, but every single action — creating a product, recording a sale, adjusting inventory — makes an HTTP call to the Express server. If the network or server process hiccups, everything fails. For a small-business POS that might run on an iPad in a gas station with spotty connectivity, that's a dealbreaker.
+What I'd change: Use an in-browser database like IndexedDB (via a library like Dexie.js) as the primary data store on the frontend. The app would read/write locally first, then sync to a server in the background when connectivity is available. Sales would never fail because the network is down.
+2. Simpler data model
+The current schema is powerful but complex — products, variants, modifier groups, modifiers, product-modifier links with scale factors, BOM entries with override groups, scale factor matrices. For a small business owner setting up their store, that's a lot of concepts to learn. The wizard helps, but the underlying complexity still leaks through.
+What I'd change: Start with a flatter model. A product has a price, optional modifiers with simple add-on prices, and optional inventory tracking. Only introduce variants and BOM recipes as an "advanced" mode for businesses that actually need them (like food service).
+3. PWA from day one
+There's no service worker, no manifest, no install-to-home-screen support. For an iPad POS, the app should feel like a native app — full screen, no browser chrome, cached assets so it loads instantly even offline.
+What I'd change: Set up the PWA manifest and service worker at project start, not as an afterthought.
+4. Local-first sync instead of client-server
+The current Express + SQLite backend means the database lives on the server. If you want multiple devices (e.g., two registers), they'd need to hit the same server. But if the server goes down, everything stops.
+What I'd change: Consider a local-first sync engine (like CRDTs or a simpler last-write-wins approach) so each device has its own full copy of the data, and they sync when they can. This also makes multi-device support natural.
+5. Better separation of POS vs back-office
+Right now the cashier-facing POS and the admin/back-office screens live in the same app with the same navigation. A cashier doesn't need to see inventory management or employee settings.
+What I'd change: Have a clear POS mode (locked down, big touch targets, minimal navigation) and an admin mode (full access), switchable via PIN or role.
+6. Receipt/payment handling
+The current sales flow records a transaction but doesn't handle payment methods, change calculation, receipt printing, or tax breakdowns — things a real POS needs
