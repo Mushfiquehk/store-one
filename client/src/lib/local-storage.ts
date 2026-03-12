@@ -35,8 +35,11 @@ export const storage = {
   },
 
   async deleteProduct(id: string): Promise<void> {
-    await db.transaction("rw", [db.products, db.variants, db.productModifierGroups], async () => {
+    await db.transaction("rw", [db.products, db.variants, db.productModifierGroups, db.billOfMaterials], async () => {
       const variantIds = (await db.variants.where("productId").equals(id).toArray()).map(v => v.id);
+      for (const vid of variantIds) {
+        await db.billOfMaterials.where("[sourceType+sourceId]").equals(["VARIANT", vid]).delete();
+      }
       await db.variants.bulkDelete(variantIds);
       await db.productModifierGroups.where("productId").equals(id).delete();
       await db.products.delete(id);
@@ -70,7 +73,10 @@ export const storage = {
   },
 
   async deleteVariant(id: string): Promise<void> {
-    await db.variants.delete(id);
+    await db.transaction("rw", [db.variants, db.billOfMaterials], async () => {
+      await db.billOfMaterials.where("[sourceType+sourceId]").equals(["VARIANT", id]).delete();
+      await db.variants.delete(id);
+    });
   },
 
   async getModifierGroups(): Promise<ModifierGroup[]> {
