@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from "react";
+import React, { createContext, useContext, useState, useCallback, useEffect } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "./db";
 import { storage } from "./local-storage";
@@ -132,9 +132,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const productModifierLinks = productModifierLinksRaw ?? {};
   const productModifierScaleFactors = productModifierScaleFactorsRaw ?? {};
 
-  if (!dbReady && products !== undefined && variants !== undefined && inventory !== undefined) {
-    setDbReady(true);
-  }
+  useEffect(() => {
+    if (!dbReady && products !== undefined && variants !== undefined && inventory !== undefined) {
+      setDbReady(true);
+    }
+  }, [dbReady, products, variants, inventory]);
 
   const isLoading = !dbReady;
 
