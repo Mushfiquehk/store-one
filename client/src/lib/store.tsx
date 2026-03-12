@@ -1,89 +1,21 @@
-import React, { createContext, useContext, useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "./api";
+import React, { createContext, useContext, useState, useCallback } from "react";
+import { useLiveQuery } from "dexie-react-hooks";
+import { db } from "./db";
+import { storage } from "./local-storage";
 import { toast } from "@/hooks/use-toast";
+import type {
+  Product,
+  Variant,
+  ModifierGroup,
+  Modifier,
+  InventoryItem,
+  BomEntry,
+  Employee,
+  TimePunch,
+  Sale,
+} from "./db";
 
-export type Product = {
-  id: string;
-  name: string;
-  type: string;
-  isComposite: boolean;
-  attributes: string | null;
-  createdAt: string | null;
-};
-
-export type Variant = {
-  id: string;
-  productId: string;
-  sku: string | null;
-  name: string;
-  basePrice: number;
-  directInventoryId: string | null;
-  config: string | null;
-};
-
-export type ModifierGroup = {
-  id: string;
-  name: string;
-  minSelections: number;
-  maxSelections: number;
-  selectionRules: string | null;
-};
-
-export type Modifier = {
-  id: string;
-  modifierGroupId: string;
-  name: string;
-  baseUpcharge: number;
-  scaleFactor: string | null;
-  pricingLogic: string | null;
-  inventoryItemId: string | null;
-  quantityPerUse: number | null;
-};
-
-export type InventoryItem = {
-  id: string;
-  name: string;
-  unitOfMeasure: string;
-  currentQuantity: number;
-  trackingConfig: string | null;
-};
-
-export type BomEntry = {
-  id: string;
-  sourceType: string;
-  sourceId: string;
-  inventoryItemId: string;
-  quantityDeducted: number;
-  scaleFactorMatrix: string | null;
-  overrideModifierGroupId: string | null;
-};
-
-export type Employee = {
-  id: string;
-  name: string;
-  role: string;
-  payRate: number;
-  pin: string;
-};
-
-export type TimePunch = {
-  id: string;
-  employeeId: string;
-  timeIn: number;
-  timeOut: number | null;
-};
-
-export type Sale = {
-  id: string;
-  createdAt: number;
-  subtotalCents: number;
-  taxCents: number;
-  totalCents: number;
-  paymentMethod: string;
-  status: string;
-  linesJson: string;
-};
+export type { Product, Variant, ModifierGroup, Modifier, InventoryItem, BomEntry, Employee, TimePunch, Sale };
 
 export type CartItem = {
   instanceId: string;
@@ -162,148 +94,160 @@ type StoreContextType = {
 const StoreContext = createContext<StoreContextType | null>(null);
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
-  const qc = useQueryClient();
   const [integrations, setIntegrations] = useState<string[]>([]);
 
-  const { data: products = [], isLoading: loadingProducts } = useQuery({ queryKey: ["products"], queryFn: api.products.list });
-  const { data: variants = [], isLoading: loadingVariants } = useQuery({ queryKey: ["variants"], queryFn: () => api.variants.list() });
-  const { data: modifierGroups = [] } = useQuery({ queryKey: ["modifierGroups"], queryFn: api.modifierGroups.list });
-  const { data: modifiersList = [] } = useQuery({ queryKey: ["modifiers"], queryFn: () => api.modifiers.list() });
-  const { data: inventory = [], isLoading: loadingInventory } = useQuery({ queryKey: ["inventory"], queryFn: api.inventory.list });
-  const { data: bom = [] } = useQuery({ queryKey: ["bom"], queryFn: () => api.bom.list() });
-  const { data: employees = [] } = useQuery({ queryKey: ["employees"], queryFn: api.employees.list });
-  const { data: timePunches = [] } = useQuery({ queryKey: ["timePunches"], queryFn: () => api.timePunches.list() });
-  const { data: sales = [] } = useQuery({ queryKey: ["sales"], queryFn: api.sales.list });
+  const [dbReady, setDbReady] = useState(false);
 
-  const { data: productModifierLinksData = {} } = useQuery({ queryKey: ["productModifierLinks"], queryFn: api.productModifierGroups.listAll });
-  const [localProductModifierLinks, setLocalProductModifierLinks] = useState<Record<string, string[]>>({});
-  const productModifierLinks = { ...productModifierLinksData, ...localProductModifierLinks };
+  const products = useLiveQuery(() => db.products.toArray(), []) as Product[] | undefined;
+  const variants = useLiveQuery(() => db.variants.toArray(), []) as Variant[] | undefined;
+  const modifierGroupsList = useLiveQuery(() => db.modifierGroups.toArray(), []) as ModifierGroup[] | undefined;
+  const modifiersList = useLiveQuery(() => db.modifiers.toArray(), []) as Modifier[] | undefined;
+  const inventory = useLiveQuery(() => db.inventoryItems.toArray(), []) as InventoryItem[] | undefined;
+  const bom = useLiveQuery(() => db.billOfMaterials.toArray(), []) as BomEntry[] | undefined;
+  const employees = useLiveQuery(() => db.employees.toArray(), []) as Employee[] | undefined;
+  const timePunches = useLiveQuery(() => db.timePunches.toArray(), []) as TimePunch[] | undefined;
+  const sales = useLiveQuery(() => db.sales.toArray(), []) as Sale[] | undefined;
 
-  const { data: productModifierScaleFactorsData = {} } = useQuery({ queryKey: ["productModifierScaleFactors"], queryFn: api.productModifierGroups.listAllScaleFactors });
-  const [localScaleFactors, setLocalScaleFactors] = useState<Record<string, string | null>>({});
-  const productModifierScaleFactors = { ...productModifierScaleFactorsData, ...localScaleFactors };
+  const productModifierLinksRaw = useLiveQuery(async () => {
+    const rows = await db.productModifierGroups.toArray();
+    const map: Record<string, string[]> = {};
+    for (const r of rows) {
+      if (!map[r.productId]) map[r.productId] = [];
+      map[r.productId].push(r.modifierGroupId);
+    }
+    return map;
+  }, []) as Record<string, string[]> | undefined;
 
-  const isLoading = loadingProducts || loadingVariants || loadingInventory;
+  const productModifierScaleFactorsRaw = useLiveQuery(async () => {
+    const rows = await db.productModifierGroups.toArray();
+    const map: Record<string, string | null> = {};
+    for (const r of rows) {
+      if (r.scaleFactors) {
+        map[`${r.productId}::${r.modifierGroupId}`] = r.scaleFactors;
+      }
+    }
+    return map;
+  }, []) as Record<string, string | null> | undefined;
 
-  const inv = (keys: string[][]) => keys.forEach(k => qc.invalidateQueries({ queryKey: k }));
+  const productModifierLinks = productModifierLinksRaw ?? {};
+  const productModifierScaleFactors = productModifierScaleFactorsRaw ?? {};
 
-  const addProductMut = useMutation({ mutationFn: api.products.create, onSuccess: () => inv([["products"]]) });
-  const updateProductMut = useMutation({ mutationFn: ({ id, data }: { id: string; data: any }) => api.products.update(id, data), onSuccess: () => inv([["products"]]) });
-  const deleteProductMut = useMutation({ mutationFn: api.products.delete, onSuccess: () => inv([["products"], ["variants"]]) });
+  if (!dbReady && products !== undefined && variants !== undefined && inventory !== undefined) {
+    setDbReady(true);
+  }
 
-  const addVariantMut = useMutation({ mutationFn: api.variants.create, onSuccess: () => inv([["variants"]]) });
-  const updateVariantMut = useMutation({ mutationFn: ({ id, data }: { id: string; data: any }) => api.variants.update(id, data), onSuccess: () => inv([["variants"]]) });
-  const deleteVariantMut = useMutation({ mutationFn: api.variants.delete, onSuccess: () => inv([["variants"]]) });
+  const isLoading = !dbReady;
 
-  const addModGroupMut = useMutation({ mutationFn: api.modifierGroups.create, onSuccess: () => inv([["modifierGroups"]]) });
-  const updateModGroupMut = useMutation({ mutationFn: ({ id, data }: { id: string; data: any }) => api.modifierGroups.update(id, data), onSuccess: () => inv([["modifierGroups"]]) });
-  const deleteModGroupMut = useMutation({ mutationFn: api.modifierGroups.delete, onSuccess: () => inv([["modifierGroups"]]) });
+  const addProduct = useCallback((data: Partial<Product>) => { storage.createProduct(data); }, []);
+  const addProductAsync = useCallback((data: Partial<Product>) => storage.createProduct(data), []);
+  const updateProduct = useCallback((id: string, data: Partial<Product>) => { storage.updateProduct(id, data); }, []);
+  const deleteProduct = useCallback((id: string) => { storage.deleteProduct(id); }, []);
 
-  const addModMut = useMutation({ mutationFn: api.modifiers.create, onSuccess: () => inv([["modifiers"]]) });
-  const updateModMut = useMutation({ mutationFn: ({ id, data }: { id: string; data: any }) => api.modifiers.update(id, data), onSuccess: () => inv([["modifiers"]]) });
-  const deleteModMut = useMutation({ mutationFn: api.modifiers.delete, onSuccess: () => inv([["modifiers"]]) });
+  const addVariant = useCallback((data: Partial<Variant>) => { storage.createVariant(data); }, []);
+  const addVariantAsync = useCallback((data: Partial<Variant>) => storage.createVariant(data), []);
+  const updateVariant = useCallback((id: string, data: Partial<Variant>) => { storage.updateVariant(id, data); }, []);
+  const deleteVariant = useCallback((id: string) => { storage.deleteVariant(id); }, []);
 
-  const setProductModGroupsMut = useMutation({
-    mutationFn: ({ productId, groupIds }: { productId: string; groupIds: string[] }) =>
-      api.productModifierGroups.set(productId, groupIds),
-    onSuccess: (_data, variables) => {
-      setLocalProductModifierLinks(prev => ({ ...prev, [variables.productId]: variables.groupIds }));
-      inv([["productModifierLinks"]]);
-    },
-  });
+  const addModifierGroup = useCallback((data: Partial<ModifierGroup>) => { storage.createModifierGroup(data); }, []);
+  const addModifierGroupAsync = useCallback((data: Partial<ModifierGroup>) => storage.createModifierGroup(data), []);
+  const updateModifierGroup = useCallback((id: string, data: Partial<ModifierGroup>) => { storage.updateModifierGroup(id, data); }, []);
+  const deleteModifierGroup = useCallback((id: string) => { storage.deleteModifierGroup(id); }, []);
 
-  const setScaleFactorsMut = useMutation({
-    mutationFn: ({ productId, groupId, scaleFactors }: { productId: string; groupId: string; scaleFactors: string | null }) =>
-      api.productModifierGroups.setScaleFactors(productId, groupId, scaleFactors),
-    onSuccess: (_data, variables) => {
-      const key = `${variables.productId}::${variables.groupId}`;
-      setLocalScaleFactors(prev => ({ ...prev, [key]: variables.scaleFactors }));
-      inv([["productModifierScaleFactors"]]);
-    },
-  });
+  const addModifier = useCallback((data: Partial<Modifier>) => { storage.createModifier(data); }, []);
+  const updateModifier = useCallback((id: string, data: Partial<Modifier>) => { storage.updateModifier(id, data); }, []);
+  const deleteModifier = useCallback((id: string) => { storage.deleteModifier(id); }, []);
 
-  const addInvMut = useMutation({ mutationFn: api.inventory.create, onSuccess: () => inv([["inventory"]]) });
-  const updateInvMut = useMutation({ mutationFn: ({ id, data }: { id: string; data: any }) => api.inventory.update(id, data), onSuccess: () => inv([["inventory"]]) });
-  const adjustInvMut = useMutation({ mutationFn: ({ id, delta }: { id: string; delta: number }) => api.inventory.adjust(id, delta), onSuccess: () => inv([["inventory"]]) });
-  const deleteInvMut = useMutation({ mutationFn: api.inventory.delete, onSuccess: () => inv([["inventory"], ["bom"], ["variants"], ["modifiers"]]) });
+  const setProductModifierGroups = useCallback((productId: string, groupIds: string[]) => { storage.setProductModifierGroups(productId, groupIds); }, []);
+  const setProductModifierGroupsAsync = useCallback((productId: string, groupIds: string[]) => storage.setProductModifierGroups(productId, groupIds), []);
+  const setProductModifierScaleFactorsSync = useCallback((productId: string, groupId: string, scaleFactors: string | null) => { storage.setProductModifierScaleFactors(productId, groupId, scaleFactors); }, []);
+  const setProductModifierScaleFactorsAsyncFn = useCallback((productId: string, groupId: string, scaleFactors: string | null) => storage.setProductModifierScaleFactors(productId, groupId, scaleFactors), []);
 
-  const addBomMut = useMutation({ mutationFn: api.bom.create, onSuccess: () => inv([["bom"]]) });
-  const updateBomMut = useMutation({ mutationFn: ({ id, data }: { id: string; data: any }) => api.bom.update(id, data), onSuccess: () => inv([["bom"]]) });
-  const deleteBomMut = useMutation({ mutationFn: api.bom.delete, onSuccess: () => inv([["bom"]]) });
+  const addInventoryItem = useCallback((data: Partial<InventoryItem>) => { storage.createInventoryItem(data); }, []);
+  const addInventoryItemAsync = useCallback((data: Partial<InventoryItem>) => storage.createInventoryItem(data), []);
+  const updateInventoryItem = useCallback((id: string, data: Partial<InventoryItem>) => { storage.updateInventoryItem(id, data); }, []);
+  const adjustInventory = useCallback((id: string, delta: number) => { storage.adjustInventoryQuantity(id, delta); }, []);
+  const deleteInventoryItem = useCallback((id: string) => { storage.deleteInventoryItem(id); }, []);
 
-  const addEmpMut = useMutation({ mutationFn: api.employees.create, onSuccess: () => inv([["employees"]]) });
-  const updateEmpMut = useMutation({ mutationFn: ({ id, data }: { id: string; data: any }) => api.employees.update(id, data), onSuccess: () => inv([["employees"]]) });
+  const addBom = useCallback((data: Partial<BomEntry>) => { storage.createBom(data); }, []);
+  const addBomAsync = useCallback((data: Partial<BomEntry>) => storage.createBom(data), []);
+  const updateBom = useCallback((id: string, data: Partial<BomEntry>) => { storage.updateBom(id, data); }, []);
+  const deleteBom = useCallback((id: string) => { storage.deleteBom(id); }, []);
 
-  const addTPMut = useMutation({ mutationFn: api.timePunches.create, onSuccess: () => inv([["timePunches"]]) });
-  const updateTPMut = useMutation({ mutationFn: ({ id, data }: { id: string; data: any }) => api.timePunches.update(id, data), onSuccess: () => inv([["timePunches"]]) });
+  const addEmployee = useCallback((data: Partial<Employee>) => { storage.createEmployee(data); }, []);
+  const updateEmployee = useCallback((id: string, data: Partial<Employee>) => { storage.updateEmployee(id, data); }, []);
 
-  const addSaleMut = useMutation({ mutationFn: api.sales.create, onSuccess: () => inv([["sales"]]) });
+  const addTimePunch = useCallback((data: Partial<TimePunch>) => { storage.createTimePunch(data); }, []);
+  const updateTimePunch = useCallback((id: string, data: Partial<TimePunch>) => { storage.updateTimePunch(id, data); }, []);
+
+  const addSale = useCallback((data: Partial<Sale>) => { storage.createSale(data); }, []);
+
+  const toggleIntegration = useCallback((id: string) => {
+    setIntegrations(prev => {
+      if (prev.includes(id)) return prev.filter(i => i !== id);
+      toast({ title: "Integration Connected", description: "Successfully linked to provider." });
+      return [...prev, id];
+    });
+  }, []);
 
   const value: StoreContextType = {
-    products,
-    variants,
-    modifierGroups,
-    modifiers: modifiersList,
-    inventory,
-    bom,
-    employees,
-    timePunches,
-    sales,
+    products: products ?? [],
+    variants: variants ?? [],
+    modifierGroups: modifierGroupsList ?? [],
+    modifiers: modifiersList ?? [],
+    inventory: inventory ?? [],
+    bom: bom ?? [],
+    employees: employees ?? [],
+    timePunches: timePunches ?? [],
+    sales: sales ?? [],
     integrations,
     productModifierLinks,
     productModifierScaleFactors,
     isLoading,
 
-    addProduct: (data) => addProductMut.mutate(data),
-    addProductAsync: (data) => addProductMut.mutateAsync(data),
-    updateProduct: (id, data) => updateProductMut.mutate({ id, data }),
-    deleteProduct: (id) => deleteProductMut.mutate(id),
+    addProduct,
+    addProductAsync,
+    updateProduct,
+    deleteProduct,
 
-    addVariant: (data) => addVariantMut.mutate(data),
-    addVariantAsync: (data) => addVariantMut.mutateAsync(data),
-    updateVariant: (id, data) => updateVariantMut.mutate({ id, data }),
-    deleteVariant: (id) => deleteVariantMut.mutate(id),
+    addVariant,
+    addVariantAsync,
+    updateVariant,
+    deleteVariant,
 
-    addModifierGroup: (data) => addModGroupMut.mutate(data),
-    addModifierGroupAsync: (data) => addModGroupMut.mutateAsync(data),
-    updateModifierGroup: (id, data) => updateModGroupMut.mutate({ id, data }),
-    deleteModifierGroup: (id) => deleteModGroupMut.mutate(id),
+    addModifierGroup,
+    addModifierGroupAsync,
+    updateModifierGroup,
+    deleteModifierGroup,
 
-    addModifier: (data) => addModMut.mutate(data),
-    updateModifier: (id, data) => updateModMut.mutate({ id, data }),
-    deleteModifier: (id) => deleteModMut.mutate(id),
+    addModifier,
+    updateModifier,
+    deleteModifier,
 
-    setProductModifierGroups: (productId, groupIds) => setProductModGroupsMut.mutate({ productId, groupIds }),
-    setProductModifierGroupsAsync: (productId, groupIds) => setProductModGroupsMut.mutateAsync({ productId, groupIds }),
-    setProductModifierScaleFactors: (productId, groupId, scaleFactors) => setScaleFactorsMut.mutate({ productId, groupId, scaleFactors }),
-    setProductModifierScaleFactorsAsync: (productId, groupId, scaleFactors) => setScaleFactorsMut.mutateAsync({ productId, groupId, scaleFactors }),
+    setProductModifierGroups,
+    setProductModifierGroupsAsync,
+    setProductModifierScaleFactors: setProductModifierScaleFactorsSync,
+    setProductModifierScaleFactorsAsync: setProductModifierScaleFactorsAsyncFn,
 
-    addInventoryItem: (data) => addInvMut.mutate(data),
-    addInventoryItemAsync: (data) => addInvMut.mutateAsync(data),
-    updateInventoryItem: (id, data) => updateInvMut.mutate({ id, data }),
-    adjustInventory: (id, delta) => adjustInvMut.mutate({ id, delta }),
-    deleteInventoryItem: (id) => deleteInvMut.mutate(id),
+    addInventoryItem,
+    addInventoryItemAsync,
+    updateInventoryItem,
+    adjustInventory,
+    deleteInventoryItem,
 
-    addBom: (data) => addBomMut.mutate(data),
-    addBomAsync: (data) => addBomMut.mutateAsync(data),
-    updateBom: (id, data) => updateBomMut.mutate({ id, data }),
-    deleteBom: (id) => deleteBomMut.mutate(id),
+    addBom,
+    addBomAsync,
+    updateBom,
+    deleteBom,
 
-    addEmployee: (data) => addEmpMut.mutate(data),
-    updateEmployee: (id, data) => updateEmpMut.mutate({ id, data }),
+    addEmployee,
+    updateEmployee,
 
-    addTimePunch: (data) => addTPMut.mutate(data),
-    updateTimePunch: (id, data) => updateTPMut.mutate({ id, data }),
+    addTimePunch,
+    updateTimePunch,
 
-    addSale: (data) => addSaleMut.mutate(data),
+    addSale,
 
-    toggleIntegration: (id) => {
-      setIntegrations(prev => {
-        if (prev.includes(id)) return prev.filter(i => i !== id);
-        toast({ title: "Integration Connected", description: "Successfully linked to provider." });
-        return [...prev, id];
-      });
-    },
+    toggleIntegration,
   };
 
   return (

@@ -120,7 +120,7 @@ function ProductEditorInner({
   function handleSaveDetails() {
     const name = editName.trim();
     if (!name) { toast({ title: "Name required" }); return; }
-    const tagList = editTags.split(",").map(t => t.trim()).filter(Boolean);
+    const tagList = editTags.split(",").map((t: string) => t.trim()).filter(Boolean);
     let attrs: any = {};
     try { attrs = JSON.parse(product.attributes || "{}"); } catch {}
     attrs.tags = tagList;

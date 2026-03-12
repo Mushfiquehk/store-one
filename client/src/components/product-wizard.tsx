@@ -860,7 +860,7 @@ export default function ProductWizard({
             </div>
             <div className="space-y-1.5">
               {(() => {
-                const uniqueInvIds = [...new Set(wizardBom.map(b => b.inventoryItemId))];
+                const uniqueInvIds = Array.from(new Set(wizardBom.map(b => b.inventoryItemId)));
                 return uniqueInvIds.map(invId => {
                   const invItem = inventory.find(i => i.id === invId);
                   const firstEntry = wizardBom.find(b => b.inventoryItemId === invId);
