@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
-import { motion } from "framer-motion";
-import { LayoutGrid, Receipt, ShoppingBag, X, Clock } from "lucide-react";
+import { useMemo, useState, useRef, useEffect, useCallback } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { LayoutGrid, Receipt, ShoppingBag, X, Clock, Search } from "lucide-react";
 import AppShell from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -40,6 +40,49 @@ export default function PosPage() {
   const [modSelectorOpen, setModSelectorOpen] = useState(false);
   const [modSelectorProduct, setModSelectorProduct] = useState<typeof products[0] | null>(null);
 
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (searchOpen && searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+  }, [searchOpen]);
+
+  const handleSearchClose = useCallback(() => {
+    setSearchOpen(false);
+    setSearchQuery("");
+  }, []);
+
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape" && searchOpen) {
+        handleSearchClose();
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [searchOpen, handleSearchClose]);
+
+  useEffect(() => {
+    if (!searchOpen) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) {
+        handleSearchClose();
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [searchOpen, handleSearchClose]);
+
+  const searchResults = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    const q = searchQuery.toLowerCase().trim();
+    return products.filter(p => p.name.toLowerCase().includes(q));
+  }, [products, searchQuery]);
+
   const tags = useMemo(() => {
     const tagSet = new Set<string>();
     products.forEach(p => {
@@ -66,6 +109,13 @@ export default function PosPage() {
       } catch { return false; }
     });
   }, [products, activeTag]);
+
+  const displayProducts = useMemo(() => {
+    if (searchOpen && searchQuery.trim()) {
+      return searchResults;
+    }
+    return filteredProducts;
+  }, [searchOpen, searchQuery, searchResults, filteredProducts]);
 
   const variantsByProduct = useMemo(() => {
     const map: Record<string, typeof variants> = {};
@@ -276,33 +326,152 @@ export default function PosPage() {
         <div className="grid gap-6 lg:grid-cols-12 h-[calc(100vh-90px)] pb-2">
           <Card className="border bg-card shadow-soft lg:col-span-7 flex flex-col overflow-hidden h-full">
             <CardHeader className="pb-3 flex-shrink-0 pt-4 px-4">
-              <CardTitle className="flex items-center gap-2 font-serif" data-testid="text-pos-title">
-                <LayoutGrid className="h-5 w-5" />
-                Ring up a sale
-              </CardTitle>
+              <div ref={searchContainerRef} className="flex items-center justify-between relative">
+                <AnimatePresence mode="wait">
+                  {searchOpen ? (
+                    <motion.div
+                      key="search-bar"
+                      initial={{ width: 0, opacity: 0 }}
+                      animate={{ width: "100%", opacity: 1 }}
+                      exit={{ width: 0, opacity: 0 }}
+                      transition={{ duration: 0.25, ease: "easeInOut" }}
+                      className="flex items-center gap-2 flex-1"
+                    >
+                      <div className="relative flex-1">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                        <Input
+                          ref={searchInputRef}
+                          value={searchQuery}
+                          onChange={e => setSearchQuery(e.target.value)}
+                          placeholder="Search products..."
+                          className="pl-9 pr-8 h-9 rounded-full"
+                          data-testid="input-product-search"
+                        />
+                        {searchQuery && (
+                          <button
+                            onClick={() => setSearchQuery("")}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                            data-testid="button-clear-search"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleSearchClose}
+                        className="h-9 px-2 shrink-0"
+                        data-testid="button-close-search"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </motion.div>
+                  ) : (
+                    <motion.div
+                      key="title"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.15 }}
+                      className="flex items-center justify-between w-full"
+                    >
+                      <CardTitle className="flex items-center gap-2 font-serif" data-testid="text-pos-title">
+                        <LayoutGrid className="h-5 w-5" />
+                        Ring up a sale
+                      </CardTitle>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setSearchOpen(true)}
+                        className="h-8 w-8 p-0 rounded-full"
+                        data-testid="button-open-search"
+                      >
+                        <Search className="h-4 w-4" />
+                      </Button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                <AnimatePresence>
+                  {searchOpen && searchQuery.trim() && searchResults.length > 0 && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -4 }}
+                      transition={{ duration: 0.15 }}
+                      className="absolute top-full left-0 right-0 mt-1 z-50 bg-popover border border-border rounded-xl shadow-lg max-h-60 overflow-y-auto"
+                      data-testid="dropdown-search-suggestions"
+                    >
+                      {searchResults.slice(0, 8).map(p => {
+                        const pvariants = variantsByProduct[p.id] || [];
+                        const isCompositeWithMods = p.isComposite && hasModifiers(p.id);
+                        return (
+                          <button
+                            key={p.id}
+                            className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-muted/60 transition-colors text-left border-b border-border/30 last:border-b-0"
+                            onClick={() => {
+                              handleProductTap(p, pvariants[0]?.id);
+                              handleSearchClose();
+                            }}
+                            data-testid={`suggestion-product-${p.id}`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="text-sm font-medium truncate">{p.name}</span>
+                              {isCompositeWithMods && (
+                                <Badge variant="outline" className="text-[9px] px-1.5 py-0 shrink-0">
+                                  customize
+                                </Badge>
+                              )}
+                            </div>
+                            <span className="text-xs text-muted-foreground ml-2 shrink-0">
+                              {pvariants.length > 1
+                                ? `from ${formatMoney(Math.min(...pvariants.map(v => v.basePrice)))}`
+                                : formatMoney(pvariants[0]?.basePrice ?? 0)}
+                            </span>
+                          </button>
+                        );
+                      })}
+                      {searchResults.length > 8 && (
+                        <div className="px-3 py-2 text-xs text-muted-foreground text-center">
+                          +{searchResults.length - 8} more results below
+                        </div>
+                      )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
             </CardHeader>
 
-            <div className="px-6 pb-2">
-              <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide" data-testid="nav-menu-categories">
-                {tags.map(tag => (
-                  <Button
-                    key={tag}
-                    variant={activeTag === tag ? "default" : "secondary"}
-                    onClick={() => setActiveTag(tag)}
-                    className="rounded-full flex-shrink-0 capitalize"
-                    size="sm"
-                    data-testid={`tab-category-${tag}`}
-                  >
-                    {tag}
-                  </Button>
-                ))}
+            {!(searchOpen && searchQuery.trim()) && (
+              <div className="px-6 pb-2">
+                <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide" data-testid="nav-menu-categories">
+                  {tags.map(tag => (
+                    <Button
+                      key={tag}
+                      variant={activeTag === tag ? "default" : "secondary"}
+                      onClick={() => setActiveTag(tag)}
+                      className="rounded-full flex-shrink-0 capitalize"
+                      size="sm"
+                      data-testid={`tab-category-${tag}`}
+                    >
+                      {tag}
+                    </Button>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
 
             <CardContent className="flex-1 overflow-y-auto p-4 bg-muted/10">
+              {searchOpen && searchQuery.trim() && (
+                <div className="flex items-center gap-2 mb-3 text-sm text-muted-foreground" data-testid="text-search-results-count">
+                  <Search className="h-3.5 w-3.5" />
+                  {displayProducts.length} result{displayProducts.length !== 1 ? "s" : ""} for "{searchQuery}"
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-3 pb-4">
-                {filteredProducts.length > 0 ? (
-                  filteredProducts.map(p => {
+                {displayProducts.length > 0 ? (
+                  displayProducts.map(p => {
                     const pvariants = variantsByProduct[p.id] || [];
                     const isCompositeWithMods = p.isComposite && hasModifiers(p.id);
 
@@ -355,7 +524,7 @@ export default function PosPage() {
                   })
                 ) : (
                   <div className="col-span-full py-10 text-center text-muted-foreground">
-                    <p>No items in this category.</p>
+                    <p>{searchOpen && searchQuery.trim() ? "No products match your search." : "No items in this category."}</p>
                   </div>
                 )}
               </div>
