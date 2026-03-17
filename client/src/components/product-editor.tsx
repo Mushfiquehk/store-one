@@ -117,7 +117,7 @@ function ProductEditorInner({
     return productBom.filter(b => b.sourceId === selectedBomVariant);
   }, [productBom, selectedBomVariant]);
 
-  function handleSaveDetails() {
+  function handleSaveAll() {
     const name = editName.trim();
     if (!name) { toast({ title: "Name required" }); return; }
     const tagList = editTags.split(",").map((t: string) => t.trim()).filter(Boolean);
@@ -126,13 +126,13 @@ function ProductEditorInner({
     attrs.tags = tagList;
     updateProduct(product.id, { name, attributes: JSON.stringify(attrs) });
 
-    if (isRetail && productVariants.length === 1) {
-      const v = productVariants[0];
+    for (const v of productVariants) {
       const ev = editVariants[v.id];
       if (ev) {
+        const vName = ev.name.trim() || v.name;
         const price = Math.round(parseFloat(ev.basePrice || "0") * 100);
         if (Number.isFinite(price) && price > 0) {
-          updateVariant(v.id, { name: ev.name.trim() || "Default", sku: ev.sku.trim() || null, basePrice: price });
+          updateVariant(v.id, { name: vName, sku: ev.sku.trim() || null, basePrice: price });
         }
       }
     }
@@ -360,9 +360,6 @@ function ProductEditorInner({
           );
         })()}
 
-        <div className="flex justify-end">
-          <Button onClick={handleSaveDetails} data-testid="button-editor-save-details">Save Details</Button>
-        </div>
       </div>
     );
   }
@@ -693,7 +690,10 @@ function ProductEditorInner({
               <Trash2 className="mr-2 h-4 w-4" />
               Delete Product
             </Button>
-            <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => onOpenChange(false)} data-testid="editor-close">Close</Button>
+              <Button onClick={handleSaveAll} data-testid="button-editor-save-changes">Save Changes</Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
