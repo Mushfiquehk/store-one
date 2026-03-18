@@ -46,14 +46,16 @@ export default function PosPage() {
   const searchContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (searchOpen && searchInputRef.current) {
-      searchInputRef.current.focus();
+    if (searchOpen) {
+      const timer = setTimeout(() => {
+        searchInputRef.current?.focus();
+      }, 50);
+      return () => clearTimeout(timer);
     }
   }, [searchOpen]);
 
   const handleSearchClose = useCallback(() => {
     setSearchOpen(false);
-    setSearchQuery("");
   }, []);
 
   useEffect(() => {
@@ -111,11 +113,11 @@ export default function PosPage() {
   }, [products, activeTag]);
 
   const displayProducts = useMemo(() => {
-    if (searchOpen && searchQuery.trim()) {
+    if (searchQuery.trim()) {
       return searchResults;
     }
     return filteredProducts;
-  }, [searchOpen, searchQuery, searchResults, filteredProducts]);
+  }, [searchQuery, searchResults, filteredProducts]);
 
   const variantsByProduct = useMemo(() => {
     const map: Record<string, typeof variants> = {};
@@ -379,6 +381,11 @@ export default function PosPage() {
                       <CardTitle className="flex items-center gap-2 font-serif" data-testid="text-pos-title">
                         <LayoutGrid className="h-5 w-5" />
                         Ring up a sale
+                        {searchQuery.trim() && (
+                          <Badge variant="secondary" className="ml-1 text-xs font-normal gap-1 cursor-pointer" onClick={() => setSearchQuery("")} data-testid="badge-active-search">
+                            "{searchQuery}" <X className="h-3 w-3" />
+                          </Badge>
+                        )}
                       </CardTitle>
                       <Button
                         variant="ghost"
@@ -393,57 +400,10 @@ export default function PosPage() {
                   )}
                 </AnimatePresence>
 
-                <AnimatePresence>
-                  {searchOpen && searchQuery.trim() && searchResults.length > 0 && (
-                    <motion.div
-                      initial={{ opacity: 0, y: -4 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -4 }}
-                      transition={{ duration: 0.15 }}
-                      className="absolute top-full left-0 right-0 mt-1 z-50 bg-popover border border-border rounded-xl shadow-lg max-h-60 overflow-y-auto"
-                      data-testid="dropdown-search-suggestions"
-                    >
-                      {searchResults.slice(0, 8).map(p => {
-                        const pvariants = variantsByProduct[p.id] || [];
-                        const isCompositeWithMods = p.isComposite && hasModifiers(p.id);
-                        return (
-                          <button
-                            key={p.id}
-                            className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-muted/60 transition-colors text-left border-b border-border/30 last:border-b-0"
-                            onClick={() => {
-                              handleProductTap(p, pvariants[0]?.id);
-                              handleSearchClose();
-                            }}
-                            data-testid={`suggestion-product-${p.id}`}
-                          >
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-sm font-medium truncate">{p.name}</span>
-                              {isCompositeWithMods && (
-                                <Badge variant="outline" className="text-[9px] px-1.5 py-0 shrink-0">
-                                  customize
-                                </Badge>
-                              )}
-                            </div>
-                            <span className="text-xs text-muted-foreground ml-2 shrink-0">
-                              {pvariants.length > 1
-                                ? `from ${formatMoney(Math.min(...pvariants.map(v => v.basePrice)))}`
-                                : formatMoney(pvariants[0]?.basePrice ?? 0)}
-                            </span>
-                          </button>
-                        );
-                      })}
-                      {searchResults.length > 8 && (
-                        <div className="px-3 py-2 text-xs text-muted-foreground text-center">
-                          +{searchResults.length - 8} more results below
-                        </div>
-                      )}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
               </div>
             </CardHeader>
 
-            {!(searchOpen && searchQuery.trim()) && (
+            {!searchQuery.trim() && (
               <div className="px-6 pb-2">
                 <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide" data-testid="nav-menu-categories">
                   {tags.map(tag => (
@@ -463,7 +423,7 @@ export default function PosPage() {
             )}
 
             <CardContent className="flex-1 overflow-y-auto p-4 bg-muted/10">
-              {searchOpen && searchQuery.trim() && (
+              {searchQuery.trim() && (
                 <div className="flex items-center gap-2 mb-3 text-sm text-muted-foreground" data-testid="text-search-results-count">
                   <Search className="h-3.5 w-3.5" />
                   {displayProducts.length} result{displayProducts.length !== 1 ? "s" : ""} for "{searchQuery}"
@@ -524,7 +484,7 @@ export default function PosPage() {
                   })
                 ) : (
                   <div className="col-span-full py-10 text-center text-muted-foreground">
-                    <p>{searchOpen && searchQuery.trim() ? "No products match your search." : "No items in this category."}</p>
+                    <p>{searchQuery.trim() ? "No products match your search." : "No items in this category."}</p>
                   </div>
                 )}
               </div>
