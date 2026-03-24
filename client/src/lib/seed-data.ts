@@ -12,7 +12,8 @@ import type {
 const DEMO_PREFIX = "demo_";
 
 const products: Product[] = [
-  { id: `${DEMO_PREFIX}prod_water_bottle`, name: "Water Bottle", type: "retail", isComposite: false, availableAsIngredient: false, attributes: JSON.stringify({ tags: ["drinks"] }), createdAt: new Date().toISOString() },
+  { id: `${DEMO_PREFIX}prod_coke_zero`, name: "Coke Zero", type: "retail", isComposite: false, availableAsIngredient: false, attributes: JSON.stringify({ tags: ["drinks"] }), createdAt: new Date().toISOString() },
+  { id: `${DEMO_PREFIX}prod_lemonade`, name: "Fresh Lemonade", type: "retail", isComposite: false, availableAsIngredient: false, attributes: JSON.stringify({ tags: ["drinks"] }), createdAt: new Date().toISOString() },
   { id: `${DEMO_PREFIX}prod_candy_bar`, name: "Candy Bar", type: "retail", isComposite: false, availableAsIngredient: false, attributes: JSON.stringify({ tags: ["snacks"] }), createdAt: new Date().toISOString() },
   { id: `${DEMO_PREFIX}prod_tshirt`, name: "T-Shirt", type: "retail", isComposite: false, availableAsIngredient: false, attributes: JSON.stringify({ tags: ["merch"] }), createdAt: new Date().toISOString() },
   { id: `${DEMO_PREFIX}prod_cappuccino`, name: "Cappuccino", type: "prepared", isComposite: true, availableAsIngredient: false, attributes: JSON.stringify({ tags: ["drinks"] }), createdAt: new Date().toISOString() },
@@ -20,7 +21,12 @@ const products: Product[] = [
 ];
 
 const variants: Variant[] = [
-  { id: `${DEMO_PREFIX}var_water`, productId: `${DEMO_PREFIX}prod_water_bottle`, sku: "WB-001", name: "Water Bottle", basePrice: 250, directInventoryId: `${DEMO_PREFIX}inv_water_bottles`, config: null },
+  { id: `${DEMO_PREFIX}var_coke_16`, productId: `${DEMO_PREFIX}prod_coke_zero`, sku: "CZ-16", name: "16 oz", basePrice: 199, directInventoryId: `${DEMO_PREFIX}inv_coke_16`, config: null },
+  { id: `${DEMO_PREFIX}var_coke_32`, productId: `${DEMO_PREFIX}prod_coke_zero`, sku: "CZ-32", name: "32 oz", basePrice: 299, directInventoryId: `${DEMO_PREFIX}inv_coke_32`, config: null },
+  { id: `${DEMO_PREFIX}var_coke_64`, productId: `${DEMO_PREFIX}prod_coke_zero`, sku: "CZ-64", name: "64 oz", basePrice: 399, directInventoryId: `${DEMO_PREFIX}inv_coke_64`, config: null },
+  { id: `${DEMO_PREFIX}var_lemon_16`, productId: `${DEMO_PREFIX}prod_lemonade`, sku: "LM-16", name: "16 oz", basePrice: 250, directInventoryId: `${DEMO_PREFIX}inv_lemon_16`, config: null },
+  { id: `${DEMO_PREFIX}var_lemon_32`, productId: `${DEMO_PREFIX}prod_lemonade`, sku: "LM-32", name: "32 oz", basePrice: 375, directInventoryId: `${DEMO_PREFIX}inv_lemon_32`, config: null },
+  { id: `${DEMO_PREFIX}var_lemon_64`, productId: `${DEMO_PREFIX}prod_lemonade`, sku: "LM-64", name: "64 oz", basePrice: 499, directInventoryId: `${DEMO_PREFIX}inv_lemon_64`, config: null },
   { id: `${DEMO_PREFIX}var_candy`, productId: `${DEMO_PREFIX}prod_candy_bar`, sku: "CB-001", name: "Candy Bar", basePrice: 175, directInventoryId: `${DEMO_PREFIX}inv_candy_bars`, config: null },
   { id: `${DEMO_PREFIX}var_tshirt_s`, productId: `${DEMO_PREFIX}prod_tshirt`, sku: "TS-S", name: "Small", basePrice: 1499, directInventoryId: `${DEMO_PREFIX}inv_tshirt_s`, config: null },
   { id: `${DEMO_PREFIX}var_tshirt_m`, productId: `${DEMO_PREFIX}prod_tshirt`, sku: "TS-M", name: "Medium", basePrice: 1599, directInventoryId: `${DEMO_PREFIX}inv_tshirt_m`, config: null },
@@ -33,7 +39,12 @@ const variants: Variant[] = [
 ];
 
 const inventoryItems: InventoryItem[] = [
-  { id: `${DEMO_PREFIX}inv_water_bottles`, name: "Water Bottles", unitOfMeasure: "each", currentQuantity: 100, trackingConfig: null },
+  { id: `${DEMO_PREFIX}inv_coke_16`, name: "Coke Zero 16oz", unitOfMeasure: "each", currentQuantity: 48, trackingConfig: null },
+  { id: `${DEMO_PREFIX}inv_coke_32`, name: "Coke Zero 32oz", unitOfMeasure: "each", currentQuantity: 36, trackingConfig: null },
+  { id: `${DEMO_PREFIX}inv_coke_64`, name: "Coke Zero 64oz", unitOfMeasure: "each", currentQuantity: 24, trackingConfig: null },
+  { id: `${DEMO_PREFIX}inv_lemon_16`, name: "Fresh Lemonade 16oz", unitOfMeasure: "each", currentQuantity: 40, trackingConfig: null },
+  { id: `${DEMO_PREFIX}inv_lemon_32`, name: "Fresh Lemonade 32oz", unitOfMeasure: "each", currentQuantity: 30, trackingConfig: null },
+  { id: `${DEMO_PREFIX}inv_lemon_64`, name: "Fresh Lemonade 64oz", unitOfMeasure: "each", currentQuantity: 20, trackingConfig: null },
   { id: `${DEMO_PREFIX}inv_candy_bars`, name: "Candy Bars", unitOfMeasure: "each", currentQuantity: 50, trackingConfig: null },
   { id: `${DEMO_PREFIX}inv_tshirt_s`, name: "T-Shirts (S)", unitOfMeasure: "each", currentQuantity: 25, trackingConfig: null },
   { id: `${DEMO_PREFIX}inv_tshirt_m`, name: "T-Shirts (M)", unitOfMeasure: "each", currentQuantity: 30, trackingConfig: null },

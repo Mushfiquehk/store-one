@@ -1,6 +1,6 @@
 import { useMemo, useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { LayoutGrid, Receipt, ShoppingBag, X, Clock, Search, SlidersHorizontal } from "lucide-react";
+import { LayoutGrid, Receipt, ShoppingBag, X, Clock, Search, SlidersHorizontal, Ruler } from "lucide-react";
 import AppShell from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -39,6 +39,9 @@ export default function PosPage() {
 
   const [modSelectorOpen, setModSelectorOpen] = useState(false);
   const [modSelectorProduct, setModSelectorProduct] = useState<typeof products[0] | null>(null);
+
+  const [sizeSelectorOpen, setSizeSelectorOpen] = useState(false);
+  const [sizeSelectorProduct, setSizeSelectorProduct] = useState<typeof products[0] | null>(null);
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -140,9 +143,13 @@ export default function PosPage() {
   }
 
   function handleProductTap(product: typeof products[0], variantId: string) {
+    const pvariants = variantsByProduct[product.id] || [];
     if (product.isComposite && hasModifiers(product.id)) {
       setModSelectorProduct(product);
       setModSelectorOpen(true);
+    } else if (pvariants.length > 1) {
+      setSizeSelectorProduct(product);
+      setSizeSelectorOpen(true);
     } else {
       addToCart(variantId, product.id, []);
     }
@@ -491,6 +498,31 @@ export default function PosPage() {
                       );
                     }
 
+                    if (pvariants.length > 1) {
+                      return (
+                        <Button
+                          key={p.id}
+                          variant="secondary"
+                          className="h-auto flex-col items-start gap-1 rounded-2xl p-3 text-left hover-lift transition-all bg-secondary/50 hover:bg-secondary relative"
+                          onClick={() => handleProductTap(p, pvariants[0]?.id)}
+                          data-testid={`button-add-menu-${p.id}`}
+                        >
+                          <div className="w-full pr-7">
+                            <p className="font-semibold leading-tight truncate text-base">{p.name}</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              {pvariants.length} sizes
+                            </p>
+                            <p className="text-sm font-medium text-primary mt-1">
+                              {`from ${formatMoney(Math.min(...pvariants.map(v => v.basePrice)))}`}
+                            </p>
+                          </div>
+                          <div className="absolute top-2 right-2 text-muted-foreground">
+                            <Ruler className="w-3.5 h-3.5" />
+                          </div>
+                        </Button>
+                      );
+                    }
+
                     return pvariants.map(v => (
                       <Button
                         key={v.id}
@@ -500,10 +532,7 @@ export default function PosPage() {
                         data-testid={`button-add-menu-${v.id}`}
                       >
                         <div className="w-full">
-                          <p className="font-semibold leading-tight line-clamp-2 text-base">{p.name}</p>
-                          {pvariants.length > 1 && (
-                            <p className="text-xs text-muted-foreground mt-0.5">{v.name}</p>
-                          )}
+                          <p className="font-semibold leading-tight truncate text-base">{p.name}</p>
                           <p className="text-sm font-medium text-primary mt-1">{formatMoney(v.basePrice)}</p>
                         </div>
                       </Button>
@@ -708,6 +737,32 @@ export default function PosPage() {
             onAddToCart={handleModifierAdd}
           />
         )}
+
+        <Dialog open={sizeSelectorOpen} onOpenChange={setSizeSelectorOpen}>
+          <DialogContent className="sm:max-w-sm" aria-describedby="size-picker-desc">
+            <DialogHeader>
+              <DialogTitle data-testid="text-size-picker-title">{sizeSelectorProduct?.name}</DialogTitle>
+              <p id="size-picker-desc" className="text-sm text-muted-foreground">Choose a size</p>
+            </DialogHeader>
+            <div className="flex flex-col gap-2 py-2">
+              {sizeSelectorProduct && (variantsByProduct[sizeSelectorProduct.id] || []).map(v => (
+                <Button
+                  key={v.id}
+                  variant="outline"
+                  className="h-14 justify-between rounded-xl px-4"
+                  data-testid={`button-size-${v.id}`}
+                  onClick={() => {
+                    addToCart(v.id, sizeSelectorProduct.id, []);
+                    setSizeSelectorOpen(false);
+                  }}
+                >
+                  <span className="font-medium">{v.name}</span>
+                  <span className="text-primary font-semibold">{formatMoney(v.basePrice)}</span>
+                </Button>
+              ))}
+            </div>
+          </DialogContent>
+        </Dialog>
       </AppShell>
     </motion.div>
   );

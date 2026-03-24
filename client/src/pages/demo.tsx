@@ -56,7 +56,11 @@ export default function DemoPage() {
               <ul className="text-sm text-muted-foreground space-y-1.5 w-full">
                 <li className="flex items-start gap-2">
                   <span className="text-primary mt-0.5">•</span>
-                  <span>Water Bottle &amp; Candy Bar — simple retail items</span>
+                  <span>Coke Zero &amp; Fresh Lemonade — sized drinks (16 / 32 / 64 oz)</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-primary mt-0.5">•</span>
+                  <span>Candy Bar — simple single-variant retail item</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="text-primary mt-0.5">•</span>
