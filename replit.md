@@ -17,7 +17,7 @@ Offline-first point-of-sale application built with React + Dexie.js (IndexedDB).
 - `modifiers` — individual options with `inventoryItemId` (assigned ingredient) and `quantityPerUse` (deduction amount)
 - `productModifierGroups` — many-to-many link between products and modifier groups with `scaleFactors` for per-product pricing
 - `inventoryItems` — raw materials/stock with currentQuantity and trackingConfig
-- `billOfMaterials` — links variants/modifiers to inventory items with quantity deduction, scale factor matrix, and optional `sourceProductId` for prepared-product-as-ingredient recipe chaining
+- `billOfMaterials` (type: `BomEntry`) — links variants/modifiers to inventory items with quantity deduction, scale factor matrix, and optional `sourceProductId` for prepared-product-as-ingredient recipe chaining
 - `employees` — staff with role, payRate, and PIN access
 - `timePunches` — clock in/out records
 - `sales` — completed transactions with `linesJson` (includes full modifier tree)
@@ -26,7 +26,7 @@ Offline-first point-of-sale application built with React + Dexie.js (IndexedDB).
 - `client/src/lib/db.ts` — Dexie.js database definition with IndexedDB schema
 - `client/src/lib/local-storage.ts` — CRUD storage layer for all entities
 - `client/src/lib/store.tsx` — React context provider using Dexie live queries for reactive data
-- `shared/schema.ts` — TypeScript type definitions for all entities
+- `shared/schema.ts` — TypeScript type definitions for all entities (canonical reference, mirrors `db.ts` interfaces)
 - `client/src/components/product-wizard.tsx` — 5-step progressive disclosure wizard for product creation
 - `client/src/components/modifier-selector.tsx` — POS modifier selection dialog with product-specific pricing
 - `vite.config.ts` — Vite configuration for dev and production builds

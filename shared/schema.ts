@@ -1,7 +1,7 @@
 export type Product = {
   id: string;
   name: string;
-  type: string;
+  type: "RETAIL" | "RESTAURANT";
   isComposite: boolean;
   availableAsIngredient: boolean;
   attributes: string | null;
@@ -15,7 +15,6 @@ export type Variant = {
   name: string;
   basePrice: number;
   directInventoryId: string | null;
-  config: string | null;
 };
 
 export type ModifierGroup = {
@@ -23,7 +22,12 @@ export type ModifierGroup = {
   name: string;
   minSelections: number;
   maxSelections: number;
-  selectionRules: string | null;
+};
+
+export type ProductModifierGroup = {
+  productId: string;
+  modifierGroupId: string;
+  scaleFactors: string | null;
 };
 
 export type Modifier = {
@@ -31,8 +35,6 @@ export type Modifier = {
   modifierGroupId: string;
   name: string;
   baseUpcharge: number;
-  scaleFactor: string | null;
-  pricingLogic: string | null;
   inventoryItemId: string | null;
   quantityPerUse: number | null;
 };
@@ -45,7 +47,7 @@ export type InventoryItem = {
   trackingConfig: string | null;
 };
 
-export type BillOfMaterials = {
+export type BomEntry = {
   id: string;
   sourceType: string;
   sourceId: string;

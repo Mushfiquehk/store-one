@@ -21,21 +21,21 @@ const products: Product[] = [
 ];
 
 const variants: Variant[] = [
-  { id: `${DEMO_PREFIX}var_coke_16`, productId: `${DEMO_PREFIX}prod_coke_zero`, sku: "CZ-16", name: "16 oz", basePrice: 199, directInventoryId: `${DEMO_PREFIX}inv_coke_16`, config: null },
-  { id: `${DEMO_PREFIX}var_coke_32`, productId: `${DEMO_PREFIX}prod_coke_zero`, sku: "CZ-32", name: "32 oz", basePrice: 299, directInventoryId: `${DEMO_PREFIX}inv_coke_32`, config: null },
-  { id: `${DEMO_PREFIX}var_coke_64`, productId: `${DEMO_PREFIX}prod_coke_zero`, sku: "CZ-64", name: "64 oz", basePrice: 399, directInventoryId: `${DEMO_PREFIX}inv_coke_64`, config: null },
-  { id: `${DEMO_PREFIX}var_lemon_16`, productId: `${DEMO_PREFIX}prod_lemonade`, sku: "LM-16", name: "16 oz", basePrice: 250, directInventoryId: `${DEMO_PREFIX}inv_lemon_16`, config: null },
-  { id: `${DEMO_PREFIX}var_lemon_32`, productId: `${DEMO_PREFIX}prod_lemonade`, sku: "LM-32", name: "32 oz", basePrice: 375, directInventoryId: `${DEMO_PREFIX}inv_lemon_32`, config: null },
-  { id: `${DEMO_PREFIX}var_lemon_64`, productId: `${DEMO_PREFIX}prod_lemonade`, sku: "LM-64", name: "64 oz", basePrice: 499, directInventoryId: `${DEMO_PREFIX}inv_lemon_64`, config: null },
-  { id: `${DEMO_PREFIX}var_candy`, productId: `${DEMO_PREFIX}prod_candy_bar`, sku: "CB-001", name: "Candy Bar", basePrice: 175, directInventoryId: `${DEMO_PREFIX}inv_candy_bars`, config: null },
-  { id: `${DEMO_PREFIX}var_tshirt_s`, productId: `${DEMO_PREFIX}prod_tshirt`, sku: "TS-S", name: "Small", basePrice: 1499, directInventoryId: `${DEMO_PREFIX}inv_tshirt_s`, config: null },
-  { id: `${DEMO_PREFIX}var_tshirt_m`, productId: `${DEMO_PREFIX}prod_tshirt`, sku: "TS-M", name: "Medium", basePrice: 1599, directInventoryId: `${DEMO_PREFIX}inv_tshirt_m`, config: null },
-  { id: `${DEMO_PREFIX}var_tshirt_l`, productId: `${DEMO_PREFIX}prod_tshirt`, sku: "TS-L", name: "Large", basePrice: 1599, directInventoryId: `${DEMO_PREFIX}inv_tshirt_l`, config: null },
-  { id: `${DEMO_PREFIX}var_tshirt_xl`, productId: `${DEMO_PREFIX}prod_tshirt`, sku: "TS-XL", name: "XL", basePrice: 1799, directInventoryId: `${DEMO_PREFIX}inv_tshirt_xl`, config: null },
-  { id: `${DEMO_PREFIX}var_cap_sm`, productId: `${DEMO_PREFIX}prod_cappuccino`, sku: "CAP-SM", name: "Small", basePrice: 350, directInventoryId: null, config: null },
-  { id: `${DEMO_PREFIX}var_cap_md`, productId: `${DEMO_PREFIX}prod_cappuccino`, sku: "CAP-MD", name: "Medium", basePrice: 450, directInventoryId: null, config: null },
-  { id: `${DEMO_PREFIX}var_cap_lg`, productId: `${DEMO_PREFIX}prod_cappuccino`, sku: "CAP-LG", name: "Large", basePrice: 525, directInventoryId: null, config: null },
-  { id: `${DEMO_PREFIX}var_sandwich`, productId: `${DEMO_PREFIX}prod_club_sandwich`, sku: "CS-001", name: "Club Sandwich", basePrice: 895, directInventoryId: null, config: null },
+  { id: `${DEMO_PREFIX}var_coke_16`, productId: `${DEMO_PREFIX}prod_coke_zero`, sku: "CZ-16", name: "16 oz", basePrice: 199, directInventoryId: `${DEMO_PREFIX}inv_coke_16` },
+  { id: `${DEMO_PREFIX}var_coke_32`, productId: `${DEMO_PREFIX}prod_coke_zero`, sku: "CZ-32", name: "32 oz", basePrice: 299, directInventoryId: `${DEMO_PREFIX}inv_coke_32` },
+  { id: `${DEMO_PREFIX}var_coke_64`, productId: `${DEMO_PREFIX}prod_coke_zero`, sku: "CZ-64", name: "64 oz", basePrice: 399, directInventoryId: `${DEMO_PREFIX}inv_coke_64` },
+  { id: `${DEMO_PREFIX}var_lemon_16`, productId: `${DEMO_PREFIX}prod_lemonade`, sku: "LM-16", name: "16 oz", basePrice: 250, directInventoryId: `${DEMO_PREFIX}inv_lemon_16` },
+  { id: `${DEMO_PREFIX}var_lemon_32`, productId: `${DEMO_PREFIX}prod_lemonade`, sku: "LM-32", name: "32 oz", basePrice: 375, directInventoryId: `${DEMO_PREFIX}inv_lemon_32` },
+  { id: `${DEMO_PREFIX}var_lemon_64`, productId: `${DEMO_PREFIX}prod_lemonade`, sku: "LM-64", name: "64 oz", basePrice: 499, directInventoryId: `${DEMO_PREFIX}inv_lemon_64` },
+  { id: `${DEMO_PREFIX}var_candy`, productId: `${DEMO_PREFIX}prod_candy_bar`, sku: "CB-001", name: "Candy Bar", basePrice: 175, directInventoryId: `${DEMO_PREFIX}inv_candy_bars` },
+  { id: `${DEMO_PREFIX}var_tshirt_s`, productId: `${DEMO_PREFIX}prod_tshirt`, sku: "TS-S", name: "Small", basePrice: 1499, directInventoryId: `${DEMO_PREFIX}inv_tshirt_s` },
+  { id: `${DEMO_PREFIX}var_tshirt_m`, productId: `${DEMO_PREFIX}prod_tshirt`, sku: "TS-M", name: "Medium", basePrice: 1599, directInventoryId: `${DEMO_PREFIX}inv_tshirt_m` },
+  { id: `${DEMO_PREFIX}var_tshirt_l`, productId: `${DEMO_PREFIX}prod_tshirt`, sku: "TS-L", name: "Large", basePrice: 1599, directInventoryId: `${DEMO_PREFIX}inv_tshirt_l` },
+  { id: `${DEMO_PREFIX}var_tshirt_xl`, productId: `${DEMO_PREFIX}prod_tshirt`, sku: "TS-XL", name: "XL", basePrice: 1799, directInventoryId: `${DEMO_PREFIX}inv_tshirt_xl` },
+  { id: `${DEMO_PREFIX}var_cap_sm`, productId: `${DEMO_PREFIX}prod_cappuccino`, sku: "CAP-SM", name: "Small", basePrice: 350, directInventoryId: null },
+  { id: `${DEMO_PREFIX}var_cap_md`, productId: `${DEMO_PREFIX}prod_cappuccino`, sku: "CAP-MD", name: "Medium", basePrice: 450, directInventoryId: null },
+  { id: `${DEMO_PREFIX}var_cap_lg`, productId: `${DEMO_PREFIX}prod_cappuccino`, sku: "CAP-LG", name: "Large", basePrice: 525, directInventoryId: null },
+  { id: `${DEMO_PREFIX}var_sandwich`, productId: `${DEMO_PREFIX}prod_club_sandwich`, sku: "CS-001", name: "Club Sandwich", basePrice: 895, directInventoryId: null },
 ];
 
 const inventoryItems: InventoryItem[] = [
@@ -63,8 +63,8 @@ const inventoryItems: InventoryItem[] = [
 ];
 
 const modifierGroups: ModifierGroup[] = [
-  { id: `${DEMO_PREFIX}mg_milk`, name: "Milk Options", minSelections: 1, maxSelections: 1, selectionRules: null },
-  { id: `${DEMO_PREFIX}mg_bread`, name: "Bread Choice", minSelections: 1, maxSelections: 1, selectionRules: null },
+  { id: `${DEMO_PREFIX}mg_milk`, name: "Milk Options", minSelections: 1, maxSelections: 1 },
+  { id: `${DEMO_PREFIX}mg_bread`, name: "Bread Choice", minSelections: 1, maxSelections: 1 },
 ];
 
 const productModifierGroups: ProductModifierGroup[] = [
@@ -73,12 +73,12 @@ const productModifierGroups: ProductModifierGroup[] = [
 ];
 
 const modifiers: Modifier[] = [
-  { id: `${DEMO_PREFIX}mod_whole_milk`, modifierGroupId: `${DEMO_PREFIX}mg_milk`, name: "Whole Milk", baseUpcharge: 0, scaleFactor: null, pricingLogic: null, inventoryItemId: `${DEMO_PREFIX}inv_whole_milk`, quantityPerUse: 4 },
-  { id: `${DEMO_PREFIX}mod_oat_milk`, modifierGroupId: `${DEMO_PREFIX}mg_milk`, name: "Oat Milk", baseUpcharge: 75, scaleFactor: null, pricingLogic: null, inventoryItemId: `${DEMO_PREFIX}inv_oat_milk`, quantityPerUse: 4 },
-  { id: `${DEMO_PREFIX}mod_almond_milk`, modifierGroupId: `${DEMO_PREFIX}mg_milk`, name: "Almond Milk", baseUpcharge: 75, scaleFactor: null, pricingLogic: null, inventoryItemId: `${DEMO_PREFIX}inv_almond_milk`, quantityPerUse: 4 },
-  { id: `${DEMO_PREFIX}mod_white_bread`, modifierGroupId: `${DEMO_PREFIX}mg_bread`, name: "White Bread", baseUpcharge: 0, scaleFactor: null, pricingLogic: null, inventoryItemId: `${DEMO_PREFIX}inv_bread_white`, quantityPerUse: 3 },
-  { id: `${DEMO_PREFIX}mod_wheat_bread`, modifierGroupId: `${DEMO_PREFIX}mg_bread`, name: "Wheat Bread", baseUpcharge: 0, scaleFactor: null, pricingLogic: null, inventoryItemId: `${DEMO_PREFIX}inv_bread_wheat`, quantityPerUse: 3 },
-  { id: `${DEMO_PREFIX}mod_sourdough`, modifierGroupId: `${DEMO_PREFIX}mg_bread`, name: "Sourdough", baseUpcharge: 50, scaleFactor: null, pricingLogic: null, inventoryItemId: `${DEMO_PREFIX}inv_bread_sourdough`, quantityPerUse: 3 },
+  { id: `${DEMO_PREFIX}mod_whole_milk`, modifierGroupId: `${DEMO_PREFIX}mg_milk`, name: "Whole Milk", baseUpcharge: 0, inventoryItemId: `${DEMO_PREFIX}inv_whole_milk`, quantityPerUse: 4 },
+  { id: `${DEMO_PREFIX}mod_oat_milk`, modifierGroupId: `${DEMO_PREFIX}mg_milk`, name: "Oat Milk", baseUpcharge: 75, inventoryItemId: `${DEMO_PREFIX}inv_oat_milk`, quantityPerUse: 4 },
+  { id: `${DEMO_PREFIX}mod_almond_milk`, modifierGroupId: `${DEMO_PREFIX}mg_milk`, name: "Almond Milk", baseUpcharge: 75, inventoryItemId: `${DEMO_PREFIX}inv_almond_milk`, quantityPerUse: 4 },
+  { id: `${DEMO_PREFIX}mod_white_bread`, modifierGroupId: `${DEMO_PREFIX}mg_bread`, name: "White Bread", baseUpcharge: 0, inventoryItemId: `${DEMO_PREFIX}inv_bread_white`, quantityPerUse: 3 },
+  { id: `${DEMO_PREFIX}mod_wheat_bread`, modifierGroupId: `${DEMO_PREFIX}mg_bread`, name: "Wheat Bread", baseUpcharge: 0, inventoryItemId: `${DEMO_PREFIX}inv_bread_wheat`, quantityPerUse: 3 },
+  { id: `${DEMO_PREFIX}mod_sourdough`, modifierGroupId: `${DEMO_PREFIX}mg_bread`, name: "Sourdough", baseUpcharge: 50, inventoryItemId: `${DEMO_PREFIX}inv_bread_sourdough`, quantityPerUse: 3 },
 ];
 
 const bomEntries: BomEntry[] = [

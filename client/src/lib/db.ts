@@ -17,7 +17,6 @@ export interface Variant {
   name: string;
   basePrice: number;
   directInventoryId: string | null;
-  config: string | null;
 }
 
 export interface ModifierGroup {
@@ -25,7 +24,6 @@ export interface ModifierGroup {
   name: string;
   minSelections: number;
   maxSelections: number;
-  selectionRules: string | null;
 }
 
 export interface ProductModifierGroup {
@@ -39,8 +37,6 @@ export interface Modifier {
   modifierGroupId: string;
   name: string;
   baseUpcharge: number;
-  scaleFactor: string | null;
-  pricingLogic: string | null;
   inventoryItemId: string | null;
   quantityPerUse: number | null;
 }
@@ -52,6 +48,7 @@ export interface InventoryItem {
   currentQuantity: number;
   trackingConfig: string | null;
 }
+
 
 export interface BomEntry {
   id: string;

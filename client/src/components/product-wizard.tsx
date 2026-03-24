@@ -230,7 +230,6 @@ export default function ProductWizard({
               name: rv.name.trim(),
               basePrice: Math.round(Number(rv.basePrice) * 100),
               directInventoryId: linkedInvId,
-              config: null,
             });
           }
           toast({ title: "Product created", description: `Retail item "${name.trim()}" with ${retailVariants.length} sizes added` });
@@ -245,7 +244,6 @@ export default function ProductWizard({
             name: "Default",
             basePrice: Math.round(Number(price) * 100),
             directInventoryId: directInvId,
-            config: null,
           });
 
           if (directInvId && Number(retailDeductQty) > 0 && Number(retailDeductQty) !== 1) {
@@ -279,7 +277,6 @@ export default function ProductWizard({
             sku: wv.sku.trim() || null,
             name: wv.name.trim(),
             basePrice: Math.round(Number(wv.basePrice) * 100),
-            config: null,
           });
         }
 

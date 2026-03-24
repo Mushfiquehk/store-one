@@ -63,7 +63,6 @@ export const storage = {
       name: data.name!,
       basePrice: data.basePrice!,
       directInventoryId: data.directInventoryId ?? null,
-      config: data.config ?? null,
     };
     await db.variants.put(variant);
     return variant;
@@ -91,7 +90,6 @@ export const storage = {
       name: data.name!,
       minSelections: data.minSelections ?? 0,
       maxSelections: data.maxSelections ?? 0,
-      selectionRules: data.selectionRules ?? null,
     };
     await db.modifierGroups.put(group);
     return group;
@@ -123,8 +121,6 @@ export const storage = {
       modifierGroupId: data.modifierGroupId!,
       name: data.name!,
       baseUpcharge: data.baseUpcharge ?? 0,
-      scaleFactor: data.scaleFactor ?? null,
-      pricingLogic: data.pricingLogic ?? null,
       inventoryItemId: data.inventoryItemId ?? null,
       quantityPerUse: data.quantityPerUse ?? null,
     };

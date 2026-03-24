@@ -169,7 +169,7 @@ function ProductEditorInner({
     const price = Math.round(parseFloat(newVariantPrice || "0") * 100);
     if (!Number.isFinite(price) || price <= 0) { toast({ title: "Invalid price" }); return; }
     const id = uid("var");
-    addVariant({ id, productId: product.id, name, sku: newVariantSku.trim() || null, basePrice: price, config: null });
+    addVariant({ id, productId: product.id, name, sku: newVariantSku.trim() || null, basePrice: price });
     setEditVariants(prev => ({ ...prev, [id]: { name, sku: newVariantSku.trim(), basePrice: (price / 100).toFixed(2) } }));
     setNewVariantName("");
     setNewVariantSku("");
