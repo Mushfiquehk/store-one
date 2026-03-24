@@ -13,9 +13,10 @@ import type {
   Employee,
   TimePunch,
   Sale,
+  ModifierScaleFactors,
 } from "./db";
 
-export type { Product, Variant, ModifierGroup, Modifier, InventoryItem, BomEntry, Employee, TimePunch, Sale };
+export type { Product, Variant, ModifierGroup, Modifier, InventoryItem, BomEntry, Employee, TimePunch, Sale, ModifierScaleFactors };
 
 export type CartItem = {
   instanceId: string;
@@ -42,7 +43,7 @@ type StoreContextType = {
   sales: Sale[];
   integrations: string[];
   productModifierLinks: Record<string, string[]>;
-  productModifierScaleFactors: Record<string, string | null>;
+  productModifierScaleFactors: Record<string, ModifierScaleFactors | null>;
   isLoading: boolean;
 
   addProduct: (data: Partial<Product>) => void;
@@ -66,8 +67,8 @@ type StoreContextType = {
 
   setProductModifierGroups: (productId: string, groupIds: string[]) => void;
   setProductModifierGroupsAsync: (productId: string, groupIds: string[]) => Promise<any>;
-  setProductModifierScaleFactors: (productId: string, groupId: string, scaleFactors: string | null) => void;
-  setProductModifierScaleFactorsAsync: (productId: string, groupId: string, scaleFactors: string | null) => Promise<any>;
+  setProductModifierScaleFactors: (productId: string, groupId: string, scaleFactors: ModifierScaleFactors | null) => void;
+  setProductModifierScaleFactorsAsync: (productId: string, groupId: string, scaleFactors: ModifierScaleFactors | null) => Promise<any>;
 
   addInventoryItem: (data: Partial<InventoryItem>) => void;
   addInventoryItemAsync: (data: Partial<InventoryItem>) => Promise<any>;
@@ -120,14 +121,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const productModifierScaleFactorsRaw = useLiveQuery(async () => {
     const rows = await db.productModifierGroups.toArray();
-    const map: Record<string, string | null> = {};
+    const map: Record<string, ModifierScaleFactors | null> = {};
     for (const r of rows) {
       if (r.scaleFactors) {
         map[`${r.productId}::${r.modifierGroupId}`] = r.scaleFactors;
       }
     }
     return map;
-  }, []) as Record<string, string | null> | undefined;
+  }, []) as Record<string, ModifierScaleFactors | null> | undefined;
 
   const productModifierLinks = productModifierLinksRaw ?? {};
   const productModifierScaleFactors = productModifierScaleFactorsRaw ?? {};
@@ -161,8 +162,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const setProductModifierGroups = useCallback((productId: string, groupIds: string[]) => { storage.setProductModifierGroups(productId, groupIds); }, []);
   const setProductModifierGroupsAsync = useCallback((productId: string, groupIds: string[]) => storage.setProductModifierGroups(productId, groupIds), []);
-  const setProductModifierScaleFactorsSync = useCallback((productId: string, groupId: string, scaleFactors: string | null) => { storage.setProductModifierScaleFactors(productId, groupId, scaleFactors); }, []);
-  const setProductModifierScaleFactorsAsyncFn = useCallback((productId: string, groupId: string, scaleFactors: string | null) => storage.setProductModifierScaleFactors(productId, groupId, scaleFactors), []);
+  const setProductModifierScaleFactorsSync = useCallback((productId: string, groupId: string, scaleFactors: ModifierScaleFactors | null) => { storage.setProductModifierScaleFactors(productId, groupId, scaleFactors); }, []);
+  const setProductModifierScaleFactorsAsyncFn = useCallback((productId: string, groupId: string, scaleFactors: ModifierScaleFactors | null) => storage.setProductModifierScaleFactors(productId, groupId, scaleFactors), []);
 
   const addInventoryItem = useCallback((data: Partial<InventoryItem>) => { storage.createInventoryItem(data); }, []);
   const addInventoryItemAsync = useCallback((data: Partial<InventoryItem>) => storage.createInventoryItem(data), []);

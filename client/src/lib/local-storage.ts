@@ -9,6 +9,7 @@ import type {
   Employee,
   TimePunch,
   Sale,
+  ModifierScaleFactors,
 } from "./db";
 
 export const storage = {
@@ -155,7 +156,7 @@ export const storage = {
   async setProductModifierGroups(productId: string, groupIds: string[]): Promise<void> {
     await db.transaction("rw", db.productModifierGroups, async () => {
       const existing = await db.productModifierGroups.where("productId").equals(productId).toArray();
-      const existingScaleFactors: Record<string, string | null> = {};
+      const existingScaleFactors: Record<string, ModifierScaleFactors | null> = {};
       for (const row of existing) {
         existingScaleFactors[row.modifierGroupId] = row.scaleFactors;
       }
@@ -170,9 +171,9 @@ export const storage = {
     });
   },
 
-  async getAllProductModifierScaleFactors(): Promise<Record<string, string | null>> {
+  async getAllProductModifierScaleFactors(): Promise<Record<string, ModifierScaleFactors | null>> {
     const rows = await db.productModifierGroups.toArray();
-    const map: Record<string, string | null> = {};
+    const map: Record<string, ModifierScaleFactors | null> = {};
     for (const r of rows) {
       if (r.scaleFactors) {
         map[`${r.productId}::${r.modifierGroupId}`] = r.scaleFactors;
@@ -181,7 +182,7 @@ export const storage = {
     return map;
   },
 
-  async setProductModifierScaleFactors(productId: string, modifierGroupId: string, scaleFactors: string | null): Promise<void> {
+  async setProductModifierScaleFactors(productId: string, modifierGroupId: string, scaleFactors: ModifierScaleFactors | null): Promise<void> {
     await db.productModifierGroups.update([productId, modifierGroupId], { scaleFactors });
   },
 

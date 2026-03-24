@@ -37,13 +37,10 @@ export default function MenuPage({ isTab = false }: { isTab?: boolean }) {
   const tagStats = useMemo(() => {
     const map: Record<string, string[]> = {};
     products.forEach(p => {
-      try {
-        const attrs = p.attributes ? JSON.parse(p.attributes) : {};
-        (attrs.tags || []).forEach((t: string) => {
-          if (!map[t]) map[t] = [];
-          map[t].push(p.id);
-        });
-      } catch {}
+      (p.attributes?.tags || []).forEach(t => {
+        if (!map[t]) map[t] = [];
+        map[t].push(p.id);
+      });
     });
     return Object.entries(map)
       .map(([tag, productIds]) => ({ tag, productIds, count: productIds.length }))
@@ -51,19 +48,12 @@ export default function MenuPage({ isTab = false }: { isTab?: boolean }) {
   }, [products]);
 
   function removeTag(tag: string) {
-    const affected = products.filter(p => {
-      try {
-        const attrs = p.attributes ? JSON.parse(p.attributes) : {};
-        return (attrs.tags || []).includes(tag);
-      } catch { return false; }
-    });
+    const affected = products.filter(p => (p.attributes?.tags || []).includes(tag));
 
     affected.forEach(p => {
-      try {
-        const attrs = p.attributes ? JSON.parse(p.attributes) : {};
-        const newTags = (attrs.tags || []).filter((t: string) => t !== tag);
-        updateProduct(p.id, { attributes: JSON.stringify({ ...attrs, tags: newTags }) });
-      } catch {}
+      const attrs = p.attributes || {};
+      const newTags = (attrs.tags || []).filter(t => t !== tag);
+      updateProduct(p.id, { attributes: { ...attrs, tags: newTags } });
     });
 
     toast({
@@ -154,8 +144,7 @@ export default function MenuPage({ isTab = false }: { isTab?: boolean }) {
                     filteredProducts.map(p => {
                       const pvariants = getProductVariants(p.id);
                       const selected = p.id === selectedProductId;
-                      let tags: string[] = [];
-                      try { tags = (JSON.parse(p.attributes || "{}")).tags || []; } catch {}
+                      const tags: string[] = p.attributes?.tags || [];
 
                       return pvariants.map((v, vi) => (
                         <TableRow

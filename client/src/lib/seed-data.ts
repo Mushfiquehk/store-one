@@ -12,12 +12,12 @@ import type {
 const DEMO_PREFIX = "demo_";
 
 const products: Product[] = [
-  { id: `${DEMO_PREFIX}prod_coke_zero`, name: "Coke Zero", type: "RETAIL", isComposite: false, availableAsIngredient: false, attributes: JSON.stringify({ tags: ["drinks"] }), createdAt: new Date().toISOString() },
-  { id: `${DEMO_PREFIX}prod_lemonade`, name: "Fresh Lemonade", type: "RETAIL", isComposite: false, availableAsIngredient: false, attributes: JSON.stringify({ tags: ["drinks"] }), createdAt: new Date().toISOString() },
-  { id: `${DEMO_PREFIX}prod_candy_bar`, name: "Candy Bar", type: "RETAIL", isComposite: false, availableAsIngredient: false, attributes: JSON.stringify({ tags: ["snacks"] }), createdAt: new Date().toISOString() },
-  { id: `${DEMO_PREFIX}prod_tshirt`, name: "T-Shirt", type: "RETAIL", isComposite: false, availableAsIngredient: false, attributes: JSON.stringify({ tags: ["merch"] }), createdAt: new Date().toISOString() },
-  { id: `${DEMO_PREFIX}prod_cappuccino`, name: "Cappuccino", type: "RESTAURANT", isComposite: true, availableAsIngredient: false, attributes: JSON.stringify({ tags: ["drinks"] }), createdAt: new Date().toISOString() },
-  { id: `${DEMO_PREFIX}prod_club_sandwich`, name: "Club Sandwich", type: "RESTAURANT", isComposite: true, availableAsIngredient: false, attributes: JSON.stringify({ tags: ["food"] }), createdAt: new Date().toISOString() },
+  { id: `${DEMO_PREFIX}prod_coke_zero`, name: "Coke Zero", type: "RETAIL", isComposite: false, availableAsIngredient: false, attributes: { tags: ["drinks"] }, createdAt: new Date().toISOString() },
+  { id: `${DEMO_PREFIX}prod_lemonade`, name: "Fresh Lemonade", type: "RETAIL", isComposite: false, availableAsIngredient: false, attributes: { tags: ["drinks"] }, createdAt: new Date().toISOString() },
+  { id: `${DEMO_PREFIX}prod_candy_bar`, name: "Candy Bar", type: "RETAIL", isComposite: false, availableAsIngredient: false, attributes: { tags: ["snacks"] }, createdAt: new Date().toISOString() },
+  { id: `${DEMO_PREFIX}prod_tshirt`, name: "T-Shirt", type: "RETAIL", isComposite: false, availableAsIngredient: false, attributes: { tags: ["merch"] }, createdAt: new Date().toISOString() },
+  { id: `${DEMO_PREFIX}prod_cappuccino`, name: "Cappuccino", type: "RESTAURANT", isComposite: true, availableAsIngredient: false, attributes: { tags: ["drinks"] }, createdAt: new Date().toISOString() },
+  { id: `${DEMO_PREFIX}prod_club_sandwich`, name: "Club Sandwich", type: "RESTAURANT", isComposite: true, availableAsIngredient: false, attributes: { tags: ["food"] }, createdAt: new Date().toISOString() },
 ];
 
 const variants: Variant[] = [

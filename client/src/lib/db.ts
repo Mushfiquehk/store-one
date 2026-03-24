@@ -1,4 +1,12 @@
 import Dexie, { type Table } from "dexie";
+import type {
+  ProductAttributes,
+  ModifierScaleFactors,
+  ScaleFactorMatrix,
+  SaleLine,
+} from "@shared/schema";
+
+export type { ProductAttributes, ModifierScaleFactors, ScaleFactorMatrix, SaleLine };
 
 export interface Product {
   id: string;
@@ -6,7 +14,7 @@ export interface Product {
   type: string;
   isComposite: boolean;
   availableAsIngredient: boolean;
-  attributes: string | null;
+  attributes: ProductAttributes | null;
   createdAt: string | null;
 }
 
@@ -29,7 +37,7 @@ export interface ModifierGroup {
 export interface ProductModifierGroup {
   productId: string;
   modifierGroupId: string;
-  scaleFactors: string | null;
+  scaleFactors: ModifierScaleFactors | null;
 }
 
 export interface Modifier {
@@ -49,7 +57,6 @@ export interface InventoryItem {
   trackingConfig: string | null;
 }
 
-
 export interface BomEntry {
   id: string;
   sourceType: string;
@@ -57,7 +64,7 @@ export interface BomEntry {
   inventoryItemId: string;
   sourceProductId: string | null;
   quantityDeducted: number;
-  scaleFactorMatrix: string | null;
+  scaleFactorMatrix: ScaleFactorMatrix | null;
   overrideModifierGroupId: string | null;
 }
 
@@ -84,7 +91,7 @@ export interface Sale {
   totalCents: number;
   paymentMethod: string;
   status: string;
-  linesJson: string;
+  linesJson: SaleLine[];
 }
 
 class PosDatabase extends Dexie {
@@ -135,6 +142,37 @@ class PosDatabase extends Dexie {
       await tx.table("billOfMaterials").toCollection().modify(entry => {
         if (entry.sourceProductId === undefined) {
           entry.sourceProductId = null;
+        }
+      });
+    });
+
+    this.version(3).stores({}).upgrade(async tx => {
+      function safeParse(val: any): any {
+        if (typeof val !== "string") return val;
+        try { return JSON.parse(val); } catch { return val; }
+      }
+
+      await tx.table("products").toCollection().modify(product => {
+        if (typeof product.attributes === "string") {
+          product.attributes = safeParse(product.attributes);
+        }
+      });
+
+      await tx.table("productModifierGroups").toCollection().modify(pmg => {
+        if (typeof pmg.scaleFactors === "string") {
+          pmg.scaleFactors = safeParse(pmg.scaleFactors);
+        }
+      });
+
+      await tx.table("billOfMaterials").toCollection().modify(entry => {
+        if (typeof entry.scaleFactorMatrix === "string") {
+          entry.scaleFactorMatrix = safeParse(entry.scaleFactorMatrix);
+        }
+      });
+
+      await tx.table("sales").toCollection().modify(sale => {
+        if (typeof sale.linesJson === "string") {
+          sale.linesJson = safeParse(sale.linesJson) ?? [];
         }
       });
     });

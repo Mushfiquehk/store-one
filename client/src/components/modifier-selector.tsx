@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
-import { type Product, type Variant, type ModifierGroup, type Modifier } from "@/lib/store";
+import { type Product, type Variant, type ModifierGroup, type Modifier, type ModifierScaleFactors } from "@/lib/store";
 
 function formatMoney(cents: number) {
   return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(cents / 100);
@@ -23,7 +23,7 @@ type Props = {
   modifierGroups: ModifierGroup[];
   modifiers: Modifier[];
   linkedGroupIds: string[];
-  productModifierScaleFactors?: Record<string, string | null>;
+  productModifierScaleFactors?: Record<string, ModifierScaleFactors | null>;
   onAddToCart: (variantId: string, modifiers: SelectedModifier[]) => void;
 };
 
@@ -63,16 +63,13 @@ export default function ModifierSelector({
     if (!activeVariant) return mod.baseUpcharge;
     const modGroup = mod.modifierGroupId;
     const sfKey = `${product.id}::${modGroup}`;
-    const sfJson = productModifierScaleFactors[sfKey];
-    if (sfJson) {
-      try {
-        const allPrices: Record<string, Record<string, number>> = JSON.parse(sfJson);
-        const modPrices = allPrices[mod.id];
-        if (modPrices) {
-          if (modPrices[activeVariant.name] !== undefined) return Math.round(modPrices[activeVariant.name]);
-          if (modPrices[activeVariant.id] !== undefined) return Math.round(modPrices[activeVariant.id]);
-        }
-      } catch {}
+    const sf = productModifierScaleFactors[sfKey];
+    if (sf) {
+      const modPrices = sf[mod.id];
+      if (modPrices) {
+        if (modPrices[activeVariant.name] !== undefined) return Math.round(modPrices[activeVariant.name]);
+        if (modPrices[activeVariant.id] !== undefined) return Math.round(modPrices[activeVariant.id]);
+      }
     }
     return mod.baseUpcharge;
   }

@@ -216,7 +216,7 @@ export default function ProductWizard({
           name: name.trim(),
           type: "RETAIL",
           isComposite: false,
-          attributes: JSON.stringify({ tax_exempt: false, tags: tagList }),
+          attributes: { tax_exempt: false, tags: tagList },
         });
 
         if (hasRetailSizes) {
@@ -264,7 +264,7 @@ export default function ProductWizard({
           type: "RESTAURANT",
           isComposite: true,
           availableAsIngredient,
-          attributes: JSON.stringify({ tax_exempt: false, tags: tagList }),
+          attributes: { tax_exempt: false, tags: tagList },
         });
 
         const variantIdMap: Record<string, string> = {};
@@ -321,7 +321,7 @@ export default function ProductWizard({
               }
             });
             if (Object.keys(scaleFactorsObj).length > 0) {
-              await setProductModifierScaleFactorsAsync(productId, groupId, JSON.stringify(scaleFactorsObj));
+              await setProductModifierScaleFactorsAsync(productId, groupId, scaleFactorsObj);
             }
           }
         }
@@ -361,7 +361,7 @@ export default function ProductWizard({
             sourceId: modId,
             inventoryItemId: mod.inventoryItemId,
             quantityDeducted: 1,
-            scaleFactorMatrix: JSON.stringify(matrix),
+            scaleFactorMatrix: matrix,
           });
         }
 

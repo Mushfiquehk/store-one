@@ -91,10 +91,7 @@ export default function PosPage() {
   const tags = useMemo(() => {
     const tagSet = new Set<string>();
     products.forEach(p => {
-      try {
-        const attrs = p.attributes ? JSON.parse(p.attributes) : {};
-        (attrs.tags || []).forEach((t: string) => tagSet.add(t));
-      } catch {}
+      (p.attributes?.tags || []).forEach(t => tagSet.add(t));
     });
     return Array.from(tagSet);
   }, [products]);
@@ -107,12 +104,7 @@ export default function PosPage() {
 
   const filteredProducts = useMemo(() => {
     if (!activeTag) return products;
-    return products.filter(p => {
-      try {
-        const attrs = p.attributes ? JSON.parse(p.attributes) : {};
-        return (attrs.tags || []).includes(activeTag);
-      } catch { return false; }
-    });
+    return products.filter(p => (p.attributes?.tags || []).includes(activeTag));
   }, [products, activeTag]);
 
   const displayProducts = useMemo(() => {
@@ -184,16 +176,13 @@ export default function PosPage() {
     if (variant) {
       const productId = variant.productId;
       const sfKey = `${productId}::${mod.modifierGroupId}`;
-      const sfJson = productModifierScaleFactors[sfKey];
-      if (sfJson) {
-        try {
-          const allSf: Record<string, Record<string, number>> = JSON.parse(sfJson);
-          const modSf = allSf[mod.id];
-          if (modSf) {
-            if (modSf[variant.name] !== undefined) return Math.round(modSf[variant.name]);
-            if (modSf[variant.id] !== undefined) return Math.round(modSf[variant.id]);
-          }
-        } catch {}
+      const sf = productModifierScaleFactors[sfKey];
+      if (sf) {
+        const modSf = sf[mod.id];
+        if (modSf) {
+          if (modSf[variant.name] !== undefined) return Math.round(modSf[variant.name]);
+          if (modSf[variant.id] !== undefined) return Math.round(modSf[variant.id]);
+        }
       }
     }
     return mod.baseUpcharge;
@@ -271,14 +260,12 @@ export default function PosPage() {
           }
           let qty = entry.quantityDeducted * line.qty;
           if (entry.scaleFactorMatrix) {
-            try {
-              const sfm: Record<string, number> = JSON.parse(entry.scaleFactorMatrix);
-              const variant = variants.find(v => v.id === line.variantId);
-              if (variant) {
-                const scale = sfm[variant.name] ?? sfm[variant.id] ?? 1;
-                qty = entry.quantityDeducted * scale * line.qty;
-              }
-            } catch {}
+            const sfm = entry.scaleFactorMatrix;
+            const variant = variants.find(v => v.id === line.variantId);
+            if (variant) {
+              const scale = sfm[variant.name] ?? sfm[variant.id] ?? 1;
+              qty = entry.quantityDeducted * scale * line.qty;
+            }
           }
           if (entry.sourceProductId) {
             resolveSubRecipe(entry.sourceProductId, qty, 0);
@@ -294,14 +281,12 @@ export default function PosPage() {
           modBomEntries.forEach(entry => {
             let qty = entry.quantityDeducted * sel.qty * line.qty;
             if (entry.scaleFactorMatrix) {
-              try {
-                const sfm: Record<string, number> = JSON.parse(entry.scaleFactorMatrix);
-                const variant = variants.find(v => v.id === line.variantId);
-                if (variant) {
-                  const scale = sfm[variant.name] ?? sfm[variant.id] ?? 1;
-                  qty = entry.quantityDeducted * scale * sel.qty * line.qty;
-                }
-              } catch {}
+              const sfm = entry.scaleFactorMatrix;
+              const variant = variants.find(v => v.id === line.variantId);
+              if (variant) {
+                const scale = sfm[variant.name] ?? sfm[variant.id] ?? 1;
+                qty = entry.quantityDeducted * scale * sel.qty * line.qty;
+              }
             }
             if (entry.sourceProductId) {
               resolveSubRecipe(entry.sourceProductId, qty, 0);
@@ -326,7 +311,7 @@ export default function PosPage() {
       totalCents,
       paymentMethod: paymentType,
       status: "completed",
-      linesJson: JSON.stringify(cart.map(c => ({
+      linesJson: cart.map(c => ({
         variantId: c.variantId,
         productId: c.productId,
         qty: c.qty,
@@ -340,7 +325,7 @@ export default function PosPage() {
           };
         }),
         unitPrice: getCartItemPrice(c),
-      }))),
+      })),
     });
 
     toast({ title: "Sale recorded", description: `${formatMoney(totalCents)} • ${paymentType}` });

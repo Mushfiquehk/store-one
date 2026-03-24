@@ -11,19 +11,19 @@ Offline-first point-of-sale application built with React + Dexie.js (IndexedDB).
 - **Sync-ready architecture**: The storage layer (`client/src/lib/local-storage.ts`) provides a clean interface that can be extended with a sync adapter for future multi-device support.
 
 ## Data Model
-- `products` — catalog items with `type` (RETAIL/RESTAURANT), `isComposite` flag, `availableAsIngredient` flag, and JSON `attributes` (tags, tax_exempt)
+- `products` — catalog items with `type` (RETAIL/RESTAURANT), `isComposite` flag, `availableAsIngredient` flag, and native `attributes: ProductAttributes | null` (tags, tax_exempt)
 - `variants` — SKU-level pricing with `directInventoryId` for 1:1 retail mapping
 - `modifierGroups` — groupings for modifiers with min/max selection constraints
 - `modifiers` — individual options with `inventoryItemId` (assigned ingredient) and `quantityPerUse` (deduction amount)
-- `productModifierGroups` — many-to-many link between products and modifier groups with `scaleFactors` for per-product pricing
-- `inventoryItems` — raw materials/stock with currentQuantity and trackingConfig
-- `billOfMaterials` (type: `BomEntry`) — links variants/modifiers to inventory items with quantity deduction, scale factor matrix, and optional `sourceProductId` for prepared-product-as-ingredient recipe chaining
+- `productModifierGroups` — many-to-many link between products and modifier groups with native `scaleFactors: ModifierScaleFactors | null` (per-product modifier pricing)
+- `inventoryItems` — raw materials/stock with currentQuantity and `trackingConfig` (JSON string for low-stock alerts — only remaining stringified field)
+- `billOfMaterials` (type: `BomEntry`) — links variants/modifiers to inventory items with quantity deduction, native `scaleFactorMatrix: ScaleFactorMatrix | null`, and optional `sourceProductId` for recipe chaining
 - `employees` — staff with role, payRate, and PIN access
 - `timePunches` — clock in/out records
-- `sales` — completed transactions with `linesJson` (includes full modifier tree)
+- `sales` — completed transactions with native `linesJson: SaleLine[]` (includes full modifier tree)
 
 ## Key Files
-- `client/src/lib/db.ts` — Dexie.js database definition with IndexedDB schema
+- `client/src/lib/db.ts` — Dexie.js database definition with IndexedDB schema (v3 migration auto-parses legacy stringified JSON fields)
 - `client/src/lib/local-storage.ts` — CRUD storage layer for all entities
 - `client/src/lib/store.tsx` — React context provider using Dexie live queries for reactive data
 - `shared/schema.ts` — TypeScript type definitions for all entities (canonical reference, mirrors `db.ts` interfaces)

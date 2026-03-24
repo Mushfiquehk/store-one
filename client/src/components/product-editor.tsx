@@ -80,7 +80,7 @@ function ProductEditorInner({
   const [editName, setEditName] = useState(product.name);
   const [editAvailableAsIngredient, setEditAvailableAsIngredient] = useState(product.availableAsIngredient ?? false);
   const [editTags, setEditTags] = useState(() => {
-    try { return (JSON.parse(product.attributes || "{}")).tags?.join(", ") || ""; } catch { return ""; }
+    return (product.attributes?.tags || []).join(", ");
   });
 
   const [editVariants, setEditVariants] = useState<Record<string, { name: string; sku: string; basePrice: string }>>(() => {
@@ -133,10 +133,8 @@ function ProductEditorInner({
     const name = editName.trim();
     if (!name) { toast({ title: "Name required" }); return; }
     const tagList = editTags.split(",").map((t: string) => t.trim()).filter(Boolean);
-    let attrs: any = {};
-    try { attrs = JSON.parse(product.attributes || "{}"); } catch {}
-    attrs.tags = tagList;
-    updateProduct(product.id, { name, availableAsIngredient: editAvailableAsIngredient, attributes: JSON.stringify(attrs) });
+    const attrs = { ...(product.attributes || {}), tags: tagList };
+    updateProduct(product.id, { name, availableAsIngredient: editAvailableAsIngredient, attributes: attrs });
 
     for (const v of productVariants) {
       const ev = editVariants[v.id];
@@ -202,8 +200,7 @@ function ProductEditorInner({
   function openModConfigDialog(groupId: string) {
     const groupMods = modifiers.filter(m => m.modifierGroupId === groupId);
     const sfKey = `${product.id}::${groupId}`;
-    let existingPrices: Record<string, Record<string, number>> | null = null;
-    try { existingPrices = JSON.parse(productModifierScaleFactors[sfKey] || "null"); } catch {}
+    const existingPrices = productModifierScaleFactors[sfKey] ?? null;
 
     const scaleData: Record<string, Record<string, string>> = {};
     const ingredientData: Record<string, Record<string, string>> = {};
@@ -218,10 +215,7 @@ function ProductEditorInner({
 
       if (mod.inventoryItemId) {
         const bomEntry = modifierBom.find(b => b.sourceId === mod.id && b.inventoryItemId === mod.inventoryItemId);
-        let matrix: Record<string, number> = {};
-        if (bomEntry?.scaleFactorMatrix) {
-          try { matrix = JSON.parse(bomEntry.scaleFactorMatrix); } catch {}
-        }
+        const matrix = bomEntry?.scaleFactorMatrix ?? {};
         for (const v of productVariants) {
           ingredientData[mod.id][v.name] = String(matrix[v.name] ?? "");
         }
@@ -254,7 +248,7 @@ function ProductEditorInner({
     setProductModifierScaleFactors(
       product.id,
       modConfigGroupId,
-      hasAnyPrice || Object.keys(priceResult).length > 0 ? JSON.stringify(priceResult) : null
+      hasAnyPrice || Object.keys(priceResult).length > 0 ? priceResult : null
     );
 
     for (const mod of groupMods) {
@@ -273,7 +267,7 @@ function ProductEditorInner({
       const existingBom = modifierBom.find(b => b.sourceId === mod.id && b.inventoryItemId === mod.inventoryItemId);
       if (hasAny) {
         if (existingBom) {
-          updateBom(existingBom.id, { scaleFactorMatrix: JSON.stringify(matrix) });
+          updateBom(existingBom.id, { scaleFactorMatrix: matrix });
         } else {
           addBom({
             id: uid("bom"),
@@ -281,7 +275,7 @@ function ProductEditorInner({
             sourceId: mod.id,
             inventoryItemId: mod.inventoryItemId,
             quantityDeducted: 1,
-            scaleFactorMatrix: JSON.stringify(matrix),
+            scaleFactorMatrix: matrix,
           });
         }
       } else if (existingBom) {
@@ -328,10 +322,8 @@ function ProductEditorInner({
 
   const deleteDeps: string[] = [];
   const hasSales = sales.some(s => {
-    try {
-      const lines = JSON.parse(s.linesJson || "[]");
-      return lines.some((l: any) => productVariants.map(v => v.id).includes(l.variantId));
-    } catch { return false; }
+    const variantIds = productVariants.map(v => v.id);
+    return (s.linesJson || []).some(l => variantIds.includes(l.variantId));
   });
   if (hasSales) deleteDeps.push("sales history");
   if (productBom.length > 0) deleteDeps.push(`${productBom.length} recipe entry(ies)`);

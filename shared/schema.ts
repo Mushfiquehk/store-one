@@ -1,10 +1,32 @@
+export type ProductAttributes = {
+  tags?: string[];
+  tax_exempt?: boolean;
+};
+
+export type ModifierScaleFactors = Record<string, Record<string, number>>;
+
+export type ScaleFactorMatrix = Record<string, number>;
+
+export type SaleLine = {
+  variantId: string;
+  productId: string;
+  qty: number;
+  modifiers: {
+    modifierId: string;
+    name: string;
+    qty: number;
+    unitPrice: number;
+  }[];
+  unitPrice: number;
+};
+
 export type Product = {
   id: string;
   name: string;
   type: "RETAIL" | "RESTAURANT";
   isComposite: boolean;
   availableAsIngredient: boolean;
-  attributes: string | null;
+  attributes: ProductAttributes | null;
   createdAt: string | null;
 };
 
@@ -27,7 +49,7 @@ export type ModifierGroup = {
 export type ProductModifierGroup = {
   productId: string;
   modifierGroupId: string;
-  scaleFactors: string | null;
+  scaleFactors: ModifierScaleFactors | null;
 };
 
 export type Modifier = {
@@ -54,7 +76,7 @@ export type BomEntry = {
   inventoryItemId: string;
   sourceProductId: string | null;
   quantityDeducted: number;
-  scaleFactorMatrix: string | null;
+  scaleFactorMatrix: ScaleFactorMatrix | null;
   overrideModifierGroupId: string | null;
 };
 
@@ -81,5 +103,5 @@ export type Sale = {
   totalCents: number;
   paymentMethod: string;
   status: string;
-  linesJson: string;
+  linesJson: SaleLine[];
 };

@@ -107,13 +107,8 @@ export default function RecipesPage({ isTab = false }: { isTab?: boolean }) {
     return ingredientProducts.filter(p => p.name.toLowerCase().includes(lower));
   }, [ingredientProducts, inventorySearch]);
 
-  const parseScaleMatrix = useCallback((matrixJson: string | null): Record<string, number> => {
-    if (!matrixJson) return {};
-    try {
-      return JSON.parse(matrixJson);
-    } catch {
-      return {};
-    }
+  const parseScaleMatrix = useCallback((matrix: Record<string, number> | null): Record<string, number> => {
+    return matrix ?? {};
   }, []);
 
   function handleAddBom() {
@@ -239,7 +234,7 @@ export default function RecipesPage({ isTab = false }: { isTab?: boolean }) {
             (b.sourceProductId || null) === (baseEntry.sourceProductId || null)
         );
         if (existingForBase) {
-          updateBom(existingForBase.id, { scaleFactorMatrix: JSON.stringify(scaleMatrix) });
+          updateBom(existingForBase.id, { scaleFactorMatrix: scaleMatrix });
         }
       }
     }
