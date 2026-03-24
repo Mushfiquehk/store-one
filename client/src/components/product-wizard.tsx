@@ -47,7 +47,8 @@ type WizardBomEntry = {
   overrideModifierGroupId?: string;
 };
 
-const STEPS_RETAIL = ["Item Type", "Inventory", "Review & Create"];
+const STEPS_RETAIL_SIMPLE = ["Item Type", "Inventory", "Review & Create"];
+const STEPS_RETAIL_SIZED = ["Item Type", "Sizes", "Review & Create"];
 const STEPS_PREPARED = ["Item Type", "Variants", "Recipes", "Modifiers", "Review & Create"];
 
 export default function ProductWizard({
@@ -82,6 +83,7 @@ export default function ProductWizard({
 
   const [step, setStep] = useState(0);
   const [itemType, setItemType] = useState<"RETAIL" | "PREPARED" | null>(null);
+  const [hasRetailSizes, setHasRetailSizes] = useState(false);
 
   const [name, setName] = useState("");
   const [sku, setSku] = useState("");
@@ -91,6 +93,12 @@ export default function ProductWizard({
   const [retailDeductQty, setRetailDeductQty] = useState("1");
   const [retailInvSearch, setRetailInvSearch] = useState("");
   const [availableAsIngredient, setAvailableAsIngredient] = useState(false);
+
+  const [retailVariants, setRetailVariants] = useState<WizardVariant[]>([
+    { tempId: uid("tmp"), name: "16 oz", sku: "", basePrice: "" },
+    { tempId: uid("tmp"), name: "32 oz", sku: "", basePrice: "" },
+    { tempId: uid("tmp"), name: "64 oz", sku: "", basePrice: "" },
+  ]);
 
   const [wizardVariants, setWizardVariants] = useState<WizardVariant[]>([
     { tempId: uid("tmp"), name: "Small", sku: "", basePrice: "" },
@@ -108,16 +116,22 @@ export default function ProductWizard({
   const [autoScalePercents, setAutoScalePercents] = useState<Record<string, string>>({});
 
   const isRetail = itemType === "RETAIL";
-  const steps = isRetail ? STEPS_RETAIL : STEPS_PREPARED;
+  const steps = isRetail ? (hasRetailSizes ? STEPS_RETAIL_SIZED : STEPS_RETAIL_SIMPLE) : STEPS_PREPARED;
   const totalSteps = steps.length;
 
   function resetWizard() {
     setStep(0);
     setItemType(null);
+    setHasRetailSizes(false);
     setName("");
     setSku("");
     setPrice("");
     setTags("");
+    setRetailVariants([
+      { tempId: uid("tmp"), name: "16 oz", sku: "", basePrice: "" },
+      { tempId: uid("tmp"), name: "32 oz", sku: "", basePrice: "" },
+      { tempId: uid("tmp"), name: "64 oz", sku: "", basePrice: "" },
+    ]);
     setWizardVariants([
       { tempId: uid("tmp"), name: "Small", sku: "", basePrice: "" },
       { tempId: uid("tmp"), name: "Medium", sku: "", basePrice: "" },
@@ -146,11 +160,14 @@ export default function ProductWizard({
     if (step === 0) {
       if (!itemType) return false;
       if (!name.trim()) return false;
-      if (isRetail) {
+      if (isRetail && !hasRetailSizes) {
         const p = Number(price);
         if (!Number.isFinite(p) || p <= 0) return false;
       }
       return true;
+    }
+    if (isRetail && hasRetailSizes && step === 1) {
+      return retailVariants.length >= 2 && retailVariants.every(v => v.name.trim() && Number(v.basePrice) > 0);
     }
     if (!isRetail) {
       if (step === 1) {
@@ -196,30 +213,45 @@ export default function ProductWizard({
           attributes: JSON.stringify({ tax_exempt: false, tags: tagList }),
         });
 
-        const directInvId = retailInventoryItemId && inventory.find(i => i.id === retailInventoryItemId) ? retailInventoryItemId : null;
+        if (hasRetailSizes) {
+          for (const rv of retailVariants) {
+            const variantId = uid("var");
+            await addVariantAsync({
+              id: variantId,
+              productId,
+              sku: rv.sku.trim() || null,
+              name: rv.name.trim(),
+              basePrice: Math.round(Number(rv.basePrice) * 100),
+              directInventoryId: null,
+              config: null,
+            });
+          }
+          toast({ title: "Product created", description: `Retail item "${name.trim()}" with ${retailVariants.length} sizes added` });
+        } else {
+          const directInvId = retailInventoryItemId && inventory.find(i => i.id === retailInventoryItemId) ? retailInventoryItemId : null;
 
-        const retailVariantId = uid("var");
-        await addVariantAsync({
-          id: retailVariantId,
-          productId,
-          sku: sku.trim() || null,
-          name: "Default",
-          basePrice: Math.round(Number(price) * 100),
-          directInventoryId: directInvId,
-          config: null,
-        });
-
-        if (directInvId && Number(retailDeductQty) > 0 && Number(retailDeductQty) !== 1) {
-          await addBomAsync({
-            id: uid("bom"),
-            sourceType: "VARIANT",
-            sourceId: retailVariantId,
-            inventoryItemId: directInvId,
-            quantityDeducted: Number(retailDeductQty),
+          const singleVariantId = uid("var");
+          await addVariantAsync({
+            id: singleVariantId,
+            productId,
+            sku: sku.trim() || null,
+            name: "Default",
+            basePrice: Math.round(Number(price) * 100),
+            directInventoryId: directInvId,
+            config: null,
           });
-        }
 
-        toast({ title: "Product created", description: `Retail item "${name.trim()}" added successfully` });
+          if (directInvId && Number(retailDeductQty) > 0 && Number(retailDeductQty) !== 1) {
+            await addBomAsync({
+              id: uid("bom"),
+              sourceType: "VARIANT",
+              sourceId: singleVariantId,
+              inventoryItemId: directInvId,
+              quantityDeducted: Number(retailDeductQty),
+            });
+          }
+          toast({ title: "Product created", description: `Retail item "${name.trim()}" added successfully` });
+        }
       } else {
         await addProductAsync({
           id: productId,
@@ -588,7 +620,7 @@ export default function ProductWizard({
                 <Label className="text-xs text-muted-foreground" htmlFor="wizard-name">Product Name</Label>
                 <Input id="wizard-name" value={name} onChange={e => setName(e.target.value)} className="mt-1 rounded-xl" placeholder="e.g., Cappuccino" data-testid="wizard-input-name" />
               </div>
-              {isRetail && (
+              {isRetail && !hasRetailSizes && (
                 <>
                   <div>
                     <Label className="text-xs text-muted-foreground" htmlFor="wizard-sku">SKU</Label>
@@ -600,11 +632,24 @@ export default function ProductWizard({
                   </div>
                 </>
               )}
-              <div className={isRetail ? "" : "sm:col-span-2"}>
+              <div className={isRetail && !hasRetailSizes ? "" : "sm:col-span-2"}>
                 <Label className="text-xs text-muted-foreground" htmlFor="wizard-tags">Tags (comma separated)</Label>
                 <Input id="wizard-tags" value={tags} onChange={e => setTags(e.target.value)} className="mt-1 rounded-xl" placeholder="coffee, hot" data-testid="wizard-input-tags" />
               </div>
             </div>
+            {isRetail && (
+              <div className="flex items-center justify-between rounded-xl border p-3 animate-in fade-in slide-in-from-bottom-2 duration-300" data-testid="wizard-retail-sizes-toggle">
+                <div className="space-y-0.5">
+                  <Label className="text-sm font-medium">Multiple sizes</Label>
+                  <p className="text-xs text-muted-foreground">This item comes in different sizes with their own prices (e.g. 16oz, 32oz, 64oz).</p>
+                </div>
+                <Switch
+                  checked={hasRetailSizes}
+                  onCheckedChange={setHasRetailSizes}
+                  data-testid="wizard-toggle-retail-sizes"
+                />
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -662,6 +707,80 @@ export default function ProductWizard({
                   onClick={() => removeVariantRow(wv.tempId)}
                   disabled={wizardVariants.length <= 1}
                   data-testid={`wizard-variant-remove-${idx}`}
+                >
+                  <Trash2 className="h-3 w-3" />
+                </Button>
+              </div>
+            ))}
+          </ScrollArea>
+        </div>
+      </div>
+    );
+  }
+
+  function addRetailVariantRow() {
+    setRetailVariants(prev => [...prev, { tempId: uid("tmp"), name: "", sku: "", basePrice: "" }]);
+  }
+
+  function removeRetailVariantRow(tempId: string) {
+    setRetailVariants(prev => prev.filter(v => v.tempId !== tempId));
+  }
+
+  function updateRetailVariantRow(tempId: string, field: keyof WizardVariant, value: string) {
+    setRetailVariants(prev => prev.map(v => v.tempId === tempId ? { ...v, [field]: value } : v));
+  }
+
+  function renderRetailSizesStep() {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold text-sm">Size Configuration</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">Define sizes with their own name, SKU, and price. At least 2 sizes required.</p>
+          </div>
+          <Button size="sm" variant="outline" onClick={addRetailVariantRow} className="rounded-xl" data-testid="wizard-add-retail-size">
+            <Plus className="h-3 w-3 mr-1" /> Add Size
+          </Button>
+        </div>
+        <div className="rounded-xl border overflow-hidden">
+          <div className="grid grid-cols-[1fr_120px_120px_40px] gap-2 p-3 bg-muted/30 text-xs font-medium text-muted-foreground">
+            <span>Size Name</span>
+            <span>SKU</span>
+            <span>Price ($)</span>
+            <span></span>
+          </div>
+          <ScrollArea className="max-h-[240px]">
+            {retailVariants.map((rv, idx) => (
+              <div key={rv.tempId} className="grid grid-cols-[1fr_120px_120px_40px] gap-2 p-2 border-t items-center" data-testid={`wizard-retail-size-row-${idx}`}>
+                <Input
+                  value={rv.name}
+                  onChange={e => updateRetailVariantRow(rv.tempId, "name", e.target.value)}
+                  className="h-8 rounded-lg text-sm"
+                  placeholder="e.g., 16 oz"
+                  data-testid={`wizard-retail-size-name-${idx}`}
+                />
+                <Input
+                  value={rv.sku}
+                  onChange={e => updateRetailVariantRow(rv.tempId, "sku", e.target.value)}
+                  className="h-8 rounded-lg text-sm"
+                  placeholder="SKU"
+                  data-testid={`wizard-retail-size-sku-${idx}`}
+                />
+                <Input
+                  value={rv.basePrice}
+                  onChange={e => updateRetailVariantRow(rv.tempId, "basePrice", e.target.value)}
+                  className="h-8 rounded-lg text-sm"
+                  inputMode="decimal"
+                  placeholder="0.00"
+                  data-testid={`wizard-retail-size-price-${idx}`}
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-destructive"
+                  onClick={() => removeRetailVariantRow(rv.tempId)}
+                  disabled={retailVariants.length <= 2}
+                  data-testid={`wizard-retail-size-remove-${idx}`}
                 >
                   <Trash2 className="h-3 w-3" />
                 </Button>
@@ -1209,29 +1328,43 @@ export default function ProductWizard({
           <Separator />
 
           {isRetail ? (
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div>
-                  <span className="text-muted-foreground text-xs">SKU</span>
-                  <p className="font-mono" data-testid="wizard-review-sku">{sku || "—"}</p>
-                </div>
-                <div>
-                  <span className="text-muted-foreground text-xs">Price</span>
-                  <p className="font-semibold" data-testid="wizard-review-price">{formatMoney(Math.round(Number(price) * 100))}</p>
+            hasRetailSizes ? (
+              <div className="space-y-3">
+                <p className="text-xs font-medium text-muted-foreground mb-1">Sizes ({retailVariants.length})</p>
+                <div className="space-y-1">
+                  {retailVariants.map((rv, i) => (
+                    <div key={rv.tempId} className="flex justify-between text-sm p-1.5 rounded-lg bg-muted/30" data-testid={`wizard-review-retail-size-${i}`}>
+                      <span className="font-medium">{rv.name}</span>
+                      <span>{rv.sku ? <span className="font-mono text-xs text-muted-foreground mr-2">{rv.sku}</span> : null}{formatMoney(Math.round(Number(rv.basePrice) * 100))}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
-              <div>
-                <span className="text-muted-foreground text-xs">Inventory Link</span>
-                {retailInventoryItemId ? (
-                  <p className="text-sm" data-testid="wizard-review-inventory">
-                    {inventory.find(i => i.id === retailInventoryItemId)?.name || "Unknown"}
-                    {Number(retailDeductQty) !== 1 && ` (deduct ${retailDeductQty} per sale)`}
-                  </p>
-                ) : (
-                  <p className="text-sm text-muted-foreground" data-testid="wizard-review-inventory">None — no stock tracking</p>
-                )}
+            ) : (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div>
+                    <span className="text-muted-foreground text-xs">SKU</span>
+                    <p className="font-mono" data-testid="wizard-review-sku">{sku || "—"}</p>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground text-xs">Price</span>
+                    <p className="font-semibold" data-testid="wizard-review-price">{formatMoney(Math.round(Number(price) * 100))}</p>
+                  </div>
+                </div>
+                <div>
+                  <span className="text-muted-foreground text-xs">Inventory Link</span>
+                  {retailInventoryItemId ? (
+                    <p className="text-sm" data-testid="wizard-review-inventory">
+                      {inventory.find(i => i.id === retailInventoryItemId)?.name || "Unknown"}
+                      {Number(retailDeductQty) !== 1 && ` (deduct ${retailDeductQty} per sale)`}
+                    </p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground" data-testid="wizard-review-inventory">None — no stock tracking</p>
+                  )}
+                </div>
               </div>
-            </div>
+            )
           ) : (
             <>
               <div>
@@ -1345,8 +1478,13 @@ export default function ProductWizard({
   function renderCurrentStep() {
     if (step === 0) return renderStep0();
     if (isRetail) {
-      if (step === 1) return renderRetailInventory();
-      if (step === 2) return renderReview();
+      if (hasRetailSizes) {
+        if (step === 1) return renderRetailSizesStep();
+        if (step === 2) return renderReview();
+      } else {
+        if (step === 1) return renderRetailInventory();
+        if (step === 2) return renderReview();
+      }
       return null;
     }
     if (step === 1) return renderStep1Variants();
