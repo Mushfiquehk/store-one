@@ -26,6 +26,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Switch } from "@/components/ui/switch";
 import { useStore } from "@/lib/store";
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
@@ -107,6 +108,7 @@ export default function ReportsPage() {
   const granularities = ['hourly', 'daily', 'monthly'] as const;
   const currentGranularity = granularities[granularityIndex[0]];
   const [activeTab, setActiveTab] = useState("sales");
+  const [showIngredientProducts, setShowIngredientProducts] = useState(false);
 
   const salesData = useMemo(() => generateMockSalesData(currentGranularity), [currentGranularity]);
 
@@ -121,7 +123,10 @@ export default function ReportsPage() {
   }, [salesData]);
 
   const productMixData = useMemo(() => {
-    return products.slice(0, 8).map(p => {
+    const filtered = showIngredientProducts
+      ? products
+      : products.filter(p => !p.availableAsIngredient);
+    return filtered.slice(0, 8).map(p => {
       const pvariants = variants.filter(v => v.productId === p.id);
       const avgPrice = pvariants.length > 0 ? pvariants.reduce((s, v) => s + v.basePrice, 0) / pvariants.length : 0;
       return {
@@ -130,7 +135,7 @@ export default function ReportsPage() {
         revenue: (Math.floor(Math.random() * 100) + 20) * (avgPrice / 100),
       };
     }).sort((a, b) => b.revenue - a.revenue);
-  }, [products, variants]);
+  }, [products, variants, showIngredientProducts]);
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
@@ -180,7 +185,19 @@ export default function ReportsPage() {
 
             <TabsContent value="product-mix" className="mt-0">
               <Card className="shadow-soft rounded-2xl">
-                <CardHeader><CardTitle>Product Performance</CardTitle></CardHeader>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle>Product Performance</CardTitle>
+                    <div className="flex items-center gap-2" data-testid="toggle-show-ingredient-products">
+                      <Label className="text-xs text-muted-foreground">Show ingredient products</Label>
+                      <Switch
+                        checked={showIngredientProducts}
+                        onCheckedChange={setShowIngredientProducts}
+                        data-testid="switch-show-ingredient-products"
+                      />
+                    </div>
+                  </div>
+                </CardHeader>
                 <CardContent>
                   <Table>
                     <TableHeader>

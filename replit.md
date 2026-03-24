@@ -11,13 +11,13 @@ Offline-first point-of-sale application built with React + Dexie.js (IndexedDB).
 - **Sync-ready architecture**: The storage layer (`client/src/lib/local-storage.ts`) provides a clean interface that can be extended with a sync adapter for future multi-device support.
 
 ## Data Model
-- `products` — catalog items with `type` (RETAIL/RESTAURANT), `isComposite` flag, and JSON `attributes` (tags, tax_exempt)
+- `products` — catalog items with `type` (RETAIL/RESTAURANT), `isComposite` flag, `availableAsIngredient` flag, and JSON `attributes` (tags, tax_exempt)
 - `variants` — SKU-level pricing with `directInventoryId` for 1:1 retail mapping
 - `modifierGroups` — groupings for modifiers with min/max selection constraints
 - `modifiers` — individual options with `inventoryItemId` (assigned ingredient) and `quantityPerUse` (deduction amount)
 - `productModifierGroups` — many-to-many link between products and modifier groups with `scaleFactors` for per-product pricing
 - `inventoryItems` — raw materials/stock with currentQuantity and trackingConfig
-- `billOfMaterials` — links variants/modifiers to inventory items with quantity deduction and scale factor matrix
+- `billOfMaterials` — links variants/modifiers to inventory items with quantity deduction, scale factor matrix, and optional `sourceProductId` for prepared-product-as-ingredient recipe chaining
 - `employees` — staff with role, payRate, and PIN access
 - `timePunches` — clock in/out records
 - `sales` — completed transactions with `linesJson` (includes full modifier tree)

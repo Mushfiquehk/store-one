@@ -22,6 +22,7 @@ export const storage = {
       name: data.name!,
       type: data.type!,
       isComposite: data.isComposite ?? false,
+      availableAsIngredient: data.availableAsIngredient ?? false,
       attributes: data.attributes ?? null,
       createdAt: data.createdAt ?? new Date().toISOString(),
     };
@@ -42,6 +43,7 @@ export const storage = {
       }
       await db.variants.bulkDelete(variantIds);
       await db.productModifierGroups.where("productId").equals(id).delete();
+      await db.billOfMaterials.where("sourceProductId").equals(id).delete();
       await db.products.delete(id);
     });
   },
@@ -236,6 +238,7 @@ export const storage = {
       sourceType: data.sourceType!,
       sourceId: data.sourceId!,
       inventoryItemId: data.inventoryItemId!,
+      sourceProductId: data.sourceProductId ?? null,
       quantityDeducted: data.quantityDeducted!,
       scaleFactorMatrix: data.scaleFactorMatrix ?? null,
       overrideModifierGroupId: data.overrideModifierGroupId ?? null,

@@ -12,11 +12,11 @@ import type {
 const DEMO_PREFIX = "demo_";
 
 const products: Product[] = [
-  { id: `${DEMO_PREFIX}prod_water_bottle`, name: "Water Bottle", type: "retail", isComposite: false, attributes: JSON.stringify({ tags: ["drinks"] }), createdAt: new Date().toISOString() },
-  { id: `${DEMO_PREFIX}prod_candy_bar`, name: "Candy Bar", type: "retail", isComposite: false, attributes: JSON.stringify({ tags: ["snacks"] }), createdAt: new Date().toISOString() },
-  { id: `${DEMO_PREFIX}prod_tshirt`, name: "T-Shirt", type: "retail", isComposite: false, attributes: JSON.stringify({ tags: ["merch"] }), createdAt: new Date().toISOString() },
-  { id: `${DEMO_PREFIX}prod_cappuccino`, name: "Cappuccino", type: "prepared", isComposite: true, attributes: JSON.stringify({ tags: ["drinks"] }), createdAt: new Date().toISOString() },
-  { id: `${DEMO_PREFIX}prod_club_sandwich`, name: "Club Sandwich", type: "prepared", isComposite: true, attributes: JSON.stringify({ tags: ["food"] }), createdAt: new Date().toISOString() },
+  { id: `${DEMO_PREFIX}prod_water_bottle`, name: "Water Bottle", type: "retail", isComposite: false, availableAsIngredient: false, attributes: JSON.stringify({ tags: ["drinks"] }), createdAt: new Date().toISOString() },
+  { id: `${DEMO_PREFIX}prod_candy_bar`, name: "Candy Bar", type: "retail", isComposite: false, availableAsIngredient: false, attributes: JSON.stringify({ tags: ["snacks"] }), createdAt: new Date().toISOString() },
+  { id: `${DEMO_PREFIX}prod_tshirt`, name: "T-Shirt", type: "retail", isComposite: false, availableAsIngredient: false, attributes: JSON.stringify({ tags: ["merch"] }), createdAt: new Date().toISOString() },
+  { id: `${DEMO_PREFIX}prod_cappuccino`, name: "Cappuccino", type: "prepared", isComposite: true, availableAsIngredient: false, attributes: JSON.stringify({ tags: ["drinks"] }), createdAt: new Date().toISOString() },
+  { id: `${DEMO_PREFIX}prod_club_sandwich`, name: "Club Sandwich", type: "prepared", isComposite: true, availableAsIngredient: false, attributes: JSON.stringify({ tags: ["food"] }), createdAt: new Date().toISOString() },
 ];
 
 const variants: Variant[] = [
@@ -71,12 +71,12 @@ const modifiers: Modifier[] = [
 ];
 
 const bomEntries: BomEntry[] = [
-  { id: `${DEMO_PREFIX}bom_cap_sm_beans`, sourceType: "VARIANT", sourceId: `${DEMO_PREFIX}var_cap_sm`, inventoryItemId: `${DEMO_PREFIX}inv_coffee_beans`, quantityDeducted: 0.5, scaleFactorMatrix: null, overrideModifierGroupId: null },
-  { id: `${DEMO_PREFIX}bom_cap_md_beans`, sourceType: "VARIANT", sourceId: `${DEMO_PREFIX}var_cap_md`, inventoryItemId: `${DEMO_PREFIX}inv_coffee_beans`, quantityDeducted: 0.75, scaleFactorMatrix: null, overrideModifierGroupId: null },
-  { id: `${DEMO_PREFIX}bom_cap_lg_beans`, sourceType: "VARIANT", sourceId: `${DEMO_PREFIX}var_cap_lg`, inventoryItemId: `${DEMO_PREFIX}inv_coffee_beans`, quantityDeducted: 1, scaleFactorMatrix: null, overrideModifierGroupId: null },
-  { id: `${DEMO_PREFIX}bom_sandwich_turkey`, sourceType: "VARIANT", sourceId: `${DEMO_PREFIX}var_sandwich`, inventoryItemId: `${DEMO_PREFIX}inv_turkey`, quantityDeducted: 4, scaleFactorMatrix: null, overrideModifierGroupId: null },
-  { id: `${DEMO_PREFIX}bom_sandwich_bacon`, sourceType: "VARIANT", sourceId: `${DEMO_PREFIX}var_sandwich`, inventoryItemId: `${DEMO_PREFIX}inv_bacon`, quantityDeducted: 3, scaleFactorMatrix: null, overrideModifierGroupId: null },
-  { id: `${DEMO_PREFIX}bom_sandwich_lettuce`, sourceType: "VARIANT", sourceId: `${DEMO_PREFIX}var_sandwich`, inventoryItemId: `${DEMO_PREFIX}inv_lettuce`, quantityDeducted: 2, scaleFactorMatrix: null, overrideModifierGroupId: null },
+  { id: `${DEMO_PREFIX}bom_cap_sm_beans`, sourceType: "VARIANT", sourceId: `${DEMO_PREFIX}var_cap_sm`, inventoryItemId: `${DEMO_PREFIX}inv_coffee_beans`, sourceProductId: null, quantityDeducted: 0.5, scaleFactorMatrix: null, overrideModifierGroupId: null },
+  { id: `${DEMO_PREFIX}bom_cap_md_beans`, sourceType: "VARIANT", sourceId: `${DEMO_PREFIX}var_cap_md`, inventoryItemId: `${DEMO_PREFIX}inv_coffee_beans`, sourceProductId: null, quantityDeducted: 0.75, scaleFactorMatrix: null, overrideModifierGroupId: null },
+  { id: `${DEMO_PREFIX}bom_cap_lg_beans`, sourceType: "VARIANT", sourceId: `${DEMO_PREFIX}var_cap_lg`, inventoryItemId: `${DEMO_PREFIX}inv_coffee_beans`, sourceProductId: null, quantityDeducted: 1, scaleFactorMatrix: null, overrideModifierGroupId: null },
+  { id: `${DEMO_PREFIX}bom_sandwich_turkey`, sourceType: "VARIANT", sourceId: `${DEMO_PREFIX}var_sandwich`, inventoryItemId: `${DEMO_PREFIX}inv_turkey`, sourceProductId: null, quantityDeducted: 4, scaleFactorMatrix: null, overrideModifierGroupId: null },
+  { id: `${DEMO_PREFIX}bom_sandwich_bacon`, sourceType: "VARIANT", sourceId: `${DEMO_PREFIX}var_sandwich`, inventoryItemId: `${DEMO_PREFIX}inv_bacon`, sourceProductId: null, quantityDeducted: 3, scaleFactorMatrix: null, overrideModifierGroupId: null },
+  { id: `${DEMO_PREFIX}bom_sandwich_lettuce`, sourceType: "VARIANT", sourceId: `${DEMO_PREFIX}var_sandwich`, inventoryItemId: `${DEMO_PREFIX}inv_lettuce`, sourceProductId: null, quantityDeducted: 2, scaleFactorMatrix: null, overrideModifierGroupId: null },
 ];
 
 export async function isDemoDataSeeded(): Promise<boolean> {

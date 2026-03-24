@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { Trash2, Plus, Search, X, Package, ChefHat, Sliders, ArrowRightLeft } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -77,6 +78,7 @@ function ProductEditorInner({
   }, [bom, productVariants]);
 
   const [editName, setEditName] = useState(product.name);
+  const [editAvailableAsIngredient, setEditAvailableAsIngredient] = useState(product.availableAsIngredient ?? false);
   const [editTags, setEditTags] = useState(() => {
     try { return (JSON.parse(product.attributes || "{}")).tags?.join(", ") || ""; } catch { return ""; }
   });
@@ -106,11 +108,21 @@ function ProductEditorInner({
     return bom.filter(b => b.sourceType === "MODIFIER");
   }, [bom]);
 
+  const ingredientProducts = useMemo(() => {
+    return products.filter(p => p.availableAsIngredient && p.id !== product.id);
+  }, [products, product.id]);
+
   const filteredInventory = useMemo(() => {
     if (!bomSearch) return inventory;
     const lower = bomSearch.toLowerCase();
     return inventory.filter(i => i.name.toLowerCase().includes(lower));
   }, [inventory, bomSearch]);
+
+  const filteredIngredientProducts = useMemo(() => {
+    if (!bomSearch) return ingredientProducts;
+    const lower = bomSearch.toLowerCase();
+    return ingredientProducts.filter(p => p.name.toLowerCase().includes(lower));
+  }, [ingredientProducts, bomSearch]);
 
   const currentBomForVariant = useMemo(() => {
     if (!selectedBomVariant) return [];
@@ -124,7 +136,7 @@ function ProductEditorInner({
     let attrs: any = {};
     try { attrs = JSON.parse(product.attributes || "{}"); } catch {}
     attrs.tags = tagList;
-    updateProduct(product.id, { name, attributes: JSON.stringify(attrs) });
+    updateProduct(product.id, { name, availableAsIngredient: editAvailableAsIngredient, attributes: JSON.stringify(attrs) });
 
     for (const v of productVariants) {
       const ev = editVariants[v.id];
@@ -281,11 +293,17 @@ function ProductEditorInner({
     setModConfigGroupId(null);
   }
 
-  function handleAddBomEntry(inventoryItemId: string) {
+  function handleAddBomEntry(inventoryItemId: string, sourceProductId?: string) {
     if (!selectedBomVariant) return;
-    const exists = currentBomForVariant.some(b => b.inventoryItemId === inventoryItemId);
-    if (exists) return;
-    addBom({ id: uid("bom"), sourceType: "VARIANT", sourceId: selectedBomVariant, inventoryItemId, quantityDeducted: 1 });
+    if (sourceProductId) {
+      const exists = currentBomForVariant.some(b => b.sourceProductId === sourceProductId);
+      if (exists) return;
+      addBom({ id: uid("bom"), sourceType: "VARIANT", sourceId: selectedBomVariant, inventoryItemId: "", sourceProductId, quantityDeducted: 1 });
+    } else {
+      const exists = currentBomForVariant.some(b => b.inventoryItemId === inventoryItemId && !b.sourceProductId);
+      if (exists) return;
+      addBom({ id: uid("bom"), sourceType: "VARIANT", sourceId: selectedBomVariant, inventoryItemId, quantityDeducted: 1 });
+    }
     toast({ title: "Ingredient added" });
   }
 
@@ -334,6 +352,20 @@ function ProductEditorInner({
           <Label htmlFor="editor-tags">Tags (comma separated)</Label>
           <Input id="editor-tags" value={editTags} onChange={e => setEditTags(e.target.value)} className="mt-1" placeholder="fuel, premium" data-testid="input-editor-tags" />
         </div>
+
+        {!isRetail && (
+          <div className="flex items-center justify-between rounded-xl border p-3" data-testid="editor-available-as-ingredient">
+            <div className="space-y-0.5">
+              <Label className="text-sm font-medium">Available as ingredient</Label>
+              <p className="text-xs text-muted-foreground">Allow this prepared product to appear in recipe ingredient lists for other products.</p>
+            </div>
+            <Switch
+              checked={editAvailableAsIngredient}
+              onCheckedChange={setEditAvailableAsIngredient}
+              data-testid="editor-toggle-available-as-ingredient"
+            />
+          </div>
+        )}
 
         {isRetail && productVariants.length === 1 && (() => {
           const v = productVariants[0];
@@ -540,12 +572,19 @@ function ProductEditorInner({
                   <div className="space-y-1.5">
                     <p className="text-xs font-medium text-muted-foreground">Linked Materials</p>
                     {currentBomForVariant.map(entry => {
-                      const item = inventory.find(i => i.id === entry.inventoryItemId);
+                      const isPreparedIngredient = !!entry.sourceProductId;
+                      const item = isPreparedIngredient
+                        ? products.find(p => p.id === entry.sourceProductId)
+                        : inventory.find(i => i.id === entry.inventoryItemId);
                       const overrideGroup = entry.overrideModifierGroupId ? modifierGroups.find(mg => mg.id === entry.overrideModifierGroupId) : null;
                       return (
                         <div key={entry.id} className="rounded-lg bg-muted/30 text-xs" data-testid={`editor-bom-entry-${entry.id}`}>
                           <div className="flex items-center gap-2 p-1.5">
-                            <span className="flex-1 truncate font-medium">{item?.name || "Unknown"}</span>
+                            <span className="flex-1 truncate font-medium flex items-center gap-1">
+                              {isPreparedIngredient && <ChefHat className="h-3 w-3 text-primary" />}
+                              {item?.name || "Unknown"}
+                              {isPreparedIngredient && <Badge variant="secondary" className="text-[9px] h-4 px-1 ml-1">Prepared</Badge>}
+                            </span>
                             <Input
                               type="number"
                               step="0.01"
@@ -555,7 +594,7 @@ function ProductEditorInner({
                               className="w-16 h-6 rounded text-xs text-center"
                               data-testid={`editor-bom-qty-${entry.id}`}
                             />
-                            <span className="text-muted-foreground">{item?.unitOfMeasure}</span>
+                            <span className="text-muted-foreground">{item && 'unitOfMeasure' in item ? item.unitOfMeasure : ''}</span>
                             <Button variant="ghost" size="icon" className="h-5 w-5 text-destructive" onClick={() => handleRemoveBomEntry(entry)} data-testid={`editor-bom-remove-${entry.id}`}>
                               <X className="h-3 w-3" />
                             </Button>
@@ -605,8 +644,29 @@ function ProductEditorInner({
                 <Separator />
                 <ScrollArea className="flex-1 max-h-[120px]">
                   <div className="space-y-0.5">
+                    {filteredIngredientProducts.map(prod => {
+                      const alreadyLinked = currentBomForVariant.some(b => b.sourceProductId === prod.id);
+                      return (
+                        <button
+                          key={`prod-${prod.id}`}
+                          type="button"
+                          disabled={alreadyLinked}
+                          onClick={() => handleAddBomEntry("", prod.id)}
+                          className={`w-full text-left text-xs p-1.5 rounded-lg transition-colors flex justify-between ${
+                            alreadyLinked ? "opacity-40 cursor-not-allowed" : "hover:bg-muted cursor-pointer"
+                          }`}
+                          data-testid={`editor-bom-prod-${prod.id}`}
+                        >
+                          <span className="flex items-center gap-1">
+                            <ChefHat className="h-3 w-3 text-primary" />
+                            {prod.name}
+                          </span>
+                          <Badge variant="secondary" className="text-[9px] h-4 px-1">Prepared</Badge>
+                        </button>
+                      );
+                    })}
                     {filteredInventory.map(inv => {
-                      const alreadyLinked = currentBomForVariant.some(b => b.inventoryItemId === inv.id);
+                      const alreadyLinked = currentBomForVariant.some(b => b.inventoryItemId === inv.id && !b.sourceProductId);
                       return (
                         <button
                           key={inv.id}
@@ -623,7 +683,7 @@ function ProductEditorInner({
                         </button>
                       );
                     })}
-                    {filteredInventory.length === 0 && (
+                    {filteredInventory.length === 0 && filteredIngredientProducts.length === 0 && (
                       <p className="text-xs text-muted-foreground text-center py-4">No inventory items found</p>
                     )}
                   </div>

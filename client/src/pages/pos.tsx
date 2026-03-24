@@ -223,6 +223,25 @@ export default function PosPage() {
     setIsPaymentOpen(true);
   }
 
+  function resolveSubRecipe(sourceProductId: string, multiplier: number, depth: number, ancestors: Set<string> = new Set()) {
+    if (depth > 5 || ancestors.has(sourceProductId)) return;
+    const subProduct = products.find(p => p.id === sourceProductId);
+    if (!subProduct) return;
+    const subVariants = variants.filter(v => v.productId === sourceProductId);
+    const defaultVariant = subVariants[0];
+    if (!defaultVariant) return;
+    const pathAncestors = new Set(ancestors);
+    pathAncestors.add(sourceProductId);
+    const subBom = bom.filter(b => b.sourceType === "VARIANT" && b.sourceId === defaultVariant.id);
+    subBom.forEach(subEntry => {
+      if (subEntry.sourceProductId) {
+        resolveSubRecipe(subEntry.sourceProductId, subEntry.quantityDeducted * multiplier, depth + 1, pathAncestors);
+      } else if (subEntry.inventoryItemId) {
+        adjustInventory(subEntry.inventoryItemId, -(subEntry.quantityDeducted * multiplier));
+      }
+    });
+  }
+
   function handleRecordSale() {
     cart.forEach(line => {
       const bomEntries = bom.filter(b => b.sourceType === "VARIANT" && b.sourceId === line.variantId);
@@ -254,7 +273,11 @@ export default function PosPage() {
               }
             } catch {}
           }
-          adjustInventory(entry.inventoryItemId, -qty);
+          if (entry.sourceProductId) {
+            resolveSubRecipe(entry.sourceProductId, qty, 0);
+          } else {
+            adjustInventory(entry.inventoryItemId, -qty);
+          }
         });
       }
 
@@ -273,7 +296,11 @@ export default function PosPage() {
                 }
               } catch {}
             }
-            adjustInventory(entry.inventoryItemId, -qty);
+            if (entry.sourceProductId) {
+              resolveSubRecipe(entry.sourceProductId, qty, 0);
+            } else {
+              adjustInventory(entry.inventoryItemId, -qty);
+            }
           });
         } else {
           const mod = modifiers.find(m => m.id === sel.modifierId);

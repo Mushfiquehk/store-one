@@ -3,6 +3,7 @@ export type Product = {
   name: string;
   type: string;
   isComposite: boolean;
+  availableAsIngredient: boolean;
   attributes: string | null;
   createdAt: string | null;
 };
@@ -49,6 +50,7 @@ export type BillOfMaterials = {
   sourceType: string;
   sourceId: string;
   inventoryItemId: string;
+  sourceProductId: string | null;
   quantityDeducted: number;
   scaleFactorMatrix: string | null;
   overrideModifierGroupId: string | null;

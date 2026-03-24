@@ -12,6 +12,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { useStore } from "@/lib/store";
+import type { BomEntry } from "@/lib/db";
 
 function uid(prefix: string) {
   return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`;
@@ -41,6 +42,7 @@ type WizardBomEntry = {
   tempId: string;
   variantTempId: string;
   inventoryItemId: string;
+  sourceProductId?: string;
   quantity: string;
   overrideModifierGroupId?: string;
 };
@@ -88,6 +90,7 @@ export default function ProductWizard({
   const [retailInventoryItemId, setRetailInventoryItemId] = useState<string>("");
   const [retailDeductQty, setRetailDeductQty] = useState("1");
   const [retailInvSearch, setRetailInvSearch] = useState("");
+  const [availableAsIngredient, setAvailableAsIngredient] = useState(false);
 
   const [wizardVariants, setWizardVariants] = useState<WizardVariant[]>([
     { tempId: uid("tmp"), name: "Small", sku: "", basePrice: "" },
@@ -131,6 +134,7 @@ export default function ProductWizard({
     setRetailInventoryItemId("");
     setRetailDeductQty("1");
     setRetailInvSearch("");
+    setAvailableAsIngredient(false);
   }
 
   function handleClose() {
@@ -222,6 +226,7 @@ export default function ProductWizard({
           name: name.trim(),
           type: "RESTAURANT",
           isComposite: true,
+          availableAsIngredient,
           attributes: JSON.stringify({ tax_exempt: false, tags: tagList }),
         });
 
@@ -287,12 +292,13 @@ export default function ProductWizard({
 
         for (const wb of wizardBom) {
           const realVariantId = variantIdMap[wb.variantTempId];
-          if (realVariantId && wb.inventoryItemId && Number(wb.quantity) > 0) {
-            const bomData: any = {
+          if (realVariantId && (wb.inventoryItemId || wb.sourceProductId) && Number(wb.quantity) > 0) {
+            const bomData: Partial<BomEntry> = {
               id: uid("bom"),
               sourceType: "VARIANT",
               sourceId: realVariantId,
-              inventoryItemId: wb.inventoryItemId,
+              inventoryItemId: wb.inventoryItemId || "",
+              sourceProductId: wb.sourceProductId || null,
               quantityDeducted: Number(wb.quantity),
             };
             if (wb.overrideModifierGroupId) {
@@ -400,13 +406,14 @@ export default function ProductWizard({
     setWizardBom(prev => prev.map(b => b.tempId === tempId ? { ...b, overrideModifierGroupId: overrideGroupTempId } : b));
   }
 
-  function addBomEntry(variantTempId: string, inventoryItemId: string) {
-    const exists = wizardBom.find(b => b.variantTempId === variantTempId && b.inventoryItemId === inventoryItemId);
+  function addBomEntry(variantTempId: string, inventoryItemId: string, sourceProductId?: string) {
+    const exists = wizardBom.find(b => b.variantTempId === variantTempId && b.inventoryItemId === inventoryItemId && b.sourceProductId === sourceProductId);
     if (exists) return;
     setWizardBom(prev => [...prev, {
       tempId: uid("tmp"),
       variantTempId,
       inventoryItemId,
+      sourceProductId,
       quantity: "1",
     }]);
   }
@@ -429,7 +436,11 @@ export default function ProductWizard({
       if (wv.tempId === autoScaleBase) return;
       const pct = Number(autoScalePercents[wv.tempId] || "100") / 100;
       baseBom.forEach(bb => {
-        const existingIdx = newBom.findIndex(b => b.variantTempId === wv.tempId && b.inventoryItemId === bb.inventoryItemId);
+        const existingIdx = newBom.findIndex(b =>
+          b.variantTempId === wv.tempId &&
+          b.inventoryItemId === bb.inventoryItemId &&
+          (b.sourceProductId || null) === (bb.sourceProductId || null)
+        );
         const scaledQty = (Number(bb.quantity) * pct).toFixed(2);
         if (existingIdx >= 0) {
           newBom[existingIdx] = { ...newBom[existingIdx], quantity: scaledQty };
@@ -438,6 +449,7 @@ export default function ProductWizard({
             tempId: uid("tmp"),
             variantTempId: wv.tempId,
             inventoryItemId: bb.inventoryItemId,
+            sourceProductId: bb.sourceProductId,
             quantity: scaledQty,
           });
         }
@@ -447,11 +459,21 @@ export default function ProductWizard({
     toast({ title: "Recipes auto-scaled", description: "Quantities scaled proportionally across variants" });
   }
 
+  const ingredientProducts = useMemo(() => {
+    return products.filter(p => p.availableAsIngredient);
+  }, [products]);
+
   const filteredInventory = useMemo(() => {
     if (!bomSearch) return inventory;
     const lower = bomSearch.toLowerCase();
     return inventory.filter(i => i.name.toLowerCase().includes(lower));
   }, [inventory, bomSearch]);
+
+  const filteredIngredientProducts = useMemo(() => {
+    if (!bomSearch) return ingredientProducts;
+    const lower = bomSearch.toLowerCase();
+    return ingredientProducts.filter(p => p.name.toLowerCase().includes(lower));
+  }, [ingredientProducts, bomSearch]);
 
   const currentBomForVariant = useMemo(() => {
     if (!selectedBomVariant) return [];
@@ -541,6 +563,20 @@ export default function ProductWizard({
               <p className="font-medium">Before you begin</p>
               <p className="text-xs mt-0.5 opacity-90">Make sure all the raw ingredients and inventory items you need for this product's recipe have already been added in the Bulk Inventory tab. You'll link them to this item in Step 3.</p>
             </div>
+          </div>
+        )}
+
+        {itemType === "PREPARED" && (
+          <div className="flex items-center justify-between rounded-xl border p-3 animate-in fade-in slide-in-from-bottom-2 duration-300" data-testid="wizard-available-as-ingredient">
+            <div className="space-y-0.5">
+              <Label className="text-sm font-medium">Available as ingredient</Label>
+              <p className="text-xs text-muted-foreground">Allow this prepared product to appear in recipe ingredient lists for other products.</p>
+            </div>
+            <Switch
+              checked={availableAsIngredient}
+              onCheckedChange={setAvailableAsIngredient}
+              data-testid="wizard-toggle-available-as-ingredient"
+            />
           </div>
         )}
 
@@ -944,10 +980,16 @@ export default function ProductWizard({
                   <div className="space-y-1">
                     <p className="text-xs font-medium text-muted-foreground">Linked Materials</p>
                     {currentBomForVariant.map(entry => {
-                      const item = inventory.find(i => i.id === entry.inventoryItemId);
+                      const item = entry.sourceProductId
+                        ? products.find(p => p.id === entry.sourceProductId)
+                        : inventory.find(i => i.id === entry.inventoryItemId);
                       return (
                         <div key={entry.tempId} className="flex items-center gap-2 p-1.5 rounded-lg bg-muted/30 text-xs">
-                          <span className="flex-1 truncate font-medium">{item?.name || "Unknown"}</span>
+                          <span className="flex-1 truncate font-medium flex items-center gap-1">
+                            {entry.sourceProductId && <ChefHat className="h-3 w-3 text-primary" />}
+                            {item?.name || "Unknown"}
+                            {entry.sourceProductId && <Badge variant="secondary" className="text-[9px] h-4 px-1 ml-1">Prepared</Badge>}
+                          </span>
                           <Input
                             value={entry.quantity}
                             onChange={e => updateBomQty(entry.tempId, e.target.value)}
@@ -955,7 +997,7 @@ export default function ProductWizard({
                             inputMode="decimal"
                             data-testid={`wizard-bom-qty-${entry.tempId}`}
                           />
-                          <span className="text-muted-foreground">{item?.unitOfMeasure}</span>
+                          <span className="text-muted-foreground">{item && 'unitOfMeasure' in item ? item.unitOfMeasure : ''}</span>
                           <Button variant="ghost" size="icon" className="h-5 w-5 text-destructive" onClick={() => removeBomEntry(entry.tempId)}>
                             <X className="h-3 w-3" />
                           </Button>
@@ -968,8 +1010,29 @@ export default function ProductWizard({
                 <Separator />
                 <ScrollArea className="flex-1 max-h-[280px]">
                   <div className="space-y-0.5">
+                    {filteredIngredientProducts.map(prod => {
+                      const alreadyLinked = currentBomForVariant.some(b => b.sourceProductId === prod.id);
+                      return (
+                        <button
+                          key={`prod-${prod.id}`}
+                          type="button"
+                          disabled={alreadyLinked}
+                          onClick={() => addBomEntry(selectedBomVariant, "", prod.id)}
+                          className={`w-full text-left text-xs p-1.5 rounded-lg transition-colors flex justify-between ${
+                            alreadyLinked ? "opacity-40 cursor-not-allowed" : "hover:bg-muted cursor-pointer"
+                          }`}
+                          data-testid={`wizard-bom-prod-${prod.id}`}
+                        >
+                          <span className="flex items-center gap-1">
+                            <ChefHat className="h-3 w-3 text-primary" />
+                            {prod.name}
+                          </span>
+                          <Badge variant="secondary" className="text-[9px] h-4 px-1">Prepared</Badge>
+                        </button>
+                      );
+                    })}
                     {filteredInventory.map(inv => {
-                      const alreadyLinked = currentBomForVariant.some(b => b.inventoryItemId === inv.id);
+                      const alreadyLinked = currentBomForVariant.some(b => b.inventoryItemId === inv.id && !b.sourceProductId);
                       return (
                         <button
                           key={inv.id}
@@ -986,7 +1049,7 @@ export default function ProductWizard({
                         </button>
                       );
                     })}
-                    {filteredInventory.length === 0 && (
+                    {filteredInventory.length === 0 && filteredIngredientProducts.length === 0 && (
                       <p className="text-xs text-muted-foreground text-center py-4">No inventory items found</p>
                     )}
                   </div>

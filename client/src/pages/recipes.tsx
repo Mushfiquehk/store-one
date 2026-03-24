@@ -1,6 +1,6 @@
 import { useMemo, useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Plus, Soup, Trash2, Search, Scale, ChevronRight, Package, Layers, Sliders } from "lucide-react";
+import { Plus, Soup, Trash2, Search, Scale, ChevronRight, Package, Layers, Sliders, ChefHat } from "lucide-react";
 import AppShell from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -31,6 +31,7 @@ export default function RecipesPage({ isTab = false }: { isTab?: boolean }) {
   const [inventorySearch, setInventorySearch] = useState("");
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [bomInvItemId, setBomInvItemId] = useState("");
+  const [bomSourceProductId, setBomSourceProductId] = useState<string | null>(null);
   const [bomQty, setBomQty] = useState("");
   const [isAutoScaleOpen, setIsAutoScaleOpen] = useState(false);
   const [baseVariantId, setBaseVariantId] = useState<string>("");
@@ -81,11 +82,30 @@ export default function RecipesPage({ isTab = false }: { isTab?: boolean }) {
     return bom.filter(b => b.sourceType === selectedSource.type && b.sourceId === selectedSource.id);
   }, [bom, selectedSource]);
 
+  const currentProductId = useMemo(() => {
+    if (!selectedSource) return null;
+    if (selectedSource.type === "VARIANT") {
+      const v = variants.find(v => v.id === selectedSource.id);
+      return v?.productId ?? null;
+    }
+    return null;
+  }, [selectedSource, variants]);
+
+  const ingredientProducts = useMemo(() => {
+    return products.filter(p => p.availableAsIngredient && p.id !== currentProductId);
+  }, [products, currentProductId]);
+
   const filteredInventory = useMemo(() => {
     if (!inventorySearch) return inventory;
     const lower = inventorySearch.toLowerCase();
     return inventory.filter(i => i.name.toLowerCase().includes(lower));
   }, [inventory, inventorySearch]);
+
+  const filteredIngredientProducts = useMemo(() => {
+    if (!inventorySearch) return ingredientProducts;
+    const lower = inventorySearch.toLowerCase();
+    return ingredientProducts.filter(p => p.name.toLowerCase().includes(lower));
+  }, [ingredientProducts, inventorySearch]);
 
   const parseScaleMatrix = useCallback((matrixJson: string | null): Record<string, number> => {
     if (!matrixJson) return {};
@@ -97,8 +117,8 @@ export default function RecipesPage({ isTab = false }: { isTab?: boolean }) {
   }, []);
 
   function handleAddBom() {
-    if (!selectedSource || !bomInvItemId) {
-      toast({ title: "Select an inventory item" });
+    if (!selectedSource || (!bomInvItemId && !bomSourceProductId)) {
+      toast({ title: "Select an inventory item or prepared product" });
       return;
     }
     const qty = Number(bomQty);
@@ -111,29 +131,44 @@ export default function RecipesPage({ isTab = false }: { isTab?: boolean }) {
       id: uid("bom"),
       sourceType: selectedSource.type,
       sourceId: selectedSource.id,
-      inventoryItemId: bomInvItemId,
+      inventoryItemId: bomInvItemId || "",
+      sourceProductId: bomSourceProductId || null,
       quantityDeducted: qty,
     });
 
     setBomInvItemId("");
+    setBomSourceProductId(null);
     setBomQty("");
     setIsAddOpen(false);
     toast({ title: "BOM entry added" });
   }
 
-  function handleAddFromCatalog(invItemId: string) {
+  function handleAddFromCatalog(itemId: string, isPreparedProduct = false) {
     if (!selectedSource) {
       toast({ title: "Select a variant or modifier first" });
       return;
     }
-    const existing = bom.find(
-      b => b.sourceType === selectedSource.type && b.sourceId === selectedSource.id && b.inventoryItemId === invItemId
-    );
-    if (existing) {
-      toast({ title: "Already linked", description: "This inventory item is already in the BOM for this source." });
-      return;
+    if (isPreparedProduct) {
+      const existing = bom.find(
+        b => b.sourceType === selectedSource.type && b.sourceId === selectedSource.id && b.sourceProductId === itemId
+      );
+      if (existing) {
+        toast({ title: "Already linked", description: "This prepared product is already in the BOM for this source." });
+        return;
+      }
+      setBomSourceProductId(itemId);
+      setBomInvItemId("");
+    } else {
+      const existing = bom.find(
+        b => b.sourceType === selectedSource.type && b.sourceId === selectedSource.id && b.inventoryItemId === itemId && !b.sourceProductId
+      );
+      if (existing) {
+        toast({ title: "Already linked", description: "This inventory item is already in the BOM for this source." });
+        return;
+      }
+      setBomInvItemId(itemId);
+      setBomSourceProductId(null);
     }
-    setBomInvItemId(invItemId);
     setBomQty("1");
     setIsAddOpen(true);
   }
@@ -171,7 +206,9 @@ export default function RecipesPage({ isTab = false }: { isTab?: boolean }) {
 
       for (const baseEntry of baseBom) {
         const existingEntry = bom.find(
-          b => b.sourceType === "VARIANT" && b.sourceId === variantId && b.inventoryItemId === baseEntry.inventoryItemId
+          b => b.sourceType === "VARIANT" && b.sourceId === variantId &&
+            b.inventoryItemId === baseEntry.inventoryItemId &&
+            (b.sourceProductId || null) === (baseEntry.sourceProductId || null)
         );
         const scaledQty = Math.round(baseEntry.quantityDeducted * scaleFactor * 1000) / 1000;
 
@@ -183,6 +220,7 @@ export default function RecipesPage({ isTab = false }: { isTab?: boolean }) {
             sourceType: "VARIANT",
             sourceId: variantId,
             inventoryItemId: baseEntry.inventoryItemId,
+            sourceProductId: baseEntry.sourceProductId || null,
             quantityDeducted: scaledQty,
           });
         }
@@ -196,7 +234,9 @@ export default function RecipesPage({ isTab = false }: { isTab?: boolean }) {
 
       for (const baseEntry of baseBom) {
         const existingForBase = bom.find(
-          b => b.sourceType === "VARIANT" && b.sourceId === baseVariantId && b.inventoryItemId === baseEntry.inventoryItemId
+          b => b.sourceType === "VARIANT" && b.sourceId === baseVariantId &&
+            b.inventoryItemId === baseEntry.inventoryItemId &&
+            (b.sourceProductId || null) === (baseEntry.sourceProductId || null)
         );
         if (existingForBase) {
           updateBom(existingForBase.id, { scaleFactorMatrix: JSON.stringify(scaleMatrix) });
@@ -335,7 +375,10 @@ export default function RecipesPage({ isTab = false }: { isTab?: boolean }) {
             {sourceBom.length > 0 ? (
               <div className="space-y-3">
                 {sourceBom.map(entry => {
-                  const item = inventory.find(i => i.id === entry.inventoryItemId);
+                  const isPreparedIngredient = !!entry.sourceProductId;
+                  const item = isPreparedIngredient
+                    ? products.find(p => p.id === entry.sourceProductId)
+                    : inventory.find(i => i.id === entry.inventoryItemId);
                   const matrix = parseScaleMatrix(entry.scaleFactorMatrix);
                   const hasMatrix = Object.keys(matrix).length > 0;
                   return (
@@ -351,11 +394,15 @@ export default function RecipesPage({ isTab = false }: { isTab?: boolean }) {
                           <Trash2 className="h-3 w-3" />
                         </Button>
                       </div>
-                      <p className="font-semibold text-sm mb-1">{item?.name || "Unknown"}</p>
+                      <p className="font-semibold text-sm mb-1 flex items-center gap-1">
+                        {isPreparedIngredient && <ChefHat className="h-3.5 w-3.5 text-primary" />}
+                        {item?.name || "Unknown"}
+                        {isPreparedIngredient && <Badge variant="secondary" className="text-[9px] h-4 px-1 ml-1">Prepared</Badge>}
+                      </p>
                       <div className="text-xs space-y-1 text-muted-foreground">
                         <div className="flex justify-between">
                           <span>Qty deducted:</span>
-                          <span className="font-medium text-primary">{entry.quantityDeducted} {item?.unitOfMeasure}</span>
+                          <span className="font-medium text-primary">{entry.quantityDeducted} {item && 'unitOfMeasure' in item ? item.unitOfMeasure : ''}</span>
                         </div>
                       </div>
 
@@ -416,9 +463,35 @@ export default function RecipesPage({ isTab = false }: { isTab?: boolean }) {
       </CardHeader>
       <CardContent className="p-2 flex-1 overflow-y-auto">
         <div className="flex flex-col gap-1">
+          {filteredIngredientProducts.map(prod => {
+            const isLinked = selectedSource
+              ? bom.some(b => b.sourceType === selectedSource.type && b.sourceId === selectedSource.id && b.sourceProductId === prod.id)
+              : false;
+            return (
+              <button
+                key={`prod-${prod.id}`}
+                className={`w-full text-left rounded-lg px-3 py-2 text-sm transition-all border ${
+                  isLinked
+                    ? "border-primary/30 bg-primary/5 cursor-default"
+                    : "border-transparent hover:bg-muted/50 cursor-pointer"
+                }`}
+                onClick={() => !isLinked && handleAddFromCatalog(prod.id, true)}
+                disabled={isLinked || !selectedSource}
+                data-testid={`inventory-catalog-prod-${prod.id}`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className={`truncate flex items-center gap-1 ${isLinked ? "text-primary font-medium" : ""}`}>
+                    <ChefHat className="h-3 w-3 text-primary" />
+                    {prod.name}
+                  </span>
+                  <Badge variant="secondary" className="text-[9px] h-4 px-1 ml-2">Prepared</Badge>
+                </div>
+              </button>
+            );
+          })}
           {filteredInventory.map(item => {
             const isLinked = selectedSource
-              ? bom.some(b => b.sourceType === selectedSource.type && b.sourceId === selectedSource.id && b.inventoryItemId === item.id)
+              ? bom.some(b => b.sourceType === selectedSource.type && b.sourceId === selectedSource.id && b.inventoryItemId === item.id && !b.sourceProductId)
               : false;
             return (
               <button
@@ -442,7 +515,7 @@ export default function RecipesPage({ isTab = false }: { isTab?: boolean }) {
               </button>
             );
           })}
-          {filteredInventory.length === 0 && (
+          {filteredInventory.length === 0 && filteredIngredientProducts.length === 0 && (
             <div className="text-center text-xs text-muted-foreground py-8">No inventory items found</div>
           )}
         </div>
@@ -467,17 +540,25 @@ export default function RecipesPage({ isTab = false }: { isTab?: boolean }) {
             </div>
           </div>
           <div className="grid gap-2">
-            <Label>Inventory Item</Label>
-            <Select value={bomInvItemId} onValueChange={setBomInvItemId}>
-              <SelectTrigger data-testid="select-bom-inventory">
-                <SelectValue placeholder="Select inventory item" />
-              </SelectTrigger>
-              <SelectContent>
-                {inventory.map(i => (
-                  <SelectItem key={i.id} value={i.id}>{i.name} ({i.unitOfMeasure})</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Label>{bomSourceProductId ? "Prepared Product" : "Inventory Item"}</Label>
+            {bomSourceProductId ? (
+              <div className="flex items-center gap-2 px-3 py-2 border rounded-md bg-muted/30">
+                <ChefHat className="h-4 w-4 text-primary" />
+                <span className="text-sm">{products.find(p => p.id === bomSourceProductId)?.name ?? bomSourceProductId}</span>
+                <Badge variant="secondary" className="text-[9px] h-4 px-1">Prepared</Badge>
+              </div>
+            ) : (
+              <Select value={bomInvItemId} onValueChange={setBomInvItemId}>
+                <SelectTrigger data-testid="select-bom-inventory">
+                  <SelectValue placeholder="Select inventory item" />
+                </SelectTrigger>
+                <SelectContent>
+                  {inventory.map(i => (
+                    <SelectItem key={i.id} value={i.id}>{i.name} ({i.unitOfMeasure})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
           <div className="grid gap-2">
             <Label>Quantity Deducted Per Sale</Label>

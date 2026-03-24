@@ -5,6 +5,7 @@ export interface Product {
   name: string;
   type: string;
   isComposite: boolean;
+  availableAsIngredient: boolean;
   attributes: string | null;
   createdAt: string | null;
 }
@@ -57,6 +58,7 @@ export interface BomEntry {
   sourceType: string;
   sourceId: string;
   inventoryItemId: string;
+  sourceProductId: string | null;
   quantityDeducted: number;
   scaleFactorMatrix: string | null;
   overrideModifierGroupId: string | null;
@@ -114,6 +116,30 @@ class PosDatabase extends Dexie {
       employees: "id, name",
       timePunches: "id, employeeId",
       sales: "id, createdAt",
+    });
+
+    this.version(2).stores({
+      products: "id, name, type, availableAsIngredient",
+      variants: "id, productId, sku",
+      modifierGroups: "id, name",
+      productModifierGroups: "[productId+modifierGroupId], productId, modifierGroupId",
+      modifiers: "id, modifierGroupId",
+      inventoryItems: "id, name",
+      billOfMaterials: "id, sourceType, sourceId, inventoryItemId, sourceProductId, [sourceType+sourceId]",
+      employees: "id, name",
+      timePunches: "id, employeeId",
+      sales: "id, createdAt",
+    }).upgrade(async tx => {
+      await tx.table("products").toCollection().modify(product => {
+        if (product.availableAsIngredient === undefined) {
+          product.availableAsIngredient = false;
+        }
+      });
+      await tx.table("billOfMaterials").toCollection().modify(entry => {
+        if (entry.sourceProductId === undefined) {
+          entry.sourceProductId = null;
+        }
+      });
     });
   }
 }
