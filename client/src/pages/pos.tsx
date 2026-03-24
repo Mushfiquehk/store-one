@@ -1,6 +1,6 @@
 import { useMemo, useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { LayoutGrid, Receipt, ShoppingBag, X, Clock, Search } from "lucide-react";
+import { LayoutGrid, Receipt, ShoppingBag, X, Clock, Search, SlidersHorizontal } from "lucide-react";
 import AppShell from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -471,8 +471,8 @@ export default function PosPage() {
                           onClick={() => handleProductTap(p, pvariants[0]?.id)}
                           data-testid={`button-add-menu-${p.id}`}
                         >
-                          <div className="w-full">
-                            <p className="font-semibold leading-tight line-clamp-2 text-base">{p.name}</p>
+                          <div className="w-full pr-7">
+                            <p className="font-semibold leading-tight truncate text-base">{p.name}</p>
                             {pvariants.length > 1 && (
                               <p className="text-xs text-muted-foreground mt-0.5">
                                 {pvariants.length} sizes
@@ -484,9 +484,9 @@ export default function PosPage() {
                                 : formatMoney(pvariants[0]?.basePrice ?? 0)}
                             </p>
                           </div>
-                          <Badge variant="outline" className="absolute top-2 right-2 text-[9px] px-1.5 py-0">
-                            customize
-                          </Badge>
+                          <div className="absolute top-2 right-2 text-muted-foreground">
+                            <SlidersHorizontal className="w-3.5 h-3.5" />
+                          </div>
                         </Button>
                       );
                     }
