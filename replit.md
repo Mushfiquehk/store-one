@@ -42,7 +42,8 @@ Offline-first point-of-sale application built with React + Dexie.js (IndexedDB).
 
 ## Frontend Patterns
 - **Dexie Live Queries**: All data subscriptions use `useLiveQuery` from `dexie-react-hooks` for automatic reactivity
-- **Wizard Design Pattern**: Product creation uses progressive disclosure
+- **Wizard Design Pattern**: Product creation uses progressive disclosure; sized retail items include per-variant inventory linking
+- **Product Type Values**: Always uppercase — `RETAIL` or `RESTAURANT` (seed data and wizard both use this convention)
 - **Product-Specific Modifier Pricing**: Modifier prices stored on `productModifierGroups.scaleFactors`
 - **Auto-Scale BOM**: Define base recipe for one size, proportionally scale to other sizes
 - **Recipe Override by Modifier Group**: BOM entries can skip deduction when a modifier from a linked group is selected

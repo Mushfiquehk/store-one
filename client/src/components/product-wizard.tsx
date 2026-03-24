@@ -48,7 +48,7 @@ type WizardBomEntry = {
 };
 
 const STEPS_RETAIL_SIMPLE = ["Item Type", "Inventory", "Review & Create"];
-const STEPS_RETAIL_SIZED = ["Item Type", "Sizes", "Review & Create"];
+const STEPS_RETAIL_SIZED = ["Item Type", "Sizes", "Inventory", "Review & Create"];
 const STEPS_PREPARED = ["Item Type", "Variants", "Recipes", "Modifiers", "Review & Create"];
 
 export default function ProductWizard({
@@ -99,6 +99,9 @@ export default function ProductWizard({
     { tempId: uid("tmp"), name: "32 oz", sku: "", basePrice: "" },
     { tempId: uid("tmp"), name: "64 oz", sku: "", basePrice: "" },
   ]);
+  const [retailVariantInvMap, setRetailVariantInvMap] = useState<Record<string, string>>({});
+  const [retailSizedInvSearch, setRetailSizedInvSearch] = useState("");
+  const [retailSizedInvExpanded, setRetailSizedInvExpanded] = useState<string | null>(null);
 
   const [wizardVariants, setWizardVariants] = useState<WizardVariant[]>([
     { tempId: uid("tmp"), name: "Small", sku: "", basePrice: "" },
@@ -132,6 +135,9 @@ export default function ProductWizard({
       { tempId: uid("tmp"), name: "32 oz", sku: "", basePrice: "" },
       { tempId: uid("tmp"), name: "64 oz", sku: "", basePrice: "" },
     ]);
+    setRetailVariantInvMap({});
+    setRetailSizedInvSearch("");
+    setRetailSizedInvExpanded(null);
     setWizardVariants([
       { tempId: uid("tmp"), name: "Small", sku: "", basePrice: "" },
       { tempId: uid("tmp"), name: "Medium", sku: "", basePrice: "" },
@@ -216,13 +222,14 @@ export default function ProductWizard({
         if (hasRetailSizes) {
           for (const rv of retailVariants) {
             const variantId = uid("var");
+            const linkedInvId = retailVariantInvMap[rv.tempId] || null;
             await addVariantAsync({
               id: variantId,
               productId,
               sku: rv.sku.trim() || null,
               name: rv.name.trim(),
               basePrice: Math.round(Number(rv.basePrice) * 100),
-              directInventoryId: null,
+              directInventoryId: linkedInvId,
               config: null,
             });
           }
@@ -792,6 +799,110 @@ export default function ProductWizard({
     );
   }
 
+  function renderRetailSizedInventory() {
+    const filteredInv = inventory.filter(i =>
+      !retailSizedInvSearch || i.name.toLowerCase().includes(retailSizedInvSearch.toLowerCase())
+    );
+
+    return (
+      <div className="space-y-4">
+        <div>
+          <h3 className="font-semibold text-sm">Link Inventory Items</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">Optionally link each size to an inventory item for stock tracking. You can skip this step.</p>
+        </div>
+
+        <div className="space-y-2">
+          {retailVariants.map((rv, idx) => {
+            const linkedInvId = retailVariantInvMap[rv.tempId];
+            const linkedItem = linkedInvId ? inventory.find(i => i.id === linkedInvId) : null;
+            const isExpanded = retailSizedInvExpanded === rv.tempId;
+
+            return (
+              <div key={rv.tempId} className="rounded-xl border overflow-hidden" data-testid={`wizard-sized-inv-${idx}`}>
+                <div
+                  className="flex items-center justify-between p-3 cursor-pointer hover:bg-muted/30 transition-colors"
+                  onClick={() => { setRetailSizedInvExpanded(isExpanded ? null : rv.tempId); setRetailSizedInvSearch(""); }}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-sm">{rv.name || `Size ${idx + 1}`}</span>
+                    {linkedItem && (
+                      <Badge variant="secondary" className="text-xs">{linkedItem.name}</Badge>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {linkedInvId && (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRetailVariantInvMap(prev => {
+                            const next = { ...prev };
+                            delete next[rv.tempId];
+                            return next;
+                          });
+                        }}
+                        data-testid={`wizard-sized-inv-clear-${idx}`}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                    <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform ${isExpanded ? "rotate-90" : ""}`} />
+                  </div>
+                </div>
+
+                {isExpanded && !linkedInvId && (
+                  <div className="border-t p-3 space-y-2 bg-muted/10">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        value={retailSizedInvSearch}
+                        onChange={e => setRetailSizedInvSearch(e.target.value)}
+                        placeholder="Search inventory items…"
+                        className="pl-9 rounded-xl h-8 text-sm"
+                        data-testid={`wizard-sized-inv-search-${idx}`}
+                      />
+                    </div>
+                    <ScrollArea className="max-h-[150px]">
+                      {filteredInv.length === 0 ? (
+                        <p className="text-xs text-muted-foreground p-2 text-center">
+                          {inventory.length === 0 ? "No inventory items exist yet." : "No matches found."}
+                        </p>
+                      ) : (
+                        <div className="space-y-0.5">
+                          {filteredInv.map(item => (
+                            <button
+                              key={item.id}
+                              type="button"
+                              onClick={() => {
+                                setRetailVariantInvMap(prev => ({ ...prev, [rv.tempId]: item.id }));
+                                setRetailSizedInvSearch("");
+                                setRetailSizedInvExpanded(null);
+                              }}
+                              className="w-full text-left p-2 rounded-lg hover:bg-muted/50 transition-colors flex items-center justify-between cursor-pointer"
+                              data-testid={`wizard-sized-inv-item-${idx}-${item.id}`}
+                            >
+                              <div>
+                                <p className="text-sm font-medium">{item.name}</p>
+                                <p className="text-xs text-muted-foreground">{item.unitOfMeasure} · Qty: {item.currentQuantity}</p>
+                              </div>
+                              <Package className="h-4 w-4 text-muted-foreground" />
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </ScrollArea>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
   function renderStep3Modifiers() {
     return (
       <div className="space-y-4">
@@ -1332,12 +1443,21 @@ export default function ProductWizard({
               <div className="space-y-3">
                 <p className="text-xs font-medium text-muted-foreground mb-1">Sizes ({retailVariants.length})</p>
                 <div className="space-y-1">
-                  {retailVariants.map((rv, i) => (
-                    <div key={rv.tempId} className="flex justify-between text-sm p-1.5 rounded-lg bg-muted/30" data-testid={`wizard-review-retail-size-${i}`}>
-                      <span className="font-medium">{rv.name}</span>
-                      <span>{rv.sku ? <span className="font-mono text-xs text-muted-foreground mr-2">{rv.sku}</span> : null}{formatMoney(Math.round(Number(rv.basePrice) * 100))}</span>
-                    </div>
-                  ))}
+                  {retailVariants.map((rv, i) => {
+                    const linkedInvId = retailVariantInvMap[rv.tempId];
+                    const linkedItem = linkedInvId ? inventory.find(it => it.id === linkedInvId) : null;
+                    return (
+                      <div key={rv.tempId} className="flex justify-between items-center text-sm p-1.5 rounded-lg bg-muted/30" data-testid={`wizard-review-retail-size-${i}`}>
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{rv.name}</span>
+                          {linkedItem && (
+                            <Badge variant="outline" className="text-[10px] gap-0.5"><Package className="h-2.5 w-2.5" />{linkedItem.name}</Badge>
+                          )}
+                        </div>
+                        <span>{rv.sku ? <span className="font-mono text-xs text-muted-foreground mr-2">{rv.sku}</span> : null}{formatMoney(Math.round(Number(rv.basePrice) * 100))}</span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             ) : (
@@ -1480,7 +1600,8 @@ export default function ProductWizard({
     if (isRetail) {
       if (hasRetailSizes) {
         if (step === 1) return renderRetailSizesStep();
-        if (step === 2) return renderReview();
+        if (step === 2) return renderRetailSizedInventory();
+        if (step === 3) return renderReview();
       } else {
         if (step === 1) return renderRetailInventory();
         if (step === 2) return renderReview();
