@@ -196,7 +196,7 @@ export const storage = {
       name: data.name!,
       unitOfMeasure: data.unitOfMeasure!,
       currentQuantity: data.currentQuantity ?? 0,
-      trackingConfig: data.trackingConfig ?? null,
+      lowStockThreshold: data.lowStockThreshold ?? null,
     };
     await db.inventoryItems.put(item);
     return item;

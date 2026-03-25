@@ -263,7 +263,7 @@ export default function PosPage() {
             const sfm = entry.scaleFactorMatrix;
             const variant = variants.find(v => v.id === line.variantId);
             if (variant) {
-              const scale = sfm[variant.name] ?? sfm[variant.id] ?? 1;
+              const scale = sfm[variant.id] ?? sfm[variant.name] ?? 1;
               qty = entry.quantityDeducted * scale * line.qty;
             }
           }
@@ -284,7 +284,7 @@ export default function PosPage() {
               const sfm = entry.scaleFactorMatrix;
               const variant = variants.find(v => v.id === line.variantId);
               if (variant) {
-                const scale = sfm[variant.name] ?? sfm[variant.id] ?? 1;
+                const scale = sfm[variant.id] ?? sfm[variant.name] ?? 1;
                 qty = entry.quantityDeducted * scale * sel.qty * line.qty;
               }
             }
@@ -311,21 +311,27 @@ export default function PosPage() {
       totalCents,
       paymentMethod: paymentType,
       status: "completed",
-      linesJson: cart.map(c => ({
-        variantId: c.variantId,
-        productId: c.productId,
-        qty: c.qty,
-        modifiers: c.modifiers.map(sel => {
-          const mod = modifiers.find(m => m.id === sel.modifierId);
-          return {
-            modifierId: sel.modifierId,
-            name: mod?.name ?? "",
-            qty: sel.qty,
-            unitPrice: mod ? getModifierPrice(mod, c.variantId) : 0,
-          };
-        }),
-        unitPrice: getCartItemPrice(c),
-      })),
+      linesJson: cart.map(c => {
+        const prod = products.find(p => p.id === c.productId);
+        const vari = variants.find(v => v.id === c.variantId);
+        return {
+          variantId: c.variantId,
+          productId: c.productId,
+          productName: prod?.name ?? "",
+          variantName: vari?.name ?? "",
+          qty: c.qty,
+          modifiers: c.modifiers.map(sel => {
+            const mod = modifiers.find(m => m.id === sel.modifierId);
+            return {
+              modifierId: sel.modifierId,
+              name: mod?.name ?? "",
+              qty: sel.qty,
+              unitPrice: mod ? getModifierPrice(mod, c.variantId) : 0,
+            };
+          }),
+          unitPrice: getCartItemPrice(c),
+        };
+      }),
     });
 
     toast({ title: "Sale recorded", description: `${formatMoney(totalCents)} • ${paymentType}` });

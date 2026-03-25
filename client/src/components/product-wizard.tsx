@@ -308,12 +308,14 @@ export default function ProductWizard({
             const groupScaleData = wizardScaleFactors[wmg.tempId];
             if (!groupScaleData) continue;
             const scaleFactorsObj: Record<string, Record<string, number>> = {};
-            Object.entries(groupScaleData).forEach(([modId, sizeMap]) => {
+            Object.entries(groupScaleData).forEach(([modId, tempIdMap]) => {
               const numMap: Record<string, number> = {};
-              Object.entries(sizeMap).forEach(([sizeName, val]) => {
+              Object.entries(tempIdMap).forEach(([varTempId, val]) => {
+                const realVarId = variantIdMap[varTempId];
+                if (!realVarId) return;
                 const num = Number(val);
                 if (Number.isFinite(num) && num >= 0) {
-                  numMap[sizeName] = Math.round(num * 100);
+                  numMap[realVarId] = Math.round(num * 100);
                 }
               });
               if (Object.keys(numMap).length > 0) {
@@ -352,8 +354,10 @@ export default function ProductWizard({
           if (!hasAnyQty) continue;
           const matrix: Record<string, number> = {};
           wizardVariants.forEach(wv => {
-            const qty = Number(sizeMap[wv.name] || 0);
-            if (qty > 0) matrix[wv.name] = qty;
+            const realVarId = variantIdMap[wv.tempId];
+            if (!realVarId) return;
+            const qty = Number(sizeMap[wv.tempId] || 0);
+            if (qty > 0) matrix[realVarId] = qty;
           });
           await addBomAsync({
             id: uid("bom"),
@@ -408,21 +412,21 @@ export default function ProductWizard({
     setWizardModGroups(prev => prev.map(m => m.tempId === tempId ? { ...m, ...updates } : m));
   }
 
-  function updateModSizeQty(modifierId: string, variantName: string, value: string) {
+  function updateModSizeQty(modifierId: string, variantTempId: string, value: string) {
     setModifierSizeQtys(prev => ({
       ...prev,
-      [modifierId]: { ...(prev[modifierId] || {}), [variantName]: value },
+      [modifierId]: { ...(prev[modifierId] || {}), [variantTempId]: value },
     }));
   }
 
-  function updateWizardScaleFactor(groupTempId: string, modifierId: string, variantName: string, value: string) {
+  function updateWizardScaleFactor(groupTempId: string, modifierId: string, variantTempId: string, value: string) {
     setWizardScaleFactors(prev => ({
       ...prev,
       [groupTempId]: {
         ...(prev[groupTempId] || {}),
         [modifierId]: {
           ...((prev[groupTempId] || {})[modifierId] || {}),
-          [variantName]: value,
+          [variantTempId]: value,
         },
       },
     }));
@@ -1026,8 +1030,8 @@ export default function ProductWizard({
                                               type="number"
                                               step="0.01"
                                               min="0"
-                                              value={wizardScaleFactors[wmg.tempId]?.[mod.id]?.[wv.name] || ""}
-                                              onChange={e => updateWizardScaleFactor(wmg.tempId, mod.id, wv.name, e.target.value)}
+                                              value={wizardScaleFactors[wmg.tempId]?.[mod.id]?.[wv.tempId] || ""}
+                                              onChange={e => updateWizardScaleFactor(wmg.tempId, mod.id, wv.tempId, e.target.value)}
                                               placeholder="0.00"
                                               className="h-7 w-20 text-center text-xs pl-4"
                                               data-testid={`wizard-price-${mi}-${vi}`}
@@ -1080,8 +1084,8 @@ export default function ProductWizard({
                                                 type="number"
                                                 step="0.1"
                                                 min="0"
-                                                value={modifierSizeQtys[mod.id]?.[wv.name] || ""}
-                                                onChange={e => updateModSizeQty(mod.id, wv.name, e.target.value)}
+                                                value={modifierSizeQtys[mod.id]?.[wv.tempId] || ""}
+                                                onChange={e => updateModSizeQty(mod.id, wv.tempId, e.target.value)}
                                                 placeholder="0"
                                                 className="h-7 w-16 text-center text-xs mx-auto"
                                                 data-testid={`wizard-mod-qty-${mi}-${vi}`}
@@ -1525,8 +1529,8 @@ export default function ProductWizard({
                               {modsWithPricing.map(mod => {
                                 const sf = scaleData[mod.id] || {};
                                 const scaleStr = wizardVariants
-                                  .filter(wv => sf[wv.name] && Number(sf[wv.name]) > 0)
-                                  .map(wv => `${wv.name}: $${Number(sf[wv.name]).toFixed(2)}`)
+                                  .filter(wv => sf[wv.tempId] && Number(sf[wv.tempId]) > 0)
+                                  .map(wv => `${wv.name}: $${Number(sf[wv.tempId]).toFixed(2)}`)
                                   .join(", ");
                                 return (
                                   <p key={mod.id} className="text-[11px] text-muted-foreground">
@@ -1542,8 +1546,8 @@ export default function ProductWizard({
                               {modsWithQtys.map(mod => {
                                 const sizeMap = modifierSizeQtys[mod.id] || {};
                                 const sizeStr = wizardVariants
-                                  .filter(wv => Number(sizeMap[wv.name] || 0) > 0)
-                                  .map(wv => `${wv.name}: ${sizeMap[wv.name]}`)
+                                  .filter(wv => Number(sizeMap[wv.tempId] || 0) > 0)
+                                  .map(wv => `${wv.name}: ${sizeMap[wv.tempId]}`)
                                   .join(", ");
                                 return (
                                   <p key={mod.id} className="text-[11px] text-muted-foreground">

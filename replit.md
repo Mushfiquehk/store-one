@@ -11,21 +11,27 @@ Offline-first point-of-sale application built with React + Dexie.js (IndexedDB).
 - **Sync-ready architecture**: The storage layer (`client/src/lib/local-storage.ts`) provides a clean interface that can be extended with a sync adapter for future multi-device support.
 
 ## Data Model
-- `products` — catalog items with `type` (RETAIL/RESTAURANT), `isComposite` flag, `availableAsIngredient` flag, and native `attributes: ProductAttributes | null` (tags, tax_exempt)
+- `products` — catalog items with `type: "RETAIL" | "RESTAURANT"` (union type), `isComposite` flag, `availableAsIngredient` flag, and native `attributes: ProductAttributes | null` (tags, tax_exempt)
 - `variants` — SKU-level pricing with `directInventoryId` for 1:1 retail mapping
 - `modifierGroups` — groupings for modifiers with min/max selection constraints
 - `modifiers` — individual options with `inventoryItemId` (assigned ingredient) and `quantityPerUse` (deduction amount)
-- `productModifierGroups` — many-to-many link between products and modifier groups with native `scaleFactors: ModifierScaleFactors | null` (per-product modifier pricing)
-- `inventoryItems` — raw materials/stock with currentQuantity and `trackingConfig` (JSON string for low-stock alerts — only remaining stringified field)
-- `billOfMaterials` (type: `BomEntry`) — links variants/modifiers to inventory items with quantity deduction, native `scaleFactorMatrix: ScaleFactorMatrix | null`, and optional `sourceProductId` for recipe chaining
+- `productModifierGroups` — many-to-many link between products and modifier groups with native `scaleFactors: ModifierScaleFactors | null` (per-product modifier pricing, keyed by variant ID)
+- `inventoryItems` — raw materials/stock with `currentQuantity` and `lowStockThreshold: number | null`
+- `billOfMaterials` (type: `BomEntry`) — links variants/modifiers to inventory items with quantity deduction, native `scaleFactorMatrix: ScaleFactorMatrix | null` (keyed by variant ID), and optional `sourceProductId` for recipe chaining
 - `employees` — staff with role, payRate, and PIN access
 - `timePunches` — clock in/out records
-- `sales` — completed transactions with native `linesJson: SaleLine[]` (includes full modifier tree)
+- `sales` — completed transactions with native `linesJson: SaleLine[]` (includes `productName`, `variantName` denormalized at sale time, plus full modifier tree)
+
+## Key Conventions
+- **Scale factor keys use variant IDs**, not variant names. This prevents data corruption when variants are renamed.
+- **All stringified JSON fields have been eliminated** — every field stores native objects/arrays. No JSON.parse/stringify needed at read/write time.
+- **SaleLine includes denormalized names** (`productName`, `variantName`) captured at sale time, so historical sales display correctly even after product edits/deletes.
+- **Dexie migration history**: v1 (initial), v2 (availableAsIngredient, sourceProductId), v3 (parse stringified JSON → native objects), v4 (rekey scale factors name→ID, trackingConfig→lowStockThreshold, SaleLine denormalization)
 
 ## Key Files
-- `client/src/lib/db.ts` — Dexie.js database definition with IndexedDB schema (v3 migration auto-parses legacy stringified JSON fields)
+- `client/src/lib/db.ts` — Dexie.js database definition with IndexedDB schema and migrations (v1–v4)
 - `client/src/lib/local-storage.ts` — CRUD storage layer for all entities
-- `client/src/lib/store.tsx` — React context provider using Dexie live queries for reactive data
+- `client/src/lib/store.tsx` — React context provider using Dexie live queries for reactive data (single query for productModifierGroups)
 - `shared/schema.ts` — TypeScript type definitions for all entities (canonical reference, mirrors `db.ts` interfaces)
 - `client/src/components/product-wizard.tsx` — 5-step progressive disclosure wizard for product creation
 - `client/src/components/modifier-selector.tsx` — POS modifier selection dialog with product-specific pricing
@@ -43,8 +49,8 @@ Offline-first point-of-sale application built with React + Dexie.js (IndexedDB).
 ## Frontend Patterns
 - **Dexie Live Queries**: All data subscriptions use `useLiveQuery` from `dexie-react-hooks` for automatic reactivity
 - **Wizard Design Pattern**: Product creation uses progressive disclosure; sized retail items include per-variant inventory linking
-- **Product Type Values**: Always uppercase — `RETAIL` or `RESTAURANT` (seed data and wizard both use this convention)
-- **Product-Specific Modifier Pricing**: Modifier prices stored on `productModifierGroups.scaleFactors`
+- **Product Type Values**: Always uppercase — `RETAIL` or `RESTAURANT` (union type enforced in db.ts)
+- **Product-Specific Modifier Pricing**: Modifier prices stored on `productModifierGroups.scaleFactors`, keyed by variant ID
 - **Auto-Scale BOM**: Define base recipe for one size, proportionally scale to other sizes
 - **Recipe Override by Modifier Group**: BOM entries can skip deduction when a modifier from a linked group is selected
 

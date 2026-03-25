@@ -109,29 +109,22 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const timePunches = useLiveQuery(() => db.timePunches.toArray(), []) as TimePunch[] | undefined;
   const sales = useLiveQuery(() => db.sales.toArray(), []) as Sale[] | undefined;
 
-  const productModifierLinksRaw = useLiveQuery(async () => {
+  const productModifierData = useLiveQuery(async () => {
     const rows = await db.productModifierGroups.toArray();
-    const map: Record<string, string[]> = {};
+    const links: Record<string, string[]> = {};
+    const sf: Record<string, ModifierScaleFactors | null> = {};
     for (const r of rows) {
-      if (!map[r.productId]) map[r.productId] = [];
-      map[r.productId].push(r.modifierGroupId);
-    }
-    return map;
-  }, []) as Record<string, string[]> | undefined;
-
-  const productModifierScaleFactorsRaw = useLiveQuery(async () => {
-    const rows = await db.productModifierGroups.toArray();
-    const map: Record<string, ModifierScaleFactors | null> = {};
-    for (const r of rows) {
+      if (!links[r.productId]) links[r.productId] = [];
+      links[r.productId].push(r.modifierGroupId);
       if (r.scaleFactors) {
-        map[`${r.productId}::${r.modifierGroupId}`] = r.scaleFactors;
+        sf[`${r.productId}::${r.modifierGroupId}`] = r.scaleFactors;
       }
     }
-    return map;
-  }, []) as Record<string, ModifierScaleFactors | null> | undefined;
+    return { links, sf };
+  }, []) as { links: Record<string, string[]>; sf: Record<string, ModifierScaleFactors | null> } | undefined;
 
-  const productModifierLinks = productModifierLinksRaw ?? {};
-  const productModifierScaleFactors = productModifierScaleFactorsRaw ?? {};
+  const productModifierLinks = productModifierData?.links ?? {};
+  const productModifierScaleFactors = productModifierData?.sf ?? {};
 
   useEffect(() => {
     if (!dbReady && products !== undefined && variants !== undefined && inventory !== undefined) {

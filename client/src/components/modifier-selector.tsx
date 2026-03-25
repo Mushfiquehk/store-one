@@ -66,9 +66,8 @@ export default function ModifierSelector({
     const sf = productModifierScaleFactors[sfKey];
     if (sf) {
       const modPrices = sf[mod.id];
-      if (modPrices) {
-        if (modPrices[activeVariant.name] !== undefined) return Math.round(modPrices[activeVariant.name]);
-        if (modPrices[activeVariant.id] !== undefined) return Math.round(modPrices[activeVariant.id]);
+      if (modPrices && modPrices[activeVariant.id] !== undefined) {
+        return Math.round(modPrices[activeVariant.id]);
       }
     }
     return mod.baseUpcharge;

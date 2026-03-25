@@ -236,9 +236,8 @@ export default function ReportsPage() {
                     </TableHeader>
                     <TableBody>
                       {inventory.map(item => {
-                        let lowAlert = 0;
-                        try { lowAlert = JSON.parse(item.trackingConfig || "{}").low_stock_alert || 0; } catch {}
-                        const isLow = item.currentQuantity <= lowAlert;
+                        const lowAlert = item.lowStockThreshold ?? 0;
+                        const isLow = lowAlert > 0 && item.currentQuantity <= lowAlert;
                         return (
                           <TableRow key={item.id}>
                             <TableCell className="font-medium">{item.name}</TableCell>

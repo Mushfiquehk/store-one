@@ -11,7 +11,7 @@ export type { ProductAttributes, ModifierScaleFactors, ScaleFactorMatrix, SaleLi
 export interface Product {
   id: string;
   name: string;
-  type: string;
+  type: "RETAIL" | "RESTAURANT";
   isComposite: boolean;
   availableAsIngredient: boolean;
   attributes: ProductAttributes | null;
@@ -54,7 +54,7 @@ export interface InventoryItem {
   name: string;
   unitOfMeasure: string;
   currentQuantity: number;
-  trackingConfig: string | null;
+  lowStockThreshold: number | null;
 }
 
 export interface BomEntry {
@@ -173,6 +173,92 @@ class PosDatabase extends Dexie {
       await tx.table("sales").toCollection().modify(sale => {
         if (typeof sale.linesJson === "string") {
           sale.linesJson = safeParse(sale.linesJson) ?? [];
+        }
+      });
+    });
+
+    this.version(4).stores({}).upgrade(async tx => {
+      const allVariants = await tx.table("variants").toArray();
+      const variantsByProduct: Record<string, { id: string; name: string }[]> = {};
+      for (const v of allVariants) {
+        if (!variantsByProduct[v.productId]) variantsByProduct[v.productId] = [];
+        variantsByProduct[v.productId].push({ id: v.id, name: v.name });
+      }
+
+      await tx.table("productModifierGroups").toCollection().modify(pmg => {
+        if (!pmg.scaleFactors) return;
+        const pVariants = variantsByProduct[pmg.productId] || [];
+        const nameToId: Record<string, string> = {};
+        for (const v of pVariants) nameToId[v.name] = v.id;
+        const newSf: Record<string, Record<string, number>> = {};
+        for (const [modId, sizeMap] of Object.entries(pmg.scaleFactors as Record<string, Record<string, number>>)) {
+          const newInner: Record<string, number> = {};
+          for (const [key, val] of Object.entries(sizeMap)) {
+            const resolvedId = nameToId[key] || key;
+            newInner[resolvedId] = val;
+          }
+          newSf[modId] = newInner;
+        }
+        pmg.scaleFactors = newSf;
+      });
+
+      const allModifiers = await tx.table("modifiers").toArray();
+      const modToGroup: Record<string, string> = {};
+      for (const m of allModifiers) modToGroup[m.id] = m.modifierGroupId;
+
+      const allPmg = await tx.table("productModifierGroups").toArray();
+      const groupToProducts: Record<string, string[]> = {};
+      for (const pmg of allPmg) {
+        if (!groupToProducts[pmg.modifierGroupId]) groupToProducts[pmg.modifierGroupId] = [];
+        groupToProducts[pmg.modifierGroupId].push(pmg.productId);
+      }
+
+      await tx.table("billOfMaterials").toCollection().modify(entry => {
+        if (!entry.scaleFactorMatrix) return;
+        const nameToId: Record<string, string> = {};
+        if (entry.sourceType === "VARIANT") {
+          const v = allVariants.find((vr: any) => vr.id === entry.sourceId);
+          if (v) {
+            for (const pv of variantsByProduct[v.productId] || []) nameToId[pv.name] = pv.id;
+          }
+        } else if (entry.sourceType === "MODIFIER") {
+          const groupId = modToGroup[entry.sourceId];
+          if (groupId) {
+            for (const pId of groupToProducts[groupId] || []) {
+              for (const pv of variantsByProduct[pId] || []) nameToId[pv.name] = pv.id;
+            }
+          }
+        }
+        const newMatrix: Record<string, number> = {};
+        for (const [key, val] of Object.entries(entry.scaleFactorMatrix as Record<string, number>)) {
+          const resolvedId = nameToId[key] || key;
+          newMatrix[resolvedId] = val;
+        }
+        entry.scaleFactorMatrix = newMatrix;
+      });
+
+      await tx.table("inventoryItems").toCollection().modify(item => {
+        if (item.trackingConfig !== undefined) {
+          let threshold: number | null = null;
+          if (typeof item.trackingConfig === "string") {
+            try {
+              const config = JSON.parse(item.trackingConfig);
+              if (config && typeof config.low_stock_alert === "number") {
+                threshold = config.low_stock_alert;
+              }
+            } catch {}
+          }
+          item.lowStockThreshold = threshold;
+          delete item.trackingConfig;
+        }
+      });
+
+      await tx.table("sales").toCollection().modify(sale => {
+        if (Array.isArray(sale.linesJson)) {
+          for (const line of sale.linesJson) {
+            if (line.productName === undefined) line.productName = "";
+            if (line.variantName === undefined) line.variantName = "";
+          }
         }
       });
     });

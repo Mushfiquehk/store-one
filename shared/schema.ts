@@ -10,6 +10,8 @@ export type ScaleFactorMatrix = Record<string, number>;
 export type SaleLine = {
   variantId: string;
   productId: string;
+  productName: string;
+  variantName: string;
   qty: number;
   modifiers: {
     modifierId: string;
@@ -66,7 +68,7 @@ export type InventoryItem = {
   name: string;
   unitOfMeasure: string;
   currentQuantity: number;
-  trackingConfig: string | null;
+  lowStockThreshold: number | null;
 };
 
 export type BomEntry = {

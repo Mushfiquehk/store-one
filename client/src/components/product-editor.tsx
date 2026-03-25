@@ -209,15 +209,15 @@ function ProductEditorInner({
       scaleData[mod.id] = {};
       ingredientData[mod.id] = {};
       for (const v of productVariants) {
-        const centsVal = existingPrices?.[mod.id]?.[v.name];
-        scaleData[mod.id][v.name] = centsVal !== undefined ? (centsVal / 100).toFixed(2) : "0";
+        const centsVal = existingPrices?.[mod.id]?.[v.id];
+        scaleData[mod.id][v.id] = centsVal !== undefined ? (centsVal / 100).toFixed(2) : "0";
       }
 
       if (mod.inventoryItemId) {
         const bomEntry = modifierBom.find(b => b.sourceId === mod.id && b.inventoryItemId === mod.inventoryItemId);
         const matrix = bomEntry?.scaleFactorMatrix ?? {};
         for (const v of productVariants) {
-          ingredientData[mod.id][v.name] = String(matrix[v.name] ?? "");
+          ingredientData[mod.id][v.id] = String(matrix[v.id] ?? "");
         }
       }
     }
@@ -799,10 +799,10 @@ function ProductEditorInner({
                                     type="number"
                                     step="0.01"
                                     min="0"
-                                    value={modConfigScaleData[mod.id]?.[v.name] ?? "0"}
+                                    value={modConfigScaleData[mod.id]?.[v.id] ?? "0"}
                                     onChange={e => setModConfigScaleData(prev => ({
                                       ...prev,
-                                      [mod.id]: { ...(prev[mod.id] || {}), [v.name]: e.target.value },
+                                      [mod.id]: { ...(prev[mod.id] || {}), [v.id]: e.target.value },
                                     }))}
                                     className="h-7 w-20 text-center text-xs pl-4 mx-auto"
                                     data-testid={`editor-price-${mod.id}-${v.id}`}
@@ -850,10 +850,10 @@ function ProductEditorInner({
                                       type="number"
                                       step="0.1"
                                       min="0"
-                                      value={modConfigIngredientData[mod.id]?.[v.name] ?? ""}
+                                      value={modConfigIngredientData[mod.id]?.[v.id] ?? ""}
                                       onChange={e => setModConfigIngredientData(prev => ({
                                         ...prev,
-                                        [mod.id]: { ...(prev[mod.id] || {}), [v.name]: e.target.value },
+                                        [mod.id]: { ...(prev[mod.id] || {}), [v.id]: e.target.value },
                                       }))}
                                       placeholder="0"
                                       className="h-7 w-16 text-center text-xs mx-auto"

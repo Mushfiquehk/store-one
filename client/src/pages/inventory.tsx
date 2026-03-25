@@ -34,12 +34,7 @@ export default function InventoryPage({ isTab = false }: { isTab?: boolean }) {
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string; deps: string[] } | null>(null);
 
   const lowStockCount = useMemo(() => {
-    return inventory.filter(i => {
-      try {
-        const config = i.trackingConfig ? JSON.parse(i.trackingConfig) : {};
-        return i.currentQuantity <= (config.low_stock_alert || 0);
-      } catch { return false; }
-    }).length;
+    return inventory.filter(i => i.lowStockThreshold != null && i.currentQuantity <= i.lowStockThreshold).length;
   }, [inventory]);
 
   function handleAddItem() {
@@ -57,7 +52,7 @@ export default function InventoryPage({ isTab = false }: { isTab?: boolean }) {
       name,
       unitOfMeasure: draftUnit.trim() || "each",
       currentQuantity: Number.isFinite(qty) ? qty : 0,
-      trackingConfig: JSON.stringify({ low_stock_alert: Number.isFinite(lowAlert) ? lowAlert : 10 }),
+      lowStockThreshold: Number.isFinite(lowAlert) ? lowAlert : 10,
     });
 
     setDraftName("");
@@ -68,10 +63,8 @@ export default function InventoryPage({ isTab = false }: { isTab?: boolean }) {
   }
 
   function openEditItem(item: InventoryItem) {
-    let lowAlert = "10";
-    try { lowAlert = String(JSON.parse(item.trackingConfig || "{}").low_stock_alert || 10); } catch {}
     setEditingItem(item);
-    setEditForm({ name: item.name, unitOfMeasure: item.unitOfMeasure, lowStockAlert: lowAlert });
+    setEditForm({ name: item.name, unitOfMeasure: item.unitOfMeasure, lowStockAlert: String(item.lowStockThreshold ?? 10) });
     setEditOpen(true);
   }
 
@@ -83,7 +76,7 @@ export default function InventoryPage({ isTab = false }: { isTab?: boolean }) {
     updateInventoryItem(editingItem.id, {
       name,
       unitOfMeasure: editForm.unitOfMeasure.trim() || "each",
-      trackingConfig: JSON.stringify({ low_stock_alert: Number.isFinite(lowAlert) ? lowAlert : 10 }),
+      lowStockThreshold: Number.isFinite(lowAlert) ? lowAlert : 10,
     });
     toast({ title: "Item updated" });
     setEditOpen(false);
@@ -166,9 +159,8 @@ export default function InventoryPage({ isTab = false }: { isTab?: boolean }) {
               </TableHeader>
               <TableBody>
                 {inventory.map(i => {
-                  let lowAlert = 0;
-                  try { lowAlert = JSON.parse(i.trackingConfig || "{}").low_stock_alert || 0; } catch {}
-                  const isLow = i.currentQuantity <= lowAlert;
+                  const lowAlert = i.lowStockThreshold ?? 0;
+                  const isLow = lowAlert > 0 && i.currentQuantity <= lowAlert;
 
                   return (
                     <TableRow key={i.id} data-testid={`row-inventory-${i.id}`} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => openEditItem(i)}>
