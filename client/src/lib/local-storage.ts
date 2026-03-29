@@ -9,6 +9,8 @@ import type {
   Employee,
   TimePunch,
   Sale,
+  Invoice,
+  InvoiceLineItem,
   ModifierScaleFactors,
 } from "./db";
 
@@ -197,6 +199,7 @@ export const storage = {
       unitOfMeasure: data.unitOfMeasure!,
       currentQuantity: data.currentQuantity ?? 0,
       lowStockThreshold: data.lowStockThreshold ?? null,
+      lastPurchasePrice: data.lastPurchasePrice ?? null,
     };
     await db.inventoryItems.put(item);
     return item;
@@ -318,5 +321,129 @@ export const storage = {
     };
     await db.sales.put(sale);
     return sale;
+  },
+
+  async getInvoices(): Promise<Invoice[]> {
+    return db.invoices.toArray();
+  },
+
+  async getInvoice(id: string): Promise<Invoice | undefined> {
+    return db.invoices.get(id);
+  },
+
+  async getInvoiceLineItems(invoiceId?: string): Promise<InvoiceLineItem[]> {
+    if (invoiceId) {
+      return db.invoiceLineItems.where("invoiceId").equals(invoiceId).toArray();
+    }
+    return db.invoiceLineItems.toArray();
+  },
+
+  async createInvoiceWithLineItems(
+    invoiceData: Partial<Invoice>,
+    lineItems: Partial<InvoiceLineItem>[]
+  ): Promise<{ invoice: Invoice; lineItems: InvoiceLineItem[] }> {
+    const invoice: Invoice = {
+      id: invoiceData.id!,
+      supplierName: invoiceData.supplierName!,
+      invoiceNumber: invoiceData.invoiceNumber!,
+      date: invoiceData.date!,
+      status: invoiceData.status ?? "recorded",
+      notes: invoiceData.notes ?? "",
+    };
+
+    const createdLineItems: InvoiceLineItem[] = [];
+
+    await db.transaction("rw", [db.invoices, db.invoiceLineItems, db.inventoryItems], async () => {
+      await db.invoices.put(invoice);
+
+      for (const li of lineItems) {
+        const lineItem: InvoiceLineItem = {
+          id: li.id!,
+          invoiceId: invoice.id,
+          inventoryItemId: li.inventoryItemId!,
+          description: li.description ?? "",
+          quantity: li.quantity!,
+          unitPriceCents: li.unitPriceCents!,
+        };
+        await db.invoiceLineItems.put(lineItem);
+        createdLineItems.push(lineItem);
+
+        const existingItem = await db.inventoryItems.get(lineItem.inventoryItemId);
+        if (existingItem) {
+          await db.inventoryItems.update(existingItem.id, {
+            lastPurchasePrice: lineItem.unitPriceCents,
+            currentQuantity: existingItem.currentQuantity + lineItem.quantity,
+          });
+        } else {
+          const newItem: InventoryItem = {
+            id: lineItem.inventoryItemId,
+            name: lineItem.description || "Unknown Item",
+            unitOfMeasure: "each",
+            currentQuantity: lineItem.quantity,
+            lowStockThreshold: null,
+            lastPurchasePrice: lineItem.unitPriceCents,
+          };
+          await db.inventoryItems.put(newItem);
+        }
+      }
+    });
+
+    return { invoice, lineItems: createdLineItems };
+  },
+
+  async createInvoiceLineItem(data: Partial<InvoiceLineItem>): Promise<InvoiceLineItem> {
+    const lineItem: InvoiceLineItem = {
+      id: data.id!,
+      invoiceId: data.invoiceId!,
+      inventoryItemId: data.inventoryItemId!,
+      description: data.description ?? "",
+      quantity: data.quantity!,
+      unitPriceCents: data.unitPriceCents!,
+    };
+
+    await db.transaction("rw", [db.invoiceLineItems, db.inventoryItems], async () => {
+      await db.invoiceLineItems.put(lineItem);
+
+      const existingItem = await db.inventoryItems.get(lineItem.inventoryItemId);
+      if (existingItem) {
+        await db.inventoryItems.update(existingItem.id, {
+          lastPurchasePrice: lineItem.unitPriceCents,
+          currentQuantity: existingItem.currentQuantity + lineItem.quantity,
+        });
+      } else {
+        const newItem: InventoryItem = {
+          id: lineItem.inventoryItemId,
+          name: lineItem.description || "Unknown Item",
+          unitOfMeasure: "each",
+          currentQuantity: lineItem.quantity,
+          lowStockThreshold: null,
+          lastPurchasePrice: lineItem.unitPriceCents,
+        };
+        await db.inventoryItems.put(newItem);
+      }
+    });
+
+    return lineItem;
+  },
+
+  async updateInvoiceLineItem(id: string, data: Partial<InvoiceLineItem>): Promise<InvoiceLineItem | undefined> {
+    await db.invoiceLineItems.update(id, data);
+    return db.invoiceLineItems.get(id);
+  },
+
+  async deleteInvoiceLineItem(id: string): Promise<void> {
+    await db.invoiceLineItems.delete(id);
+  },
+
+  async updateInvoice(id: string, data: Partial<Invoice>): Promise<Invoice | undefined> {
+    await db.invoices.update(id, data);
+    return db.invoices.get(id);
+  },
+
+  async deleteInvoice(id: string): Promise<void> {
+    await db.transaction("rw", [db.invoices, db.invoiceLineItems], async () => {
+      await db.invoiceLineItems.where("invoiceId").equals(id).delete();
+      await db.invoices.delete(id);
+    });
   },
 };

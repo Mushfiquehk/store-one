@@ -69,6 +69,25 @@ export type InventoryItem = {
   unitOfMeasure: string;
   currentQuantity: number;
   lowStockThreshold: number | null;
+  lastPurchasePrice: number | null;
+};
+
+export type Invoice = {
+  id: string;
+  supplierName: string;
+  invoiceNumber: string;
+  date: string;
+  status: string;
+  notes: string;
+};
+
+export type InvoiceLineItem = {
+  id: string;
+  invoiceId: string;
+  inventoryItemId: string;
+  description: string;
+  quantity: number;
+  unitPriceCents: number;
 };
 
 export type BomEntry = {

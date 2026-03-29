@@ -55,6 +55,25 @@ export interface InventoryItem {
   unitOfMeasure: string;
   currentQuantity: number;
   lowStockThreshold: number | null;
+  lastPurchasePrice: number | null;
+}
+
+export interface Invoice {
+  id: string;
+  supplierName: string;
+  invoiceNumber: string;
+  date: string;
+  status: string;
+  notes: string;
+}
+
+export interface InvoiceLineItem {
+  id: string;
+  invoiceId: string;
+  inventoryItemId: string;
+  description: string;
+  quantity: number;
+  unitPriceCents: number;
 }
 
 export interface BomEntry {
@@ -105,6 +124,8 @@ class PosDatabase extends Dexie {
   employees!: Table<Employee, string>;
   timePunches!: Table<TimePunch, string>;
   sales!: Table<Sale, string>;
+  invoices!: Table<Invoice, string>;
+  invoiceLineItems!: Table<InvoiceLineItem, string>;
 
   constructor() {
     super("cornerpos");
@@ -259,6 +280,17 @@ class PosDatabase extends Dexie {
             if (line.productName === undefined) line.productName = "";
             if (line.variantName === undefined) line.variantName = "";
           }
+        }
+      });
+    });
+
+    this.version(5).stores({
+      invoices: "id, supplierName, invoiceNumber, date",
+      invoiceLineItems: "id, invoiceId, inventoryItemId",
+    }).upgrade(async tx => {
+      await tx.table("inventoryItems").toCollection().modify(item => {
+        if (item.lastPurchasePrice === undefined) {
+          item.lastPurchasePrice = null;
         }
       });
     });

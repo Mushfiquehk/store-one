@@ -1592,6 +1592,161 @@ export default function ProductWizard({
             </>
           )}
         </div>
+
+        {renderProfitability()}
+      </div>
+    );
+  }
+
+  function renderProfitability() {
+    if (isRetail) {
+      if (hasRetailSizes) {
+        const hasAnyCost = retailVariants.some(rv => {
+          const linkedInvId = retailVariantInvMap[rv.tempId];
+          if (!linkedInvId) return false;
+          const item = inventory.find(i => i.id === linkedInvId);
+          return item?.lastPurchasePrice != null;
+        });
+        if (!hasAnyCost && retailVariants.every(rv => !retailVariantInvMap[rv.tempId])) return null;
+        return (
+          <div className="rounded-xl border p-4 space-y-3" data-testid="profitability-section">
+            <p className="text-xs font-medium text-muted-foreground">Profitability</p>
+            <div className="space-y-2">
+              {retailVariants.map((rv, i) => {
+                const linkedInvId = retailVariantInvMap[rv.tempId];
+                const linkedItem = linkedInvId ? inventory.find(it => it.id === linkedInvId) : null;
+                const sellingPriceCents = Math.round(Number(rv.basePrice) * 100);
+                if (!linkedItem) {
+                  return (
+                    <div key={rv.tempId} className="text-xs p-2 rounded-lg bg-muted/30" data-testid={`profitability-variant-${i}`}>
+                      <span className="font-medium">{rv.name}</span>
+                      <span className="text-muted-foreground ml-2">No inventory linked</span>
+                    </div>
+                  );
+                }
+                const costCents = linkedItem.lastPurchasePrice;
+                if (costCents == null) {
+                  return (
+                    <div key={rv.tempId} className="text-xs p-2 rounded-lg bg-muted/30" data-testid={`profitability-variant-${i}`}>
+                      <span className="font-medium">{rv.name}</span>
+                      <span className="text-muted-foreground ml-2">— {linkedItem.name}: No cost data</span>
+                    </div>
+                  );
+                }
+                const margin = sellingPriceCents > 0 ? ((sellingPriceCents - costCents) / sellingPriceCents * 100) : 0;
+                return (
+                  <div key={rv.tempId} className="text-xs p-2 rounded-lg bg-muted/30 space-y-1" data-testid={`profitability-variant-${i}`}>
+                    <div className="flex justify-between font-medium">
+                      <span>{rv.name}</span>
+                      <span className={margin >= 0 ? "text-green-600" : "text-red-600"}>{margin.toFixed(1)}% margin</span>
+                    </div>
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>{linkedItem.name}: {formatMoney(costCents)}</span>
+                      <span>Sells {formatMoney(sellingPriceCents)} — Cost {formatMoney(costCents)}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      }
+
+      const linkedItem = retailInventoryItemId ? inventory.find(i => i.id === retailInventoryItemId) : null;
+      if (!linkedItem) return null;
+      const costCents = linkedItem.lastPurchasePrice;
+      const sellingPriceCents = Math.round(Number(price) * 100);
+      return (
+        <div className="rounded-xl border p-4 space-y-3" data-testid="profitability-section">
+          <p className="text-xs font-medium text-muted-foreground">Profitability</p>
+          {costCents == null ? (
+            <p className="text-xs text-muted-foreground">{linkedItem.name}: No cost data</p>
+          ) : (
+            <div className="text-xs space-y-1">
+              <div className="flex justify-between">
+                <span>{linkedItem.name}</span>
+                <span>{formatMoney(costCents)}</span>
+              </div>
+              <Separator />
+              <div className="flex justify-between font-medium">
+                <span>Selling: {formatMoney(sellingPriceCents)} — Cost: {formatMoney(costCents)}</span>
+                <span className={sellingPriceCents - costCents >= 0 ? "text-green-600" : "text-red-600"}>
+                  {sellingPriceCents > 0 ? ((sellingPriceCents - costCents) / sellingPriceCents * 100).toFixed(1) : "0.0"}% margin
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    if (wizardBom.length === 0) return null;
+
+    return (
+      <div className="rounded-xl border p-4 space-y-3" data-testid="profitability-section">
+        <p className="text-xs font-medium text-muted-foreground">Profitability</p>
+        <div className="space-y-3">
+          {wizardVariants.map((wv, vi) => {
+            const entries = wizardBom.filter(b => b.variantTempId === wv.tempId);
+            const sellingPriceCents = Math.round(Number(wv.basePrice) * 100);
+            if (entries.length === 0) {
+              return (
+                <div key={wv.tempId} className="text-xs p-2 rounded-lg bg-muted/30" data-testid={`profitability-variant-${vi}`}>
+                  <span className="font-medium">{wv.name}</span>
+                  <span className="text-muted-foreground ml-2">No ingredients</span>
+                </div>
+              );
+            }
+
+            let totalCostCents = 0;
+            let hasMissingCost = false;
+
+            const ingredientLines = entries.map((e, ei) => {
+              const item = inventory.find(i => i.id === e.inventoryItemId);
+              const qty = Number(e.quantity);
+              const unitCost = item?.lastPurchasePrice;
+              if (unitCost == null) {
+                hasMissingCost = true;
+                return (
+                  <div key={ei} className="flex justify-between text-muted-foreground" data-testid={`profitability-ingredient-${vi}-${ei}`}>
+                    <span>{item?.name || "?"} × {qty}</span>
+                    <span>No cost data</span>
+                  </div>
+                );
+              }
+              const lineCost = Math.round(qty * unitCost);
+              totalCostCents += lineCost;
+              return (
+                <div key={ei} className="flex justify-between" data-testid={`profitability-ingredient-${vi}-${ei}`}>
+                  <span>{item?.name || "?"} × {qty} @ {formatMoney(unitCost)}</span>
+                  <span>{formatMoney(lineCost)}</span>
+                </div>
+              );
+            });
+
+            const margin = !hasMissingCost && sellingPriceCents > 0
+              ? ((sellingPriceCents - totalCostCents) / sellingPriceCents * 100)
+              : null;
+
+            return (
+              <div key={wv.tempId} className="text-xs p-2 rounded-lg bg-muted/30 space-y-1" data-testid={`profitability-variant-${vi}`}>
+                <div className="font-medium">{wv.name}</div>
+                {ingredientLines}
+                <Separator />
+                <div className="flex justify-between font-medium">
+                  <span>Total Cost: {hasMissingCost ? "Incomplete" : formatMoney(totalCostCents)}</span>
+                  {margin != null ? (
+                    <span className={margin >= 0 ? "text-green-600" : "text-red-600"}>
+                      {formatMoney(sellingPriceCents)} sell — {margin.toFixed(1)}% margin
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">{formatMoney(sellingPriceCents)} sell</span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
     );
   }

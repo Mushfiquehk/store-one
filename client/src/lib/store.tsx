@@ -13,10 +13,12 @@ import type {
   Employee,
   TimePunch,
   Sale,
+  Invoice,
+  InvoiceLineItem,
   ModifierScaleFactors,
 } from "./db";
 
-export type { Product, Variant, ModifierGroup, Modifier, InventoryItem, BomEntry, Employee, TimePunch, Sale, ModifierScaleFactors };
+export type { Product, Variant, ModifierGroup, Modifier, InventoryItem, BomEntry, Employee, TimePunch, Sale, Invoice, InvoiceLineItem, ModifierScaleFactors };
 
 export type CartItem = {
   instanceId: string;
@@ -41,6 +43,8 @@ type StoreContextType = {
   employees: Employee[];
   timePunches: TimePunch[];
   sales: Sale[];
+  invoices: Invoice[];
+  invoiceLineItems: InvoiceLineItem[];
   integrations: string[];
   productModifierLinks: Record<string, string[]>;
   productModifierScaleFactors: Record<string, ModifierScaleFactors | null>;
@@ -89,6 +93,13 @@ type StoreContextType = {
 
   addSale: (data: Partial<Sale>) => void;
 
+  createInvoiceWithLineItems: (invoiceData: Partial<Invoice>, lineItems: Partial<InvoiceLineItem>[]) => Promise<any>;
+  createInvoiceLineItem: (data: Partial<InvoiceLineItem>) => Promise<any>;
+  updateInvoiceLineItem: (id: string, data: Partial<InvoiceLineItem>) => Promise<any>;
+  deleteInvoiceLineItem: (id: string) => Promise<void>;
+  updateInvoice: (id: string, data: Partial<Invoice>) => Promise<any>;
+  deleteInvoice: (id: string) => Promise<void>;
+
   toggleIntegration: (id: string) => void;
 };
 
@@ -108,6 +119,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const employees = useLiveQuery(() => db.employees.toArray(), []) as Employee[] | undefined;
   const timePunches = useLiveQuery(() => db.timePunches.toArray(), []) as TimePunch[] | undefined;
   const sales = useLiveQuery(() => db.sales.toArray(), []) as Sale[] | undefined;
+  const invoices = useLiveQuery(() => db.invoices.toArray(), []) as Invoice[] | undefined;
+  const invoiceLineItemsList = useLiveQuery(() => db.invoiceLineItems.toArray(), []) as InvoiceLineItem[] | undefined;
 
   const productModifierData = useLiveQuery(async () => {
     const rows = await db.productModifierGroups.toArray();
@@ -177,6 +190,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const addSale = useCallback((data: Partial<Sale>) => { storage.createSale(data); }, []);
 
+  const createInvoiceWithLineItems = useCallback((invoiceData: Partial<Invoice>, lineItems: Partial<InvoiceLineItem>[]) => storage.createInvoiceWithLineItems(invoiceData, lineItems), []);
+  const createInvoiceLineItem = useCallback((data: Partial<InvoiceLineItem>) => storage.createInvoiceLineItem(data), []);
+  const updateInvoiceLineItem = useCallback((id: string, data: Partial<InvoiceLineItem>) => storage.updateInvoiceLineItem(id, data), []);
+  const deleteInvoiceLineItem = useCallback((id: string) => storage.deleteInvoiceLineItem(id), []);
+  const updateInvoice = useCallback((id: string, data: Partial<Invoice>) => storage.updateInvoice(id, data), []);
+  const deleteInvoice = useCallback((id: string) => storage.deleteInvoice(id), []);
+
   const toggleIntegration = useCallback((id: string) => {
     setIntegrations(prev => {
       if (prev.includes(id)) return prev.filter(i => i !== id);
@@ -195,6 +215,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     employees: employees ?? [],
     timePunches: timePunches ?? [],
     sales: sales ?? [],
+    invoices: invoices ?? [],
+    invoiceLineItems: invoiceLineItemsList ?? [],
     integrations,
     productModifierLinks,
     productModifierScaleFactors,
@@ -242,6 +264,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     updateTimePunch,
 
     addSale,
+
+    createInvoiceWithLineItems,
+    createInvoiceLineItem,
+    updateInvoiceLineItem,
+    deleteInvoiceLineItem,
+    updateInvoice,
+    deleteInvoice,
 
     toggleIntegration,
   };
