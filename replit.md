@@ -1,60 +1,99 @@
 # CornerPOS
 
 ## Overview
-Offline-first point-of-sale application built with React + Dexie.js (IndexedDB). Designed to work entirely in the browser with zero server requirements. Supports both simple retail (1:1 SKU) and complex composite/restaurant items with modifiers, BOM recipes, and product-specific modifier pricing.
+Offline-first point-of-sale application built with React + Dexie.js (IndexedDB). Features a central backup server so multiple POS terminals can upload/restore their local data, an admin dashboard showing aggregated metrics, and incremental per-category sync with auto-sync support.
 
 ## Architecture
-- **Frontend-only**: React 19 + TypeScript, Vite, Dexie.js (IndexedDB), Wouter routing, shadcn/ui components, Framer Motion
-- **Database**: IndexedDB via Dexie.js — all data stored in the browser, persists across sessions
-- **No server**: The app runs entirely client-side. Vite serves as the dev server. Production builds output static files.
-- **Offline-first**: All operations read/write directly to IndexedDB. No network calls required.
-- **Sync-ready architecture**: The storage layer (`client/src/lib/local-storage.ts`) provides a clean interface that can be extended with a sync adapter for future multi-device support.
+- **Frontend**: React 19 + TypeScript, Vite, Dexie.js (IndexedDB), Wouter routing, shadcn/ui components, Framer Motion
+- **Backend**: Express server on port 3001 (dev), PostgreSQL via Drizzle ORM for backup storage and sync records
+- **Database**: IndexedDB via Dexie.js for local POS data; PostgreSQL for server-side backup snapshots and sync records
+- **Dev setup**: Vite on port 5000 proxies `/api` requests to Express on port 3001; both run via `concurrently`
+- **Production**: Express serves built static files and API routes from a single process
+- **Offline-first**: All POS operations read/write directly to IndexedDB. Backup/restore is snapshot-based; incremental sync is per-category.
 
 ## Data Model
-- `products` — catalog items with `type: "RETAIL" | "RESTAURANT"` (union type), `isComposite` flag, `availableAsIngredient` flag, and native `attributes: ProductAttributes | null` (tags, tax_exempt)
-- `variants` — SKU-level pricing with `directInventoryId` for 1:1 retail mapping
+
+### Client-side (IndexedDB / Dexie.js)
+All entities include `updatedAt: number` (epoch ms timestamp) and `deletedAt: number | null` for soft-delete support.
+- `products` — catalog items with `type: "RETAIL" | "RESTAURANT"`, `isComposite`, `availableAsIngredient`, native `attributes: ProductAttributes | null`
+- `variants` — SKU-level pricing with `directInventoryId`
 - `modifierGroups` — groupings for modifiers with min/max selection constraints
-- `modifiers` — individual options with `inventoryItemId` (assigned ingredient) and `quantityPerUse` (deduction amount)
-- `productModifierGroups` — many-to-many link between products and modifier groups with native `scaleFactors: ModifierScaleFactors | null` (per-product modifier pricing, keyed by variant ID)
-- `inventoryItems` — raw materials/stock with `currentQuantity` and `lowStockThreshold: number | null`
-- `billOfMaterials` (type: `BomEntry`) — links variants/modifiers to inventory items with quantity deduction, native `scaleFactorMatrix: ScaleFactorMatrix | null` (keyed by variant ID), and optional `sourceProductId` for recipe chaining
+- `modifiers` — individual options with `inventoryItemId` and `quantityPerUse`
+- `productModifierGroups` — many-to-many link with native `scaleFactors: ModifierScaleFactors | null`; compound key `[productId+modifierGroupId]`
+- `inventoryItems` — raw materials/stock with `currentQuantity` and `lowStockThreshold`
+- `billOfMaterials` (BomEntry) — links variants/modifiers to inventory items with quantity deduction and scale factors
 - `employees` — staff with role, payRate, and PIN access
 - `timePunches` — clock in/out records
-- `sales` — completed transactions with native `linesJson: SaleLine[]` (includes `productName`, `variantName` denormalized at sale time, plus full modifier tree)
+- `sales` — completed transactions with native `linesJson: SaleLine[]`
+
+### Server-side (PostgreSQL / Drizzle)
+- `clients` — registered POS terminal instances (id, code, name, created_at)
+- `backups` — full JSON snapshots of a client's IndexedDB data (id, client_id, snapshot JSONB, created_at)
+- `sync_records` — incremental sync records (id, client_id, table_name, record_id, data JSONB, updated_at BIGINT, deleted_at BIGINT); unique on (client_id, table_name, record_id)
+
+## Sync System
+
+### Categories
+- `menu` → products, variants, modifierGroups, productModifierGroups, modifiers
+- `ingredients` → inventoryItems, billOfMaterials
+- `sales` → sales
+
+### Sync Flow
+1. Client collects local records changed since `lastSyncedAt` (using `updatedAt` index)
+2. Sends changes to `POST /api/sync/:category` with `clientCode` and `lastSyncedAt`
+3. Server applies client changes (last-write-wins by `updatedAt`), returns any server-side changes the client is missing
+4. Client applies server changes locally, updates `lastSyncedAt` cursor
+
+### Auto-Sync
+- Configurable interval (default 15 minutes) stored in localStorage (`cornerpos_auto_sync_interval`)
+- Toggle stored in localStorage (`cornerpos_auto_sync`)
+- Syncs all categories on each tick
+
+### Soft Deletes
+- All CRUD operations use soft deletes (`deletedAt = Date.now()`) instead of hard deletes
+- Cascade soft deletes propagate to related entities (e.g., deleting a product soft-deletes its variants, PMG links, and BOM entries)
+- Live queries in `store.tsx` filter out soft-deleted records via `.filter(r => !r.deletedAt)`
 
 ## Key Conventions
-- **Scale factor keys use variant IDs**, not variant names. This prevents data corruption when variants are renamed.
-- **All stringified JSON fields have been eliminated** — every field stores native objects/arrays. No JSON.parse/stringify needed at read/write time.
-- **SaleLine includes denormalized names** (`productName`, `variantName`) captured at sale time, so historical sales display correctly even after product edits/deletes.
-- **Dexie migration history**: v1 (initial), v2 (availableAsIngredient, sourceProductId), v3 (parse stringified JSON → native objects), v4 (rekey scale factors name→ID, trackingConfig→lowStockThreshold, SaleLine denormalization)
+- **Scale factor keys use variant IDs**, not variant names
+- **All stringified JSON fields have been eliminated** — native objects/arrays throughout
+- **SaleLine includes denormalized names** captured at sale time
+- **Dexie migration history**: v1 (initial), v2, v3 (JSON parsing), v4 (rekey scale factors), v5 (add updatedAt/deletedAt indexes)
+- **productModifierGroups sync uses `${productId}::${modifierGroupId}` as recordId** for compound key serialization
 
 ## Key Files
-- `client/src/lib/db.ts` — Dexie.js database definition with IndexedDB schema and migrations (v1–v4)
-- `client/src/lib/local-storage.ts` — CRUD storage layer for all entities
-- `client/src/lib/store.tsx` — React context provider using Dexie live queries for reactive data (single query for productModifierGroups)
-- `shared/schema.ts` — TypeScript type definitions for all entities (canonical reference, mirrors `db.ts` interfaces)
-- `client/src/components/product-wizard.tsx` — 5-step progressive disclosure wizard for product creation
-- `client/src/components/modifier-selector.tsx` — POS modifier selection dialog with product-specific pricing
-- `vite.config.ts` — Vite configuration for dev and production builds
+- `client/src/lib/db.ts` — Dexie.js database definition with IndexedDB schema and migrations (v1–v5)
+- `client/src/lib/local-storage.ts` — CRUD storage layer for all entities (with soft deletes and updatedAt stamping)
+- `client/src/lib/store.tsx` — React context provider using Dexie live queries (filters soft-deleted records)
+- `client/src/lib/sync.ts` — Client-side sync service (syncCategory, syncAll, startAutoSync, stopAutoSync)
+- `client/src/lib/seed-data.ts` — Demo data seeding with updatedAt/deletedAt fields
+- `shared/schema.ts` — TypeScript type definitions for all entities + SYNC_CATEGORY_TABLES mapping
+- `server/index.ts` — Express server entry point with DB initialization (creates clients, backups, sync_records tables)
+- `server/schema.ts` — Drizzle ORM schema for clients, backups, and sync_records tables
+- `server/routes.ts` — API routes for backup, restore, clients list, admin metrics, and incremental sync
+- `server/storage.ts` — Server-side storage interface using Drizzle (backup + sync operations)
+- `server/db.ts` — PostgreSQL connection pool and Drizzle instance
+- `vite.config.ts` — Vite configuration with `/api` proxy to Express
+
+## API Endpoints
+- `POST /api/backup` — Upload a full data snapshot (clientCode + snapshot JSON)
+- `GET /api/backup/:clientCode` — Get latest backup snapshot for a client
+- `GET /api/clients` — List all registered clients with last backup timestamps
+- `GET /api/admin/metrics` — Aggregated metrics across all client backups
+- `POST /api/sync/:category` — Push local changes, receive server-side changes (category: menu, ingredients, sales)
+- `GET /api/sync/:category/status` — Get sync status for a category (requires ?clientCode query param)
 
 ## Pages
-- `/` — POS register (with modifier selection for composite items)
+- `/` — POS register
 - `/start` — Onboarding/getting started
-- `/products` — Tabbed view: Station Menu (with Wizard), Modifiers, Bill of Materials, Bulk Inventory
+- `/products` — Station Menu, Modifiers, Bill of Materials, Bulk Inventory
 - `/employees` — Staff management
 - `/reports` — Sales trends, product mix, inventory status
 - `/integrations` — Third-party connections (placeholder)
-- `/settings` — Tax rate configuration
-
-## Frontend Patterns
-- **Dexie Live Queries**: All data subscriptions use `useLiveQuery` from `dexie-react-hooks` for automatic reactivity
-- **Wizard Design Pattern**: Product creation uses progressive disclosure; sized retail items include per-variant inventory linking
-- **Product Type Values**: Always uppercase — `RETAIL` or `RESTAURANT` (union type enforced in db.ts)
-- **Product-Specific Modifier Pricing**: Modifier prices stored on `productModifierGroups.scaleFactors`, keyed by variant ID
-- **Auto-Scale BOM**: Define base recipe for one size, proportionally scale to other sizes
-- **Recipe Override by Modifier Group**: BOM entries can skip deduction when a modifier from a linked group is selected
+- `/settings` — Tax rate, Incremental Sync (per-category controls + auto-sync), Full Backup & Restore
+- `/admin` — Admin dashboard with aggregated metrics and client list
 
 ## Development
-- `npm run dev` — Start Vite dev server on port 5000
-- `npm run build` — Build static output to `dist/public`
-- No database setup required — IndexedDB is created automatically in the browser
+- Workflow runs: `concurrently "vite dev --host 0.0.0.0 --port 5000" "npx tsx server/index.ts"`
+- Vite proxies `/api` to Express on port 3001
+- PostgreSQL database provisioned via Replit (DATABASE_URL env var)

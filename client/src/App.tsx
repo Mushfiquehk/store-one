@@ -13,6 +13,7 @@ import IntegrationsPage from "@/pages/integrations";
 import SettingsPage from "@/pages/settings";
 import EmployeesPage from "@/pages/employees";
 import DemoPage from "@/pages/demo";
+import AdminPage from "@/pages/admin";
 
 function Router() {
   return (
@@ -25,6 +26,7 @@ function Router() {
       <Route path="/employees" component={EmployeesPage} />
       <Route path="/settings" component={SettingsPage} />
       <Route path="/demo" component={DemoPage} />
+      <Route path="/admin" component={AdminPage} />
 
       <Route component={NotFound} />
     </Switch>

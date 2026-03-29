@@ -16,6 +16,8 @@ export interface Product {
   availableAsIngredient: boolean;
   attributes: ProductAttributes | null;
   createdAt: string | null;
+  updatedAt: number;
+  deletedAt: number | null;
 }
 
 export interface Variant {
@@ -25,6 +27,8 @@ export interface Variant {
   name: string;
   basePrice: number;
   directInventoryId: string | null;
+  updatedAt: number;
+  deletedAt: number | null;
 }
 
 export interface ModifierGroup {
@@ -32,12 +36,16 @@ export interface ModifierGroup {
   name: string;
   minSelections: number;
   maxSelections: number;
+  updatedAt: number;
+  deletedAt: number | null;
 }
 
 export interface ProductModifierGroup {
   productId: string;
   modifierGroupId: string;
   scaleFactors: ModifierScaleFactors | null;
+  updatedAt: number;
+  deletedAt: number | null;
 }
 
 export interface Modifier {
@@ -47,6 +55,8 @@ export interface Modifier {
   baseUpcharge: number;
   inventoryItemId: string | null;
   quantityPerUse: number | null;
+  updatedAt: number;
+  deletedAt: number | null;
 }
 
 export interface InventoryItem {
@@ -56,6 +66,8 @@ export interface InventoryItem {
   currentQuantity: number;
   lowStockThreshold: number | null;
   lastPurchasePrice: number | null;
+  updatedAt: number;
+  deletedAt: number | null;
 }
 
 export interface Invoice {
@@ -65,6 +77,8 @@ export interface Invoice {
   date: string;
   status: string;
   notes: string;
+  updatedAt: number;
+  deletedAt: number | null;
 }
 
 export interface InvoiceLineItem {
@@ -74,6 +88,8 @@ export interface InvoiceLineItem {
   description: string;
   quantity: number;
   unitPriceCents: number;
+  updatedAt: number;
+  deletedAt: number | null;
 }
 
 export interface BomEntry {
@@ -85,6 +101,8 @@ export interface BomEntry {
   quantityDeducted: number;
   scaleFactorMatrix: ScaleFactorMatrix | null;
   overrideModifierGroupId: string | null;
+  updatedAt: number;
+  deletedAt: number | null;
 }
 
 export interface Employee {
@@ -93,6 +111,8 @@ export interface Employee {
   role: string;
   payRate: number;
   pin: string;
+  updatedAt: number;
+  deletedAt: number | null;
 }
 
 export interface TimePunch {
@@ -100,6 +120,8 @@ export interface TimePunch {
   employeeId: string;
   timeIn: number;
   timeOut: number | null;
+  updatedAt: number;
+  deletedAt: number | null;
 }
 
 export interface Sale {
@@ -111,6 +133,8 @@ export interface Sale {
   paymentMethod: string;
   status: string;
   linesJson: SaleLine[];
+  updatedAt: number;
+  deletedAt: number | null;
 }
 
 class PosDatabase extends Dexie {
@@ -168,7 +192,7 @@ class PosDatabase extends Dexie {
     });
 
     this.version(3).stores({}).upgrade(async tx => {
-      function safeParse(val: any): any {
+      function safeParse(val: unknown): unknown {
         if (typeof val !== "string") return val;
         try { return JSON.parse(val); } catch { return val; }
       }
@@ -193,7 +217,7 @@ class PosDatabase extends Dexie {
 
       await tx.table("sales").toCollection().modify(sale => {
         if (typeof sale.linesJson === "string") {
-          sale.linesJson = safeParse(sale.linesJson) ?? [];
+          sale.linesJson = (safeParse(sale.linesJson) as SaleLine[]) ?? [];
         }
       });
     });
@@ -238,7 +262,7 @@ class PosDatabase extends Dexie {
         if (!entry.scaleFactorMatrix) return;
         const nameToId: Record<string, string> = {};
         if (entry.sourceType === "VARIANT") {
-          const v = allVariants.find((vr: any) => vr.id === entry.sourceId);
+          const v = allVariants.find((vr: { id: string; productId: string }) => vr.id === entry.sourceId);
           if (v) {
             for (const pv of variantsByProduct[v.productId] || []) nameToId[pv.name] = pv.id;
           }
@@ -267,7 +291,7 @@ class PosDatabase extends Dexie {
               if (config && typeof config.low_stock_alert === "number") {
                 threshold = config.low_stock_alert;
               }
-            } catch {}
+            } catch { /* ignore parse errors */ }
           }
           item.lowStockThreshold = threshold;
           delete item.trackingConfig;
@@ -285,9 +309,31 @@ class PosDatabase extends Dexie {
     });
 
     this.version(5).stores({
-      invoices: "id, supplierName, invoiceNumber, date",
-      invoiceLineItems: "id, invoiceId, inventoryItemId",
+      invoices: "id, supplierName, invoiceNumber, date, updatedAt",
+      invoiceLineItems: "id, invoiceId, inventoryItemId, updatedAt",
+      products: "id, name, type, availableAsIngredient, updatedAt",
+      variants: "id, productId, sku, updatedAt",
+      modifierGroups: "id, name, updatedAt",
+      productModifierGroups: "[productId+modifierGroupId], productId, modifierGroupId, updatedAt",
+      modifiers: "id, modifierGroupId, updatedAt",
+      inventoryItems: "id, name, updatedAt",
+      billOfMaterials: "id, sourceType, sourceId, inventoryItemId, sourceProductId, [sourceType+sourceId], updatedAt",
+      employees: "id, name, updatedAt",
+      timePunches: "id, employeeId, updatedAt",
+      sales: "id, createdAt, updatedAt",
     }).upgrade(async tx => {
+      const now = Date.now();
+      const tables = [
+        "products", "variants", "modifierGroups", "productModifierGroups",
+        "modifiers", "inventoryItems", "billOfMaterials", "employees",
+        "timePunches", "sales",
+      ];
+      for (const tableName of tables) {
+        await tx.table(tableName).toCollection().modify(record => {
+          if (record.updatedAt === undefined) record.updatedAt = now;
+          if (record.deletedAt === undefined) record.deletedAt = null;
+        });
+      }
       await tx.table("inventoryItems").toCollection().modify(item => {
         if (item.lastPurchasePrice === undefined) {
           item.lastPurchasePrice = null;

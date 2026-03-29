@@ -22,6 +22,22 @@ export type SaleLine = {
   unitPrice: number;
 };
 
+export type SyncCategory = "menu" | "ingredients" | "sales";
+
+export const SYNC_CATEGORY_TABLES: Record<SyncCategory, string[]> = {
+  menu: ["products", "variants", "modifierGroups", "productModifierGroups", "modifiers"],
+  ingredients: ["inventoryItems", "billOfMaterials"],
+  sales: ["sales"],
+};
+
+export type SyncRecord = {
+  tableName: string;
+  recordId: string;
+  data: Record<string, unknown>;
+  updatedAt: number;
+  deletedAt: number | null;
+};
+
 export type Product = {
   id: string;
   name: string;
@@ -30,6 +46,8 @@ export type Product = {
   availableAsIngredient: boolean;
   attributes: ProductAttributes | null;
   createdAt: string | null;
+  updatedAt: number;
+  deletedAt: number | null;
 };
 
 export type Variant = {
@@ -39,6 +57,8 @@ export type Variant = {
   name: string;
   basePrice: number;
   directInventoryId: string | null;
+  updatedAt: number;
+  deletedAt: number | null;
 };
 
 export type ModifierGroup = {
@@ -46,12 +66,16 @@ export type ModifierGroup = {
   name: string;
   minSelections: number;
   maxSelections: number;
+  updatedAt: number;
+  deletedAt: number | null;
 };
 
 export type ProductModifierGroup = {
   productId: string;
   modifierGroupId: string;
   scaleFactors: ModifierScaleFactors | null;
+  updatedAt: number;
+  deletedAt: number | null;
 };
 
 export type Modifier = {
@@ -61,6 +85,8 @@ export type Modifier = {
   baseUpcharge: number;
   inventoryItemId: string | null;
   quantityPerUse: number | null;
+  updatedAt: number;
+  deletedAt: number | null;
 };
 
 export type InventoryItem = {
@@ -70,6 +96,8 @@ export type InventoryItem = {
   currentQuantity: number;
   lowStockThreshold: number | null;
   lastPurchasePrice: number | null;
+  updatedAt: number;
+  deletedAt: number | null;
 };
 
 export type Invoice = {
@@ -79,6 +107,8 @@ export type Invoice = {
   date: string;
   status: string;
   notes: string;
+  updatedAt: number;
+  deletedAt: number | null;
 };
 
 export type InvoiceLineItem = {
@@ -88,6 +118,8 @@ export type InvoiceLineItem = {
   description: string;
   quantity: number;
   unitPriceCents: number;
+  updatedAt: number;
+  deletedAt: number | null;
 };
 
 export type BomEntry = {
@@ -99,6 +131,8 @@ export type BomEntry = {
   quantityDeducted: number;
   scaleFactorMatrix: ScaleFactorMatrix | null;
   overrideModifierGroupId: string | null;
+  updatedAt: number;
+  deletedAt: number | null;
 };
 
 export type Employee = {
@@ -107,6 +141,8 @@ export type Employee = {
   role: string;
   payRate: number;
   pin: string;
+  updatedAt: number;
+  deletedAt: number | null;
 };
 
 export type TimePunch = {
@@ -114,6 +150,8 @@ export type TimePunch = {
   employeeId: string;
   timeIn: number;
   timeOut: number | null;
+  updatedAt: number;
+  deletedAt: number | null;
 };
 
 export type Sale = {
@@ -125,4 +163,6 @@ export type Sale = {
   paymentMethod: string;
   status: string;
   linesJson: SaleLine[];
+  updatedAt: number;
+  deletedAt: number | null;
 };

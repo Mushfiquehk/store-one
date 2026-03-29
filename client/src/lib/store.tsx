@@ -110,20 +110,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const [dbReady, setDbReady] = useState(false);
 
-  const products = useLiveQuery(() => db.products.toArray(), []) as Product[] | undefined;
-  const variants = useLiveQuery(() => db.variants.toArray(), []) as Variant[] | undefined;
-  const modifierGroupsList = useLiveQuery(() => db.modifierGroups.toArray(), []) as ModifierGroup[] | undefined;
-  const modifiersList = useLiveQuery(() => db.modifiers.toArray(), []) as Modifier[] | undefined;
-  const inventory = useLiveQuery(() => db.inventoryItems.toArray(), []) as InventoryItem[] | undefined;
-  const bom = useLiveQuery(() => db.billOfMaterials.toArray(), []) as BomEntry[] | undefined;
-  const employees = useLiveQuery(() => db.employees.toArray(), []) as Employee[] | undefined;
-  const timePunches = useLiveQuery(() => db.timePunches.toArray(), []) as TimePunch[] | undefined;
-  const sales = useLiveQuery(() => db.sales.toArray(), []) as Sale[] | undefined;
-  const invoices = useLiveQuery(() => db.invoices.toArray(), []) as Invoice[] | undefined;
-  const invoiceLineItemsList = useLiveQuery(() => db.invoiceLineItems.toArray(), []) as InvoiceLineItem[] | undefined;
+  const products = useLiveQuery(() => db.products.filter(r => !r.deletedAt).toArray(), []) as Product[] | undefined;
+  const variants = useLiveQuery(() => db.variants.filter(r => !r.deletedAt).toArray(), []) as Variant[] | undefined;
+  const modifierGroupsList = useLiveQuery(() => db.modifierGroups.filter(r => !r.deletedAt).toArray(), []) as ModifierGroup[] | undefined;
+  const modifiersList = useLiveQuery(() => db.modifiers.filter(r => !r.deletedAt).toArray(), []) as Modifier[] | undefined;
+  const inventory = useLiveQuery(() => db.inventoryItems.filter(r => !r.deletedAt).toArray(), []) as InventoryItem[] | undefined;
+  const bom = useLiveQuery(() => db.billOfMaterials.filter(r => !r.deletedAt).toArray(), []) as BomEntry[] | undefined;
+  const employees = useLiveQuery(() => db.employees.filter(r => !r.deletedAt).toArray(), []) as Employee[] | undefined;
+  const timePunches = useLiveQuery(() => db.timePunches.filter(r => !r.deletedAt).toArray(), []) as TimePunch[] | undefined;
+  const sales = useLiveQuery(() => db.sales.filter(r => !r.deletedAt).toArray(), []) as Sale[] | undefined;
+  const invoices = useLiveQuery(() => db.invoices.filter(r => !r.deletedAt).toArray(), []) as Invoice[] | undefined;
+  const invoiceLineItemsList = useLiveQuery(() => db.invoiceLineItems.filter(r => !r.deletedAt).toArray(), []) as InvoiceLineItem[] | undefined;
 
   const productModifierData = useLiveQuery(async () => {
-    const rows = await db.productModifierGroups.toArray();
+    const rows = await db.productModifierGroups.filter(r => !r.deletedAt).toArray();
     const links: Record<string, string[]> = {};
     const sf: Record<string, ModifierScaleFactors | null> = {};
     for (const r of rows) {

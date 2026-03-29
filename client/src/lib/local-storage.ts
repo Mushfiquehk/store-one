@@ -14,12 +14,17 @@ import type {
   ModifierScaleFactors,
 } from "./db";
 
+function notDeleted<T extends { deletedAt: number | null }>(items: T[]): T[] {
+  return items.filter(item => !item.deletedAt);
+}
+
 export const storage = {
   async getProducts(): Promise<Product[]> {
-    return db.products.toArray();
+    return notDeleted(await db.products.toArray());
   },
 
   async createProduct(data: Partial<Product>): Promise<Product> {
+    const now = Date.now();
     const product: Product = {
       id: data.id!,
       name: data.name!,
@@ -28,37 +33,41 @@ export const storage = {
       availableAsIngredient: data.availableAsIngredient ?? false,
       attributes: data.attributes ?? null,
       createdAt: data.createdAt ?? new Date().toISOString(),
+      updatedAt: data.updatedAt ?? now,
+      deletedAt: null,
     };
     await db.products.put(product);
     return product;
   },
 
   async updateProduct(id: string, data: Partial<Product>): Promise<Product | undefined> {
-    await db.products.update(id, data);
+    await db.products.update(id, { ...data, updatedAt: Date.now() });
     return db.products.get(id);
   },
 
   async deleteProduct(id: string): Promise<void> {
+    const now = Date.now();
     await db.transaction("rw", [db.products, db.variants, db.productModifierGroups, db.billOfMaterials], async () => {
-      const variantIds = (await db.variants.where("productId").equals(id).toArray()).map(v => v.id);
-      for (const vid of variantIds) {
-        await db.billOfMaterials.where("[sourceType+sourceId]").equals(["VARIANT", vid]).delete();
+      const variants = await db.variants.where("productId").equals(id).toArray();
+      for (const v of variants) {
+        await db.billOfMaterials.where("[sourceType+sourceId]").equals(["VARIANT", v.id]).modify({ deletedAt: now, updatedAt: now });
+        await db.variants.update(v.id, { deletedAt: now, updatedAt: now });
       }
-      await db.variants.bulkDelete(variantIds);
-      await db.productModifierGroups.where("productId").equals(id).delete();
-      await db.billOfMaterials.where("sourceProductId").equals(id).delete();
-      await db.products.delete(id);
+      await db.productModifierGroups.where("productId").equals(id).modify({ deletedAt: now, updatedAt: now });
+      await db.billOfMaterials.where("sourceProductId").equals(id).modify({ deletedAt: now, updatedAt: now });
+      await db.products.update(id, { deletedAt: now, updatedAt: now });
     });
   },
 
   async getVariants(productId?: string): Promise<Variant[]> {
     if (productId) {
-      return db.variants.where("productId").equals(productId).toArray();
+      return notDeleted(await db.variants.where("productId").equals(productId).toArray());
     }
-    return db.variants.toArray();
+    return notDeleted(await db.variants.toArray());
   },
 
   async createVariant(data: Partial<Variant>): Promise<Variant> {
+    const now = Date.now();
     const variant: Variant = {
       id: data.id!,
       productId: data.productId!,
@@ -66,59 +75,67 @@ export const storage = {
       name: data.name!,
       basePrice: data.basePrice!,
       directInventoryId: data.directInventoryId ?? null,
+      updatedAt: data.updatedAt ?? now,
+      deletedAt: null,
     };
     await db.variants.put(variant);
     return variant;
   },
 
   async updateVariant(id: string, data: Partial<Variant>): Promise<Variant | undefined> {
-    await db.variants.update(id, data);
+    await db.variants.update(id, { ...data, updatedAt: Date.now() });
     return db.variants.get(id);
   },
 
   async deleteVariant(id: string): Promise<void> {
+    const now = Date.now();
     await db.transaction("rw", [db.variants, db.billOfMaterials], async () => {
-      await db.billOfMaterials.where("[sourceType+sourceId]").equals(["VARIANT", id]).delete();
-      await db.variants.delete(id);
+      await db.billOfMaterials.where("[sourceType+sourceId]").equals(["VARIANT", id]).modify({ deletedAt: now, updatedAt: now });
+      await db.variants.update(id, { deletedAt: now, updatedAt: now });
     });
   },
 
   async getModifierGroups(): Promise<ModifierGroup[]> {
-    return db.modifierGroups.toArray();
+    return notDeleted(await db.modifierGroups.toArray());
   },
 
   async createModifierGroup(data: Partial<ModifierGroup>): Promise<ModifierGroup> {
+    const now = Date.now();
     const group: ModifierGroup = {
       id: data.id!,
       name: data.name!,
       minSelections: data.minSelections ?? 0,
       maxSelections: data.maxSelections ?? 0,
+      updatedAt: data.updatedAt ?? now,
+      deletedAt: null,
     };
     await db.modifierGroups.put(group);
     return group;
   },
 
   async updateModifierGroup(id: string, data: Partial<ModifierGroup>): Promise<ModifierGroup | undefined> {
-    await db.modifierGroups.update(id, data);
+    await db.modifierGroups.update(id, { ...data, updatedAt: Date.now() });
     return db.modifierGroups.get(id);
   },
 
   async deleteModifierGroup(id: string): Promise<void> {
+    const now = Date.now();
     await db.transaction("rw", [db.modifierGroups, db.modifiers, db.productModifierGroups], async () => {
-      await db.modifiers.where("modifierGroupId").equals(id).delete();
-      await db.productModifierGroups.where("modifierGroupId").equals(id).delete();
-      await db.modifierGroups.delete(id);
+      await db.modifiers.where("modifierGroupId").equals(id).modify({ deletedAt: now, updatedAt: now });
+      await db.productModifierGroups.where("modifierGroupId").equals(id).modify({ deletedAt: now, updatedAt: now });
+      await db.modifierGroups.update(id, { deletedAt: now, updatedAt: now });
     });
   },
 
   async getModifiers(groupId?: string): Promise<Modifier[]> {
     if (groupId) {
-      return db.modifiers.where("modifierGroupId").equals(groupId).toArray();
+      return notDeleted(await db.modifiers.where("modifierGroupId").equals(groupId).toArray());
     }
-    return db.modifiers.toArray();
+    return notDeleted(await db.modifiers.toArray());
   },
 
   async createModifier(data: Partial<Modifier>): Promise<Modifier> {
+    const now = Date.now();
     const modifier: Modifier = {
       id: data.id!,
       modifierGroupId: data.modifierGroupId!,
@@ -126,22 +143,25 @@ export const storage = {
       baseUpcharge: data.baseUpcharge ?? 0,
       inventoryItemId: data.inventoryItemId ?? null,
       quantityPerUse: data.quantityPerUse ?? null,
+      updatedAt: data.updatedAt ?? now,
+      deletedAt: null,
     };
     await db.modifiers.put(modifier);
     return modifier;
   },
 
   async updateModifier(id: string, data: Partial<Modifier>): Promise<Modifier | undefined> {
-    await db.modifiers.update(id, data);
+    await db.modifiers.update(id, { ...data, updatedAt: Date.now() });
     return db.modifiers.get(id);
   },
 
   async deleteModifier(id: string): Promise<void> {
-    await db.modifiers.delete(id);
+    const now = Date.now();
+    await db.modifiers.update(id, { deletedAt: now, updatedAt: now });
   },
 
   async getAllProductModifierGroupLinks(): Promise<Record<string, string[]>> {
-    const rows = await db.productModifierGroups.toArray();
+    const rows = notDeleted(await db.productModifierGroups.toArray());
     const map: Record<string, string[]> = {};
     for (const r of rows) {
       if (!map[r.productId]) map[r.productId] = [];
@@ -151,30 +171,44 @@ export const storage = {
   },
 
   async getProductModifierGroups(productId: string): Promise<string[]> {
-    const rows = await db.productModifierGroups.where("productId").equals(productId).toArray();
+    const rows = notDeleted(await db.productModifierGroups.where("productId").equals(productId).toArray());
     return rows.map(r => r.modifierGroupId);
   },
 
   async setProductModifierGroups(productId: string, groupIds: string[]): Promise<void> {
+    const now = Date.now();
     await db.transaction("rw", db.productModifierGroups, async () => {
       const existing = await db.productModifierGroups.where("productId").equals(productId).toArray();
-      const existingScaleFactors: Record<string, ModifierScaleFactors | null> = {};
+      const existingMap = new Map(existing.map(row => [row.modifierGroupId, row]));
+      const newSet = new Set(groupIds);
+
       for (const row of existing) {
-        existingScaleFactors[row.modifierGroupId] = row.scaleFactors;
+        if (!newSet.has(row.modifierGroupId) && !row.deletedAt) {
+          await db.productModifierGroups.update([productId, row.modifierGroupId], { deletedAt: now, updatedAt: now });
+        }
       }
-      await db.productModifierGroups.where("productId").equals(productId).delete();
+
       for (const gid of groupIds) {
-        await db.productModifierGroups.put({
-          productId,
-          modifierGroupId: gid,
-          scaleFactors: existingScaleFactors[gid] || null,
-        });
+        const existingRow = existingMap.get(gid);
+        if (existingRow) {
+          if (existingRow.deletedAt) {
+            await db.productModifierGroups.update([productId, gid], { deletedAt: null, updatedAt: now });
+          }
+        } else {
+          await db.productModifierGroups.put({
+            productId,
+            modifierGroupId: gid,
+            scaleFactors: null,
+            updatedAt: now,
+            deletedAt: null,
+          });
+        }
       }
     });
   },
 
   async getAllProductModifierScaleFactors(): Promise<Record<string, ModifierScaleFactors | null>> {
-    const rows = await db.productModifierGroups.toArray();
+    const rows = notDeleted(await db.productModifierGroups.toArray());
     const map: Record<string, ModifierScaleFactors | null> = {};
     for (const r of rows) {
       if (r.scaleFactors) {
@@ -185,14 +219,15 @@ export const storage = {
   },
 
   async setProductModifierScaleFactors(productId: string, modifierGroupId: string, scaleFactors: ModifierScaleFactors | null): Promise<void> {
-    await db.productModifierGroups.update([productId, modifierGroupId], { scaleFactors });
+    await db.productModifierGroups.update([productId, modifierGroupId], { scaleFactors, updatedAt: Date.now() });
   },
 
   async getInventoryItems(): Promise<InventoryItem[]> {
-    return db.inventoryItems.toArray();
+    return notDeleted(await db.inventoryItems.toArray());
   },
 
   async createInventoryItem(data: Partial<InventoryItem>): Promise<InventoryItem> {
+    const now = Date.now();
     const item: InventoryItem = {
       id: data.id!,
       name: data.name!,
@@ -200,13 +235,15 @@ export const storage = {
       currentQuantity: data.currentQuantity ?? 0,
       lowStockThreshold: data.lowStockThreshold ?? null,
       lastPurchasePrice: data.lastPurchasePrice ?? null,
+      updatedAt: data.updatedAt ?? now,
+      deletedAt: null,
     };
     await db.inventoryItems.put(item);
     return item;
   },
 
   async updateInventoryItem(id: string, data: Partial<InventoryItem>): Promise<InventoryItem | undefined> {
-    await db.inventoryItems.update(id, data);
+    await db.inventoryItems.update(id, { ...data, updatedAt: Date.now() });
     return db.inventoryItems.get(id);
   },
 
@@ -214,25 +251,27 @@ export const storage = {
     const item = await db.inventoryItems.get(id);
     if (!item) return undefined;
     const newQty = Math.max(0, item.currentQuantity + delta);
-    await db.inventoryItems.update(id, { currentQuantity: newQty });
+    await db.inventoryItems.update(id, { currentQuantity: newQty, updatedAt: Date.now() });
     return db.inventoryItems.get(id);
   },
 
   async deleteInventoryItem(id: string): Promise<void> {
+    const now = Date.now();
     await db.transaction("rw", [db.inventoryItems, db.billOfMaterials], async () => {
-      await db.billOfMaterials.where("inventoryItemId").equals(id).delete();
-      await db.inventoryItems.delete(id);
+      await db.billOfMaterials.where("inventoryItemId").equals(id).modify({ deletedAt: now, updatedAt: now });
+      await db.inventoryItems.update(id, { deletedAt: now, updatedAt: now });
     });
   },
 
   async getBom(sourceType?: string, sourceId?: string): Promise<BomEntry[]> {
     if (sourceType && sourceId) {
-      return db.billOfMaterials.where("[sourceType+sourceId]").equals([sourceType, sourceId]).toArray();
+      return notDeleted(await db.billOfMaterials.where("[sourceType+sourceId]").equals([sourceType, sourceId]).toArray());
     }
-    return db.billOfMaterials.toArray();
+    return notDeleted(await db.billOfMaterials.toArray());
   },
 
   async createBom(data: Partial<BomEntry>): Promise<BomEntry> {
+    const now = Date.now();
     const entry: BomEntry = {
       id: data.id!,
       sourceType: data.sourceType!,
@@ -242,73 +281,84 @@ export const storage = {
       quantityDeducted: data.quantityDeducted!,
       scaleFactorMatrix: data.scaleFactorMatrix ?? null,
       overrideModifierGroupId: data.overrideModifierGroupId ?? null,
+      updatedAt: data.updatedAt ?? now,
+      deletedAt: null,
     };
     await db.billOfMaterials.put(entry);
     return entry;
   },
 
   async updateBom(id: string, data: Partial<BomEntry>): Promise<BomEntry | undefined> {
-    await db.billOfMaterials.update(id, data);
+    await db.billOfMaterials.update(id, { ...data, updatedAt: Date.now() });
     return db.billOfMaterials.get(id);
   },
 
   async deleteBom(id: string): Promise<void> {
-    await db.billOfMaterials.delete(id);
+    const now = Date.now();
+    await db.billOfMaterials.update(id, { deletedAt: now, updatedAt: now });
   },
 
   async getEmployees(): Promise<Employee[]> {
-    return db.employees.toArray();
+    return notDeleted(await db.employees.toArray());
   },
 
   async createEmployee(data: Partial<Employee>): Promise<Employee> {
+    const now = Date.now();
     const employee: Employee = {
       id: data.id!,
       name: data.name!,
       role: data.role!,
       payRate: data.payRate!,
       pin: data.pin!,
+      updatedAt: data.updatedAt ?? now,
+      deletedAt: null,
     };
     await db.employees.put(employee);
     return employee;
   },
 
   async updateEmployee(id: string, data: Partial<Employee>): Promise<Employee | undefined> {
-    await db.employees.update(id, data);
+    await db.employees.update(id, { ...data, updatedAt: Date.now() });
     return db.employees.get(id);
   },
 
   async deleteEmployee(id: string): Promise<void> {
-    await db.employees.delete(id);
+    const now = Date.now();
+    await db.employees.update(id, { deletedAt: now, updatedAt: now });
   },
 
   async getTimePunches(employeeId?: string): Promise<TimePunch[]> {
     if (employeeId) {
-      return db.timePunches.where("employeeId").equals(employeeId).toArray();
+      return notDeleted(await db.timePunches.where("employeeId").equals(employeeId).toArray());
     }
-    return db.timePunches.toArray();
+    return notDeleted(await db.timePunches.toArray());
   },
 
   async createTimePunch(data: Partial<TimePunch>): Promise<TimePunch> {
+    const now = Date.now();
     const punch: TimePunch = {
       id: data.id!,
       employeeId: data.employeeId!,
       timeIn: data.timeIn!,
       timeOut: data.timeOut ?? null,
+      updatedAt: data.updatedAt ?? now,
+      deletedAt: null,
     };
     await db.timePunches.put(punch);
     return punch;
   },
 
   async updateTimePunch(id: string, data: Partial<TimePunch>): Promise<TimePunch | undefined> {
-    await db.timePunches.update(id, data);
+    await db.timePunches.update(id, { ...data, updatedAt: Date.now() });
     return db.timePunches.get(id);
   },
 
   async getSales(): Promise<Sale[]> {
-    return db.sales.toArray();
+    return notDeleted(await db.sales.toArray());
   },
 
   async createSale(data: Partial<Sale>): Promise<Sale> {
+    const now = Date.now();
     const sale: Sale = {
       id: data.id!,
       createdAt: data.createdAt!,
@@ -318,13 +368,15 @@ export const storage = {
       paymentMethod: data.paymentMethod!,
       status: data.status!,
       linesJson: data.linesJson!,
+      updatedAt: data.updatedAt ?? now,
+      deletedAt: null,
     };
     await db.sales.put(sale);
     return sale;
   },
 
   async getInvoices(): Promise<Invoice[]> {
-    return db.invoices.toArray();
+    return notDeleted(await db.invoices.toArray());
   },
 
   async getInvoice(id: string): Promise<Invoice | undefined> {
@@ -333,15 +385,16 @@ export const storage = {
 
   async getInvoiceLineItems(invoiceId?: string): Promise<InvoiceLineItem[]> {
     if (invoiceId) {
-      return db.invoiceLineItems.where("invoiceId").equals(invoiceId).toArray();
+      return notDeleted(await db.invoiceLineItems.where("invoiceId").equals(invoiceId).toArray());
     }
-    return db.invoiceLineItems.toArray();
+    return notDeleted(await db.invoiceLineItems.toArray());
   },
 
   async createInvoiceWithLineItems(
     invoiceData: Partial<Invoice>,
     lineItems: Partial<InvoiceLineItem>[]
   ): Promise<{ invoice: Invoice; lineItems: InvoiceLineItem[] }> {
+    const now = Date.now();
     const invoice: Invoice = {
       id: invoiceData.id!,
       supplierName: invoiceData.supplierName!,
@@ -349,6 +402,8 @@ export const storage = {
       date: invoiceData.date!,
       status: invoiceData.status ?? "recorded",
       notes: invoiceData.notes ?? "",
+      updatedAt: now,
+      deletedAt: null,
     };
 
     const createdLineItems: InvoiceLineItem[] = [];
@@ -364,6 +419,8 @@ export const storage = {
           description: li.description ?? "",
           quantity: li.quantity!,
           unitPriceCents: li.unitPriceCents!,
+          updatedAt: now,
+          deletedAt: null,
         };
         await db.invoiceLineItems.put(lineItem);
         createdLineItems.push(lineItem);
@@ -373,6 +430,7 @@ export const storage = {
           await db.inventoryItems.update(existingItem.id, {
             lastPurchasePrice: lineItem.unitPriceCents,
             currentQuantity: existingItem.currentQuantity + lineItem.quantity,
+            updatedAt: now,
           });
         } else {
           const newItem: InventoryItem = {
@@ -382,6 +440,8 @@ export const storage = {
             currentQuantity: lineItem.quantity,
             lowStockThreshold: null,
             lastPurchasePrice: lineItem.unitPriceCents,
+            updatedAt: now,
+            deletedAt: null,
           };
           await db.inventoryItems.put(newItem);
         }
@@ -392,6 +452,7 @@ export const storage = {
   },
 
   async createInvoiceLineItem(data: Partial<InvoiceLineItem>): Promise<InvoiceLineItem> {
+    const now = Date.now();
     const lineItem: InvoiceLineItem = {
       id: data.id!,
       invoiceId: data.invoiceId!,
@@ -399,6 +460,8 @@ export const storage = {
       description: data.description ?? "",
       quantity: data.quantity!,
       unitPriceCents: data.unitPriceCents!,
+      updatedAt: now,
+      deletedAt: null,
     };
 
     await db.transaction("rw", [db.invoiceLineItems, db.inventoryItems], async () => {
@@ -409,6 +472,7 @@ export const storage = {
         await db.inventoryItems.update(existingItem.id, {
           lastPurchasePrice: lineItem.unitPriceCents,
           currentQuantity: existingItem.currentQuantity + lineItem.quantity,
+          updatedAt: now,
         });
       } else {
         const newItem: InventoryItem = {
@@ -418,6 +482,8 @@ export const storage = {
           currentQuantity: lineItem.quantity,
           lowStockThreshold: null,
           lastPurchasePrice: lineItem.unitPriceCents,
+          updatedAt: now,
+          deletedAt: null,
         };
         await db.inventoryItems.put(newItem);
       }
@@ -427,23 +493,25 @@ export const storage = {
   },
 
   async updateInvoiceLineItem(id: string, data: Partial<InvoiceLineItem>): Promise<InvoiceLineItem | undefined> {
-    await db.invoiceLineItems.update(id, data);
+    await db.invoiceLineItems.update(id, { ...data, updatedAt: Date.now() });
     return db.invoiceLineItems.get(id);
   },
 
   async deleteInvoiceLineItem(id: string): Promise<void> {
-    await db.invoiceLineItems.delete(id);
+    const now = Date.now();
+    await db.invoiceLineItems.update(id, { deletedAt: now, updatedAt: now });
   },
 
   async updateInvoice(id: string, data: Partial<Invoice>): Promise<Invoice | undefined> {
-    await db.invoices.update(id, data);
+    await db.invoices.update(id, { ...data, updatedAt: Date.now() });
     return db.invoices.get(id);
   },
 
   async deleteInvoice(id: string): Promise<void> {
+    const now = Date.now();
     await db.transaction("rw", [db.invoices, db.invoiceLineItems], async () => {
-      await db.invoiceLineItems.where("invoiceId").equals(id).delete();
-      await db.invoices.delete(id);
+      await db.invoiceLineItems.where("invoiceId").equals(id).modify({ deletedAt: now, updatedAt: now });
+      await db.invoices.update(id, { deletedAt: now, updatedAt: now });
     });
   },
 };

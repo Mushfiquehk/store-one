@@ -1,0 +1,154 @@
+import { Router, type Request, type Response } from "express";
+import { storage } from "./storage";
+import { z } from "zod";
+import { SYNC_CATEGORY_TABLES, type SyncCategory } from "../shared/schema";
+
+export const router = Router();
+
+const backupBodySchema = z.object({
+  clientCode: z.string().min(1),
+  clientName: z.string().optional(),
+  snapshot: z.object({
+    products: z.array(z.record(z.string(), z.unknown())),
+    variants: z.array(z.record(z.string(), z.unknown())),
+    modifierGroups: z.array(z.record(z.string(), z.unknown())),
+    productModifierGroups: z.array(z.record(z.string(), z.unknown())),
+    modifiers: z.array(z.record(z.string(), z.unknown())),
+    inventoryItems: z.array(z.record(z.string(), z.unknown())),
+    billOfMaterials: z.array(z.record(z.string(), z.unknown())),
+    employees: z.array(z.record(z.string(), z.unknown())),
+    timePunches: z.array(z.record(z.string(), z.unknown())),
+    sales: z.array(z.record(z.string(), z.unknown())),
+  }),
+});
+
+const syncChangeSchema = z.object({
+  tableName: z.string(),
+  recordId: z.string(),
+  data: z.record(z.string(), z.unknown()),
+  updatedAt: z.number(),
+  deletedAt: z.number().nullable(),
+});
+
+const syncBodySchema = z.object({
+  clientCode: z.string().min(1),
+  lastSyncedAt: z.number(),
+  changes: z.array(syncChangeSchema),
+});
+
+const VALID_CATEGORIES = new Set<string>(["menu", "ingredients", "sales"]);
+
+router.post("/api/backup", async (req: Request, res: Response) => {
+  try {
+    const parsed = backupBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid backup data", details: parsed.error.flatten() });
+    }
+    const { clientCode, clientName, snapshot } = parsed.data;
+    const client = await storage.getOrCreateClient(clientCode, clientName);
+    const backup = await storage.createBackup(client.id, snapshot);
+    res.json({ success: true, backupId: backup.id, createdAt: backup.createdAt });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("Backup error:", message);
+    res.status(500).json({ error: "Failed to create backup" });
+  }
+});
+
+router.get("/api/backup/:clientCode", async (req: Request, res: Response) => {
+  try {
+    const { clientCode } = req.params;
+    const backup = await storage.getLatestBackup(clientCode);
+    if (!backup) {
+      return res.status(404).json({ error: "No backup found for this client" });
+    }
+    res.json({ snapshot: backup.snapshot, createdAt: backup.createdAt, backupId: backup.id });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("Restore error:", message);
+    res.status(500).json({ error: "Failed to retrieve backup" });
+  }
+});
+
+router.get("/api/clients", async (_req: Request, res: Response) => {
+  try {
+    const clientList = await storage.getClients();
+    res.json(clientList);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("Clients error:", message);
+    res.status(500).json({ error: "Failed to retrieve clients" });
+  }
+});
+
+router.get("/api/admin/metrics", async (_req: Request, res: Response) => {
+  try {
+    const metrics = await storage.getAggregatedMetrics();
+    res.json(metrics);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("Metrics error:", message);
+    res.status(500).json({ error: "Failed to retrieve metrics" });
+  }
+});
+
+router.post("/api/sync/:category", async (req: Request, res: Response) => {
+  try {
+    const { category } = req.params;
+    if (!VALID_CATEGORIES.has(category)) {
+      return res.status(400).json({ error: `Invalid sync category: ${category}` });
+    }
+
+    const parsed = syncBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid sync data", details: parsed.error.flatten() });
+    }
+
+    const { clientCode, lastSyncedAt, changes } = parsed.data;
+    const tableNames = SYNC_CATEGORY_TABLES[category as SyncCategory];
+
+    const invalidTables = changes.filter(c => !tableNames.includes(c.tableName));
+    if (invalidTables.length > 0) {
+      return res.status(400).json({
+        error: `Tables not allowed in category '${category}': ${invalidTables.map(c => c.tableName).join(", ")}`,
+      });
+    }
+
+    const client = await storage.getOrCreateClient(clientCode);
+    const result = await storage.processSyncChanges(client.id, tableNames, changes, lastSyncedAt);
+
+    res.json({
+      success: true,
+      serverChanges: result.serverChanges,
+      syncedAt: result.syncedAt,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("Sync error:", message);
+    res.status(500).json({ error: "Failed to process sync" });
+  }
+});
+
+router.get("/api/sync/:category/status", async (req: Request, res: Response) => {
+  try {
+    const { category } = req.params;
+    const clientCode = req.query.clientCode as string;
+
+    if (!VALID_CATEGORIES.has(category)) {
+      return res.status(400).json({ error: `Invalid sync category: ${category}` });
+    }
+    if (!clientCode) {
+      return res.status(400).json({ error: "clientCode query parameter required" });
+    }
+
+    const tableNames = SYNC_CATEGORY_TABLES[category as SyncCategory];
+    const client = await storage.getOrCreateClient(clientCode);
+    const status = await storage.getSyncStatus(client.id, tableNames);
+
+    res.json(status);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("Sync status error:", message);
+    res.status(500).json({ error: "Failed to get sync status" });
+  }
+});
