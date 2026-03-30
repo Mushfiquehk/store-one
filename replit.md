@@ -71,7 +71,8 @@ All entities include `updatedAt: number` (epoch ms timestamp) and `deletedAt: nu
 - `shared/schema.ts` — TypeScript type definitions for all entities + SYNC_CATEGORY_TABLES mapping
 - `server/index.ts` — Express server entry point with DB initialization (creates clients, backups, sync_records tables)
 - `server/schema.ts` — Drizzle ORM schema for clients, backups, and sync_records tables
-- `server/routes.ts` — API routes for backup, restore, clients list, admin metrics, and incremental sync
+- `server/routes.ts` — API routes for backup, restore, clients list, admin metrics, incremental sync, and dev seed/clear endpoints
+- `server/seed-data.ts` — Server-side demo data definitions for dev seed endpoint
 - `server/storage.ts` — Server-side storage interface using Drizzle (backup + sync operations)
 - `server/db.ts` — PostgreSQL connection pool and Drizzle instance
 - `vite.config.ts` — Vite configuration with `/api` proxy to Express
@@ -83,6 +84,8 @@ All entities include `updatedAt: number` (epoch ms timestamp) and `deletedAt: nu
 - `GET /api/admin/metrics` — Aggregated metrics across all client backups
 - `POST /api/sync/:category` — Push local changes, receive server-side changes (category: menu, ingredients, sales)
 - `GET /api/sync/:category/status` — Get sync status for a category (requires ?clientCode query param)
+- `POST /api/dev/seed` — (Dev only) Seed demo data into sync_records. Optional body: `{ "clientCode": "my-client" }` (defaults to "dev-seed"). Returns `{ success, clientCode, recordsInserted, recordsUpdated, totalRecords }`.
+- `POST /api/dev/clear` — (Dev only) Delete all sync_records where record_id starts with `demo_`. Returns `{ success, recordsDeleted }`.
 
 ## Pages
 - `/` — POS register
@@ -93,6 +96,14 @@ All entities include `updatedAt: number` (epoch ms timestamp) and `deletedAt: nu
 - `/integrations` — Third-party connections (placeholder)
 - `/settings` — Tax rate, Incremental Sync (per-category controls + auto-sync), Full Backup & Restore
 - `/admin` — Admin dashboard with aggregated metrics and client list
+
+## Schema Migrations
+This project does not use automated schema migration tooling. When the data shape changes (modifications to `shared/schema.ts` types or `client/src/lib/db.ts` Dexie schema), all local and server data should be wiped and recreated:
+
+1. **Clear IndexedDB**: In the browser DevTools → Application → IndexedDB, delete the `CornerPOS` database (or clear site data).
+2. **Reset PostgreSQL**: Run `npx drizzle-kit push` to recreate server tables, or drop and recreate the database if needed.
+3. **Re-seed demo data**: Call `POST /api/dev/seed` to populate the sync_records table with demo data, then sync from a client to pull it down. Alternatively, use the `/demo` page UI to seed data directly into IndexedDB on the client side.
+4. **Clear demo data**: Call `POST /api/dev/clear` to remove all demo-prefixed records (`demo_*`) from the server sync_records table.
 
 ## Development
 - Workflow runs: `concurrently "vite dev --host 0.0.0.0 --port 5000" "npx tsx server/index.ts"`

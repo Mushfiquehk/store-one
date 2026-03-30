@@ -2,6 +2,10 @@ import { Router, type Request, type Response } from "express";
 import { storage } from "./storage";
 import { z } from "zod";
 import { SYNC_CATEGORY_TABLES, type SyncCategory } from "../shared/schema";
+import { getDemoSeedRecords, DEMO_PREFIX_VALUE } from "./seed-data";
+import { db } from "./db";
+import { syncRecords } from "./schema";
+import { sql, and, eq } from "drizzle-orm";
 
 export const router = Router();
 
@@ -152,3 +156,95 @@ router.get("/api/sync/:category/status", async (req: Request, res: Response) => 
     res.status(500).json({ error: "Failed to get sync status" });
   }
 });
+
+if (process.env.NODE_ENV !== "production") {
+  router.post("/api/dev/seed", async (req: Request, res: Response) => {
+    try {
+      const clientCode = typeof req.body?.clientCode === "string" && req.body.clientCode.length > 0
+        ? req.body.clientCode
+        : "dev-seed";
+      const client = await storage.getOrCreateClient(clientCode, "Dev Seed Client");
+      const seedRecords = getDemoSeedRecords();
+      let inserted = 0;
+      let updated = 0;
+
+      await db.transaction(async (tx) => {
+        for (const record of seedRecords) {
+          const existing = await tx
+            .select()
+            .from(syncRecords)
+            .where(
+              and(
+                eq(syncRecords.clientId, client.id),
+                eq(syncRecords.tableName, record.tableName),
+                eq(syncRecords.recordId, record.recordId),
+              )
+            )
+            .limit(1);
+
+          if (existing.length === 0) {
+            await tx.insert(syncRecords).values({
+              clientId: client.id,
+              tableName: record.tableName,
+              recordId: record.recordId,
+              data: record.data,
+              updatedAt: record.updatedAt,
+              deletedAt: record.deletedAt,
+            });
+            inserted++;
+          } else {
+            await tx
+              .update(syncRecords)
+              .set({
+                data: record.data,
+                updatedAt: record.updatedAt,
+                deletedAt: record.deletedAt,
+              })
+              .where(eq(syncRecords.id, existing[0].id));
+            updated++;
+          }
+        }
+      });
+
+      res.json({
+        success: true,
+        clientCode,
+        recordsInserted: inserted,
+        recordsUpdated: updated,
+        totalRecords: seedRecords.length,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      console.error("Dev seed error:", message);
+      res.status(500).json({ error: "Failed to seed demo data", details: message });
+    }
+  });
+
+  router.post("/api/dev/clear", async (req: Request, res: Response) => {
+    try {
+      const demoPrefix = DEMO_PREFIX_VALUE;
+      const escapedPattern = demoPrefix.replace(/%/g, '\\%').replace(/_/g, '\\_') + '%';
+      const likeCondition = sql`${syncRecords.recordId} LIKE ${escapedPattern}`;
+
+      const countResult = await db
+        .select({ id: syncRecords.id })
+        .from(syncRecords)
+        .where(likeCondition);
+
+      const deleted = countResult.length;
+
+      if (deleted > 0) {
+        await db.delete(syncRecords).where(likeCondition);
+      }
+
+      res.json({
+        success: true,
+        recordsDeleted: deleted,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      console.error("Dev clear error:", message);
+      res.status(500).json({ error: "Failed to clear demo data", details: message });
+    }
+  });
+}
