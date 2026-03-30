@@ -2,9 +2,9 @@ import { Router, type Request, type Response } from "express";
 import { storage, adminStorage } from "./storage";
 import { z } from "zod";
 import { SYNC_CATEGORY_TABLES, type SyncCategory } from "../shared/schema";
-import { getDemoSeedRecords, DEMO_PREFIX_VALUE } from "./seed-data";
+import { getDemoSeedRecords, getDemoAdminData, DEMO_PREFIX_VALUE } from "./seed-data";
 import { db } from "./db";
-import { syncRecords } from "./schema";
+import { syncRecords, adminProducts, adminVariants, adminModifierGroups, adminModifiers, adminProductModifierGroups, adminInventoryItems, adminBillOfMaterials } from "./schema";
 import { sql, and, eq } from "drizzle-orm";
 
 export const router = Router();
@@ -315,12 +315,55 @@ if (process.env.NODE_ENV !== "production") {
         }
       });
 
+      const adminData = getDemoAdminData();
+      let adminCount = 0;
+      for (const p of adminData.products) {
+        await adminStorage.createProduct(p as unknown as Record<string, unknown>);
+        adminCount++;
+      }
+      for (const v of adminData.variants) {
+        await adminStorage.createVariant(v as unknown as Record<string, unknown>);
+        adminCount++;
+      }
+      for (const ii of adminData.inventoryItems) {
+        await adminStorage.createInventoryItem(ii as unknown as Record<string, unknown>);
+        adminCount++;
+      }
+      for (const mg of adminData.modifierGroups) {
+        await adminStorage.createModifierGroup(mg as unknown as Record<string, unknown>);
+        adminCount++;
+      }
+      for (const m of adminData.modifiers) {
+        await adminStorage.createModifier(m as unknown as Record<string, unknown>);
+        adminCount++;
+      }
+      for (const b of adminData.bomEntries) {
+        await adminStorage.createBom(b as unknown as Record<string, unknown>);
+        adminCount++;
+      }
+      const pmgByProduct = new Map<string, typeof adminData.productModifierGroups>();
+      for (const pmg of adminData.productModifierGroups) {
+        const arr = pmgByProduct.get(pmg.productId) || [];
+        arr.push(pmg);
+        pmgByProduct.set(pmg.productId, arr);
+      }
+      for (const [productId, pmgs] of pmgByProduct) {
+        await adminStorage.setProductModifierGroups(productId, pmgs.map(p => p.modifierGroupId));
+        for (const pmg of pmgs) {
+          if (pmg.scaleFactors) {
+            await adminStorage.setProductModifierGroupScaleFactors(productId, pmg.modifierGroupId, pmg.scaleFactors);
+          }
+        }
+        adminCount += pmgs.length;
+      }
+
       res.json({
         success: true,
         clientCode,
         recordsInserted: inserted,
         recordsUpdated: updated,
         totalRecords: seedRecords.length,
+        adminRecords: adminCount,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
@@ -346,9 +389,18 @@ if (process.env.NODE_ENV !== "production") {
         await db.delete(syncRecords).where(likeCondition);
       }
 
+      await db.delete(adminBillOfMaterials).where(sql`${adminBillOfMaterials.id} LIKE ${escapedPattern}`);
+      await db.delete(adminProductModifierGroups).where(sql`${adminProductModifierGroups.productId} LIKE ${escapedPattern}`);
+      await db.delete(adminModifiers).where(sql`${adminModifiers.id} LIKE ${escapedPattern}`);
+      await db.delete(adminModifierGroups).where(sql`${adminModifierGroups.id} LIKE ${escapedPattern}`);
+      await db.delete(adminVariants).where(sql`${adminVariants.id} LIKE ${escapedPattern}`);
+      await db.delete(adminProducts).where(sql`${adminProducts.id} LIKE ${escapedPattern}`);
+      await db.delete(adminInventoryItems).where(sql`${adminInventoryItems.id} LIKE ${escapedPattern}`);
+
       res.json({
         success: true,
         recordsDeleted: deleted,
+        adminTablesCleared: true,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";

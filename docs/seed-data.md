@@ -6,14 +6,29 @@ CornerPOS ships with a comprehensive coffee shop demo dataset in `client/src/lib
 
 ## Using Seed & Deseed
 
-### From the UI
+### From the UI (Client-side)
 
 Navigate to `/demo` in the browser. Two buttons are available:
 
-- **Seed Demo Data** — inserts the full demo dataset (or re-seeds if already present)
+- **Seed Demo Data** — inserts the full demo dataset into IndexedDB (or re-seeds if already present)
 - **Clear** — removes all demo records without affecting user-created data
 
-### From Code
+### From the Server (Dev Endpoints)
+
+The server has dev-only endpoints that seed/clear both sync_records and admin tables:
+
+```bash
+# Seed all demo data (sync_records + admin tables)
+curl -X POST http://localhost:3001/api/dev/seed
+
+# Seed with a specific client code
+curl -X POST http://localhost:3001/api/dev/seed -H "Content-Type: application/json" -d '{"clientCode": "my-pos"}'
+
+# Clear all demo data from both sync_records and admin tables
+curl -X POST http://localhost:3001/api/dev/clear
+```
+
+### From Code (Client-side)
 
 ```ts
 import { seedDemoData, clearDemoData, isDemoDataSeeded } from "@/lib/seed-data";
@@ -31,6 +46,8 @@ await clearDemoData();
 ### How Isolation Works
 
 Every demo record uses an ID prefix of `demo_`. The `clearDemoData()` function removes only records whose IDs start with `demo_`, so user-created data is never touched. `seedDemoData()` calls `clearDemoData()` internally before inserting, making it safe to call repeatedly.
+
+Both `server/seed-data.ts` and `client/src/lib/seed-data.ts` produce the same coffee shop dataset. The server seed populates `sync_records` (for client pull during sync) and admin tables (for admin panel display). The client seed populates IndexedDB directly.
 
 ---
 

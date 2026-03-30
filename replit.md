@@ -108,8 +108,8 @@ All entities include `updatedAt: number` (epoch ms timestamp) and `deletedAt: nu
 - `POST /api/admin/apply-sync-changes` — Apply sync changes to admin data
 - `POST /api/sync/:category` — Push local changes, receive server-side changes (category: menu, ingredients, sales)
 - `GET /api/sync/:category/status` — Get sync status for a category (requires ?clientCode query param)
-- `POST /api/dev/seed` — (Dev only) Seed demo data into sync_records. Optional body: `{ "clientCode": "my-client" }` (defaults to "dev-seed"). Returns `{ success, clientCode, recordsInserted, recordsUpdated, totalRecords }`.
-- `POST /api/dev/clear` — (Dev only) Delete all sync_records where record_id starts with `demo_`. Returns `{ success, recordsDeleted }`.
+- `POST /api/dev/seed` — (Dev only) Seed coffee shop demo data into both sync_records and admin tables (products, variants, modifiers, inventory, BOM, PMGs, ~350 sales). Optional body: `{ "clientCode": "my-client" }` (defaults to "dev-seed"). Returns `{ success, clientCode, recordsInserted, recordsUpdated, totalRecords, adminRecords }`.
+- `POST /api/dev/clear` — (Dev only) Delete all `demo_*` records from sync_records and all admin tables. Returns `{ success, recordsDeleted, adminTablesCleared }`.
 
 ## Pages
 - `/` — POS register
