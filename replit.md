@@ -66,7 +66,8 @@ All entities include `updatedAt: number` (epoch ms timestamp) and `deletedAt: nu
 - `client/src/lib/local-storage.ts` — CRUD storage layer for all entities (with soft deletes and updatedAt stamping)
 - `client/src/lib/store.tsx` — React context provider using Dexie live queries (filters soft-deleted records)
 - `client/src/lib/sync.ts` — Client-side sync service (syncCategory, syncAll, startAutoSync, stopAutoSync)
-- `client/src/lib/seed-data.ts` — Demo data seeding with updatedAt/deletedAt fields
+- `client/src/lib/seed-data.ts` — Coffee shop demo data: 21 products, 36 ingredients, 5 modifier groups, 4 employees, ~350 orders across 15 days
+- `docs/seed-data.md` — Seed/deseed usage, schema change workflow, and seed data update checklist
 - `shared/schema.ts` — TypeScript type definitions for all entities + SYNC_CATEGORY_TABLES mapping
 - `server/index.ts` — Express server entry point with DB initialization (creates clients, backups, sync_records tables)
 - `server/schema.ts` — Drizzle ORM schema for clients, backups, and sync_records tables
