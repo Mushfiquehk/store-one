@@ -408,6 +408,8 @@ function generateSales(): Sale[] {
         paymentMethod: pm,
         status: "completed",
         linesJson: lines,
+        customerName: "",
+        closedAt: saleTime,
         updatedAt: now,
         deletedAt: null,
       });

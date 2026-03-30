@@ -343,6 +343,8 @@ function generateSales(): Sale[] {
         subtotalCents, taxCents, totalCents,
         paymentMethod: pm, status: "completed",
         linesJson: lines,
+        customerName: "",
+        closedAt: saleTime,
         updatedAt: now, deletedAt: null,
       });
     }
