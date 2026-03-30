@@ -139,7 +139,7 @@ export default function OrderReceipts({
   onCloseOrder: (id: string) => void;
 }) {
   const openOrders = sales
-    .filter(s => !s.closedAt && s.status === "completed")
+    .filter(s => s.closedAt === null && s.customerName !== undefined && s.status === "completed")
     .sort((a, b) => a.createdAt - b.createdAt);
 
   if (openOrders.length === 0) return null;
