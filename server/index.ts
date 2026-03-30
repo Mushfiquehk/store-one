@@ -23,12 +23,12 @@ const isDev = process.env.NODE_ENV !== "production";
 if (!isDev) {
   const publicDir = path.resolve(__dirname, "../dist/public");
   app.use(express.static(publicDir));
-  app.get("/{*splat}", (_req, res) => {
+  app.get("*", (_req, res) => {
     res.sendFile(path.join(publicDir, "index.html"));
   });
 }
 
-const port = parseInt(process.env.PORT || "3001", 10);
+const port = parseInt(process.env.PORT || "5000", 10);
 const serverPort = isDev ? 3001 : port;
 
 async function initDb() {
