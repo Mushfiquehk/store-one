@@ -164,6 +164,8 @@ export type Sale = {
   paymentMethod: string;
   status: string;
   linesJson: SaleLine[];
+  customerName: string;
+  closedAt: number | null;
   updatedAt: number;
   deletedAt: number | null;
 };

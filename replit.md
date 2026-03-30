@@ -24,7 +24,7 @@ All entities include `updatedAt: number` (epoch ms timestamp) and `deletedAt: nu
 - `billOfMaterials` (BomEntry) — links variants/modifiers to inventory items with quantity deduction and scale factors
 - `employees` — staff with role, payRate, and PIN access
 - `timePunches` — clock in/out records
-- `sales` — completed transactions with native `linesJson: SaleLine[]`
+- `sales` — completed transactions with native `linesJson: SaleLine[]`, `customerName`, and `closedAt` (null = open order)
 
 ### Server-side (PostgreSQL / Drizzle)
 - `clients` — registered POS terminal instances (id, code, name, created_at)
@@ -64,11 +64,11 @@ All entities include `updatedAt: number` (epoch ms timestamp) and `deletedAt: nu
 - **Scale factor keys use variant IDs**, not variant names
 - **All stringified JSON fields have been eliminated** — native objects/arrays throughout
 - **SaleLine includes denormalized names** captured at sale time
-- **Dexie migration history**: v1 (initial), v2, v3 (JSON parsing), v4 (rekey scale factors), v5 (add updatedAt/deletedAt indexes)
+- **Dexie migration history**: v1 (initial), v2, v3 (JSON parsing), v4 (rekey scale factors), v5 (add updatedAt/deletedAt indexes), v6 (add customerName/closedAt to sales)
 - **productModifierGroups sync uses `${productId}::${modifierGroupId}` as recordId** for compound key serialization
 
 ## Key Files
-- `client/src/lib/db.ts` — Dexie.js database definition with IndexedDB schema and migrations (v1–v5)
+- `client/src/lib/db.ts` — Dexie.js database definition with IndexedDB schema and migrations (v1–v6)
 - `client/src/lib/local-storage.ts` — CRUD storage layer for all entities (with soft deletes and updatedAt stamping)
 - `client/src/lib/store.tsx` — React context provider using Dexie live queries (filters soft-deleted records)
 - `client/src/lib/sync.ts` — Client-side sync service (syncCategory, syncAll, startAutoSync, stopAutoSync)

@@ -133,6 +133,8 @@ export interface Sale {
   paymentMethod: string;
   status: string;
   linesJson: SaleLine[];
+  customerName: string;
+  closedAt: number | null;
   updatedAt: number;
   deletedAt: number | null;
 }
@@ -338,6 +340,13 @@ class PosDatabase extends Dexie {
         if (item.lastPurchasePrice === undefined) {
           item.lastPurchasePrice = null;
         }
+      });
+    });
+
+    this.version(6).stores({}).upgrade(async tx => {
+      await tx.table("sales").toCollection().modify(sale => {
+        if (sale.customerName === undefined) sale.customerName = "";
+        if (sale.closedAt === undefined) sale.closedAt = sale.createdAt;
       });
     });
   }

@@ -368,11 +368,18 @@ export const storage = {
       paymentMethod: data.paymentMethod!,
       status: data.status!,
       linesJson: data.linesJson!,
+      customerName: data.customerName ?? "",
+      closedAt: data.closedAt ?? null,
       updatedAt: data.updatedAt ?? now,
       deletedAt: null,
     };
     await db.sales.put(sale);
     return sale;
+  },
+
+  async updateSale(id: string, data: Partial<Sale>): Promise<Sale | undefined> {
+    await db.sales.update(id, { ...data, updatedAt: Date.now() });
+    return db.sales.get(id);
   },
 
   async getInvoices(): Promise<Invoice[]> {

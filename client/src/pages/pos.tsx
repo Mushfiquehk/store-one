@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useStore, type CartItem } from "@/lib/store";
 import ModifierSelector, { type SelectedModifier } from "@/components/modifier-selector";
+import OrderReceipts from "@/components/order-receipts";
 import { format } from "date-fns";
 
 function formatMoney(cents: number) {
@@ -29,7 +30,7 @@ export default function PosPage() {
   const { toast } = useToast();
   const {
     products, variants, inventory, bom, sales, modifierGroups, modifiers,
-    productModifierLinks, productModifierScaleFactors, addSale, adjustInventory, integrations, isLoading,
+    productModifierLinks, productModifierScaleFactors, addSale, updateSale, adjustInventory, integrations, isLoading,
   } = useStore();
 
   const [taxRatePct, setTaxRatePct] = useState(8.25);
@@ -42,6 +43,8 @@ export default function PosPage() {
 
   const [sizeSelectorOpen, setSizeSelectorOpen] = useState(false);
   const [sizeSelectorProduct, setSizeSelectorProduct] = useState<typeof products[0] | null>(null);
+
+  const [customerName, setCustomerName] = useState("");
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -210,6 +213,11 @@ export default function PosPage() {
   const taxCents = Math.round((subtotalCents * taxRatePct) / 100);
   const totalCents = subtotalCents + taxCents;
 
+  function handleCloseOrder(saleId: string) {
+    updateSale(saleId, { closedAt: Date.now() });
+    toast({ title: "Order closed" });
+  }
+
   function handleConfirmOrder() {
     if (cart.length === 0) {
       toast({ title: "Cart is empty", description: "Add items first." });
@@ -311,6 +319,8 @@ export default function PosPage() {
       totalCents,
       paymentMethod: paymentType,
       status: "completed",
+      customerName: customerName.trim(),
+      closedAt: null,
       linesJson: cart.map(c => {
         const prod = products.find(p => p.id === c.productId);
         const vari = variants.find(v => v.id === c.variantId);
@@ -336,6 +346,7 @@ export default function PosPage() {
 
     toast({ title: "Sale recorded", description: `${formatMoney(totalCents)} • ${paymentType}` });
     clearCart();
+    setCustomerName("");
     setIsPaymentOpen(false);
   }
 
@@ -350,6 +361,7 @@ export default function PosPage() {
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
       <AppShell title="POS">
+        <OrderReceipts sales={sales} onCloseOrder={handleCloseOrder} />
         <div className="grid gap-6 lg:grid-cols-12 h-[calc(100vh-90px)] pb-2">
           <Card className="border bg-card shadow-soft lg:col-span-7 flex flex-col overflow-hidden h-full">
             <CardHeader className="pb-3 flex-shrink-0 pt-4 px-4">
@@ -670,6 +682,16 @@ export default function PosPage() {
               <DialogTitle>Confirm Payment</DialogTitle>
             </DialogHeader>
             <div className="py-6 flex flex-col gap-6">
+              <div>
+                <label className="text-xs text-muted-foreground uppercase tracking-wider mb-1.5 block">Name on Order</label>
+                <Input
+                  value={customerName}
+                  onChange={e => setCustomerName(e.target.value)}
+                  placeholder="Customer name (optional)"
+                  className="rounded-xl"
+                  data-testid="input-customer-name"
+                />
+              </div>
               <div className="text-center">
                 <p className="text-sm text-muted-foreground uppercase tracking-wider">Total Due</p>
                 <p className="text-4xl font-serif mt-1">{formatMoney(totalCents)}</p>
