@@ -108,8 +108,8 @@ All entities include `updatedAt: number` (epoch ms timestamp) and `deletedAt: nu
 - `POST /api/admin/apply-sync-changes` — Apply sync changes to admin data
 - `POST /api/sync/:category` — Push local changes, receive server-side changes (category: menu, ingredients, sales)
 - `GET /api/sync/:category/status` — Get sync status for a category (requires ?clientCode query param)
-- `POST /api/dev/seed` — (Dev only) Seed coffee shop demo data into both sync_records and admin tables (products, variants, modifiers, inventory, BOM, PMGs, ~350 sales). Optional body: `{ "clientCode": "my-client" }` (defaults to "dev-seed"). Returns `{ success, clientCode, recordsInserted, recordsUpdated, totalRecords, adminRecords }`.
-- `POST /api/dev/clear` — (Dev only) Delete all `demo_*` records from sync_records and all admin tables. Returns `{ success, recordsDeleted, adminTablesCleared }`.
+- `POST /api/demo/seed` — Seed coffee shop demo data into both sync_records and admin tables. Optional body: `{ "clientCode": "my-client" }` (defaults to "demo-client"). Returns `{ success, clientCode, recordsInserted, recordsUpdated, totalRecords, adminRecords }`.
+- `POST /api/demo/clear` — Delete all `demo_*` records from sync_records and all admin tables. Returns `{ success, recordsDeleted, adminTablesCleared }`.
 
 ## Pages
 - `/` — POS register
@@ -120,6 +120,12 @@ All entities include `updatedAt: number` (epoch ms timestamp) and `deletedAt: nu
 - `/integrations` — Third-party connections (placeholder)
 - `/settings` — Tax rate, Incremental Sync (per-category controls + auto-sync), Full Backup & Restore
 - `/admin` — Admin dashboard with tabbed interface: Dashboard (metrics + clients), Products (reuses POS components via AdminStoreProvider), Invoice Intake, and Interactive Sync
+
+## Auto-Seed Demo Data
+Both the server and client automatically seed demo data on first launch:
+- **Server**: On startup, checks if admin tables are empty. If so, seeds sync_records and all admin tables with the coffee shop dataset.
+- **Client**: On first load, checks if IndexedDB has any demo products. If not, seeds the full dataset (products, ingredients, employees, ~350 orders).
+- **Removal**: Navigate to `/demo` and click "Clear" to remove all demo data from both client and server. Or call `POST /api/demo/clear` directly.
 
 ## Schema Migrations
 This project does not use automated schema migration tooling. When the data shape changes (modifications to `shared/schema.ts` types or `client/src/lib/db.ts` Dexie schema), all local and server data should be wiped and recreated:

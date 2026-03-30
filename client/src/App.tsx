@@ -1,8 +1,10 @@
+import { useEffect, useRef } from "react";
 import { Route, Switch } from "wouter";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
 import { StoreProvider } from "@/lib/store";
+import { isDemoDataSeeded, seedDemoData } from "@/lib/seed-data";
 
 import OnboardingPage from "@/pages/onboarding";
 import PosPage from "@/pages/pos";
@@ -33,7 +35,26 @@ function Router() {
   );
 }
 
+function useAutoSeedDemo() {
+  const ran = useRef(false);
+  useEffect(() => {
+    if (ran.current) return;
+    ran.current = true;
+    isDemoDataSeeded().then((seeded) => {
+      if (!seeded) {
+        seedDemoData().then(() => {
+          console.log("Auto-seeded demo data");
+        }).catch((err) => {
+          console.error("Auto-seed failed:", err);
+        });
+      }
+    });
+  }, []);
+}
+
 function App() {
+  useAutoSeedDemo();
+
   return (
     <StoreProvider>
       <TooltipProvider>

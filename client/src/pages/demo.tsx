@@ -39,10 +39,13 @@ export default function DemoPage() {
     setClearing(true);
     try {
       await clearDemoData();
+      try {
+        await fetch("/api/demo/clear", { method: "POST" });
+      } catch (_) {}
       setSeeded(false);
       toast({
         title: "Demo data cleared",
-        description: "All demo records have been removed. User-created data is untouched.",
+        description: "All demo records have been removed from the POS and server.",
       });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "An unexpected error occurred.";

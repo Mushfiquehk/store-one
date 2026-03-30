@@ -266,146 +266,144 @@ router.post("/api/admin/apply-client-sync-changes/:clientCode", async (req: Requ
   } catch (err) { res.status(500).json({ error: "Failed to apply client sync changes" }); }
 });
 
-if (process.env.NODE_ENV !== "production") {
-  router.post("/api/dev/seed", async (req: Request, res: Response) => {
-    try {
-      const clientCode = typeof req.body?.clientCode === "string" && req.body.clientCode.length > 0
-        ? req.body.clientCode
-        : "dev-seed";
-      const client = await storage.getOrCreateClient(clientCode, "Dev Seed Client");
-      const seedRecords = getDemoSeedRecords();
-      let inserted = 0;
-      let updated = 0;
+router.post("/api/demo/seed", async (req: Request, res: Response) => {
+  try {
+    const clientCode = typeof req.body?.clientCode === "string" && req.body.clientCode.length > 0
+      ? req.body.clientCode
+      : "demo-client";
+    const client = await storage.getOrCreateClient(clientCode, "Demo Client");
+    const seedRecords = getDemoSeedRecords();
+    let inserted = 0;
+    let updated = 0;
 
-      await db.transaction(async (tx) => {
-        for (const record of seedRecords) {
-          const existing = await tx
-            .select()
-            .from(syncRecords)
-            .where(
-              and(
-                eq(syncRecords.clientId, client.id),
-                eq(syncRecords.tableName, record.tableName),
-                eq(syncRecords.recordId, record.recordId),
-              )
+    await db.transaction(async (tx) => {
+      for (const record of seedRecords) {
+        const existing = await tx
+          .select()
+          .from(syncRecords)
+          .where(
+            and(
+              eq(syncRecords.clientId, client.id),
+              eq(syncRecords.tableName, record.tableName),
+              eq(syncRecords.recordId, record.recordId),
             )
-            .limit(1);
+          )
+          .limit(1);
 
-          if (existing.length === 0) {
-            await tx.insert(syncRecords).values({
-              clientId: client.id,
-              tableName: record.tableName,
-              recordId: record.recordId,
+        if (existing.length === 0) {
+          await tx.insert(syncRecords).values({
+            clientId: client.id,
+            tableName: record.tableName,
+            recordId: record.recordId,
+            data: record.data,
+            updatedAt: record.updatedAt,
+            deletedAt: record.deletedAt,
+          });
+          inserted++;
+        } else {
+          await tx
+            .update(syncRecords)
+            .set({
               data: record.data,
               updatedAt: record.updatedAt,
               deletedAt: record.deletedAt,
-            });
-            inserted++;
-          } else {
-            await tx
-              .update(syncRecords)
-              .set({
-                data: record.data,
-                updatedAt: record.updatedAt,
-                deletedAt: record.deletedAt,
-              })
-              .where(eq(syncRecords.id, existing[0].id));
-            updated++;
-          }
+            })
+            .where(eq(syncRecords.id, existing[0].id));
+          updated++;
         }
-      });
+      }
+    });
 
-      const adminData = getDemoAdminData();
-      let adminCount = 0;
-      for (const p of adminData.products) {
-        await adminStorage.createProduct(p as unknown as Record<string, unknown>);
-        adminCount++;
-      }
-      for (const v of adminData.variants) {
-        await adminStorage.createVariant(v as unknown as Record<string, unknown>);
-        adminCount++;
-      }
-      for (const ii of adminData.inventoryItems) {
-        await adminStorage.createInventoryItem(ii as unknown as Record<string, unknown>);
-        adminCount++;
-      }
-      for (const mg of adminData.modifierGroups) {
-        await adminStorage.createModifierGroup(mg as unknown as Record<string, unknown>);
-        adminCount++;
-      }
-      for (const m of adminData.modifiers) {
-        await adminStorage.createModifier(m as unknown as Record<string, unknown>);
-        adminCount++;
-      }
-      for (const b of adminData.bomEntries) {
-        await adminStorage.createBom(b as unknown as Record<string, unknown>);
-        adminCount++;
-      }
-      const pmgByProduct = new Map<string, typeof adminData.productModifierGroups>();
-      for (const pmg of adminData.productModifierGroups) {
-        const arr = pmgByProduct.get(pmg.productId) || [];
-        arr.push(pmg);
-        pmgByProduct.set(pmg.productId, arr);
-      }
-      for (const [productId, pmgs] of pmgByProduct) {
-        await adminStorage.setProductModifierGroups(productId, pmgs.map(p => p.modifierGroupId));
-        for (const pmg of pmgs) {
-          if (pmg.scaleFactors) {
-            await adminStorage.setProductModifierGroupScaleFactors(productId, pmg.modifierGroupId, pmg.scaleFactors);
-          }
+    const adminData = getDemoAdminData();
+    let adminCount = 0;
+    for (const p of adminData.products) {
+      await adminStorage.createProduct(p as unknown as Record<string, unknown>);
+      adminCount++;
+    }
+    for (const v of adminData.variants) {
+      await adminStorage.createVariant(v as unknown as Record<string, unknown>);
+      adminCount++;
+    }
+    for (const ii of adminData.inventoryItems) {
+      await adminStorage.createInventoryItem(ii as unknown as Record<string, unknown>);
+      adminCount++;
+    }
+    for (const mg of adminData.modifierGroups) {
+      await adminStorage.createModifierGroup(mg as unknown as Record<string, unknown>);
+      adminCount++;
+    }
+    for (const m of adminData.modifiers) {
+      await adminStorage.createModifier(m as unknown as Record<string, unknown>);
+      adminCount++;
+    }
+    for (const b of adminData.bomEntries) {
+      await adminStorage.createBom(b as unknown as Record<string, unknown>);
+      adminCount++;
+    }
+    const pmgByProduct = new Map<string, typeof adminData.productModifierGroups>();
+    for (const pmg of adminData.productModifierGroups) {
+      const arr = pmgByProduct.get(pmg.productId) || [];
+      arr.push(pmg);
+      pmgByProduct.set(pmg.productId, arr);
+    }
+    for (const [productId, pmgs] of pmgByProduct) {
+      await adminStorage.setProductModifierGroups(productId, pmgs.map(p => p.modifierGroupId));
+      for (const pmg of pmgs) {
+        if (pmg.scaleFactors) {
+          await adminStorage.setProductModifierGroupScaleFactors(productId, pmg.modifierGroupId, pmg.scaleFactors);
         }
-        adminCount += pmgs.length;
       }
-
-      res.json({
-        success: true,
-        clientCode,
-        recordsInserted: inserted,
-        recordsUpdated: updated,
-        totalRecords: seedRecords.length,
-        adminRecords: adminCount,
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error";
-      console.error("Dev seed error:", message);
-      res.status(500).json({ error: "Failed to seed demo data", details: message });
+      adminCount += pmgs.length;
     }
-  });
 
-  router.post("/api/dev/clear", async (req: Request, res: Response) => {
-    try {
-      const demoPrefix = DEMO_PREFIX_VALUE;
-      const escapedPattern = demoPrefix.replace(/%/g, '\\%').replace(/_/g, '\\_') + '%';
-      const likeCondition = sql`${syncRecords.recordId} LIKE ${escapedPattern}`;
+    res.json({
+      success: true,
+      clientCode,
+      recordsInserted: inserted,
+      recordsUpdated: updated,
+      totalRecords: seedRecords.length,
+      adminRecords: adminCount,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("Demo seed error:", message);
+    res.status(500).json({ error: "Failed to seed demo data", details: message });
+  }
+});
 
-      const countResult = await db
-        .select({ id: syncRecords.id })
-        .from(syncRecords)
-        .where(likeCondition);
+router.post("/api/demo/clear", async (_req: Request, res: Response) => {
+  try {
+    const demoPrefix = DEMO_PREFIX_VALUE;
+    const escapedPattern = demoPrefix.replace(/%/g, '\\%').replace(/_/g, '\\_') + '%';
+    const likeCondition = sql`${syncRecords.recordId} LIKE ${escapedPattern}`;
 
-      const deleted = countResult.length;
+    const countResult = await db
+      .select({ id: syncRecords.id })
+      .from(syncRecords)
+      .where(likeCondition);
 
-      if (deleted > 0) {
-        await db.delete(syncRecords).where(likeCondition);
-      }
+    const deleted = countResult.length;
 
-      await db.delete(adminBillOfMaterials).where(sql`${adminBillOfMaterials.id} LIKE ${escapedPattern}`);
-      await db.delete(adminProductModifierGroups).where(sql`${adminProductModifierGroups.productId} LIKE ${escapedPattern}`);
-      await db.delete(adminModifiers).where(sql`${adminModifiers.id} LIKE ${escapedPattern}`);
-      await db.delete(adminModifierGroups).where(sql`${adminModifierGroups.id} LIKE ${escapedPattern}`);
-      await db.delete(adminVariants).where(sql`${adminVariants.id} LIKE ${escapedPattern}`);
-      await db.delete(adminProducts).where(sql`${adminProducts.id} LIKE ${escapedPattern}`);
-      await db.delete(adminInventoryItems).where(sql`${adminInventoryItems.id} LIKE ${escapedPattern}`);
-
-      res.json({
-        success: true,
-        recordsDeleted: deleted,
-        adminTablesCleared: true,
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error";
-      console.error("Dev clear error:", message);
-      res.status(500).json({ error: "Failed to clear demo data", details: message });
+    if (deleted > 0) {
+      await db.delete(syncRecords).where(likeCondition);
     }
-  });
-}
+
+    await db.delete(adminBillOfMaterials).where(sql`${adminBillOfMaterials.id} LIKE ${escapedPattern}`);
+    await db.delete(adminProductModifierGroups).where(sql`${adminProductModifierGroups.productId} LIKE ${escapedPattern}`);
+    await db.delete(adminModifiers).where(sql`${adminModifiers.id} LIKE ${escapedPattern}`);
+    await db.delete(adminModifierGroups).where(sql`${adminModifierGroups.id} LIKE ${escapedPattern}`);
+    await db.delete(adminVariants).where(sql`${adminVariants.id} LIKE ${escapedPattern}`);
+    await db.delete(adminProducts).where(sql`${adminProducts.id} LIKE ${escapedPattern}`);
+    await db.delete(adminInventoryItems).where(sql`${adminInventoryItems.id} LIKE ${escapedPattern}`);
+
+    res.json({
+      success: true,
+      recordsDeleted: deleted,
+      adminTablesCleared: true,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("Demo clear error:", message);
+    res.status(500).json({ error: "Failed to clear demo data", details: message });
+  }
+});
