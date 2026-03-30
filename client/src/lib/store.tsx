@@ -103,7 +103,7 @@ type StoreContextType = {
   toggleIntegration: (id: string) => void;
 };
 
-const StoreContext = createContext<StoreContextType | null>(null);
+export const StoreContext = createContext<StoreContextType | null>(null);
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [integrations, setIntegrations] = useState<string[]>([]);

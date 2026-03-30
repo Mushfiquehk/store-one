@@ -66,6 +66,8 @@ const TABLE_TO_DEXIE: Record<string, string> = {
   employees: "employees",
   timePunches: "timePunches",
   sales: "sales",
+  invoices: "invoices",
+  invoiceLineItems: "invoiceLineItems",
 };
 
 async function collectChanges(category: SyncCategory, lastSyncedAt: number): Promise<SyncChange[]> {
@@ -177,7 +179,7 @@ export async function syncCategory(category: SyncCategory, clientCode: string): 
 export async function syncAll(clientCode: string): Promise<{
   results: Record<SyncCategory, { success: boolean; pushed: number; pulled: number; error?: string }>;
 }> {
-  const categories: SyncCategory[] = ["menu", "ingredients", "sales"];
+  const categories: SyncCategory[] = ["menu", "ingredients", "sales", "invoices"];
   const results = {} as Record<SyncCategory, { success: boolean; pushed: number; pulled: number; error?: string }>;
 
   for (const category of categories) {

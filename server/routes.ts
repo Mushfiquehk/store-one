@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { storage } from "./storage";
+import { storage, adminStorage } from "./storage";
 import { z } from "zod";
 import { SYNC_CATEGORY_TABLES, type SyncCategory } from "../shared/schema";
 import { getDemoSeedRecords, DEMO_PREFIX_VALUE } from "./seed-data";
@@ -40,7 +40,7 @@ const syncBodySchema = z.object({
   changes: z.array(syncChangeSchema),
 });
 
-const VALID_CATEGORIES = new Set<string>(["menu", "ingredients", "sales"]);
+const VALID_CATEGORIES = new Set<string>(["menu", "ingredients", "sales", "invoices"]);
 
 router.post("/api/backup", async (req: Request, res: Response) => {
   try {
@@ -155,6 +155,115 @@ router.get("/api/sync/:category/status", async (req: Request, res: Response) => 
     console.error("Sync status error:", message);
     res.status(500).json({ error: "Failed to get sync status" });
   }
+});
+
+const adminBodySchema = z.object({
+  id: z.string().min(1),
+}).passthrough();
+
+const adminCrudRoute = (entity: string, listFn: () => Promise<unknown[]>, getFn: (id: string) => Promise<unknown | null>, createFn: (d: Record<string, unknown>) => Promise<unknown>, updateFn: (id: string, d: Record<string, unknown>) => Promise<unknown>, deleteFn: (id: string) => Promise<void>) => {
+  router.get(`/api/admin/${entity}`, async (_req: Request, res: Response) => {
+    try { res.json(await listFn()); } catch (err) { res.status(500).json({ error: `Failed to list ${entity}` }); }
+  });
+  router.get(`/api/admin/${entity}/:id`, async (req: Request, res: Response) => {
+    try { const r = await getFn(req.params.id); if (!r) return res.status(404).json({ error: "Not found" }); res.json(r); } catch (err) { res.status(500).json({ error: `Failed to get ${entity}` }); }
+  });
+  router.post(`/api/admin/${entity}`, async (req: Request, res: Response) => {
+    try {
+      const parsed = adminBodySchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: "Invalid request body: id is required", details: parsed.error.format() });
+      res.json(await createFn(parsed.data));
+    } catch (err) { res.status(500).json({ error: `Failed to create ${entity}` }); }
+  });
+  router.put(`/api/admin/${entity}/:id`, async (req: Request, res: Response) => {
+    try {
+      if (!req.body || typeof req.body !== "object") return res.status(400).json({ error: "Request body must be a JSON object" });
+      const r = await updateFn(req.params.id, req.body);
+      if (!r) return res.status(404).json({ error: "Not found" });
+      res.json(r);
+    } catch (err) { res.status(500).json({ error: `Failed to update ${entity}` }); }
+  });
+  router.delete(`/api/admin/${entity}/:id`, async (req: Request, res: Response) => {
+    try { await deleteFn(req.params.id); res.json({ success: true }); } catch (err) { res.status(500).json({ error: `Failed to delete ${entity}` }); }
+  });
+};
+
+adminCrudRoute("products", adminStorage.listProducts, adminStorage.getProduct, adminStorage.createProduct, adminStorage.updateProduct, adminStorage.deleteProduct);
+adminCrudRoute("variants", adminStorage.listVariants, adminStorage.getVariant, adminStorage.createVariant, adminStorage.updateVariant, adminStorage.deleteVariant);
+adminCrudRoute("modifier-groups", adminStorage.listModifierGroups, adminStorage.getModifierGroup, adminStorage.createModifierGroup, adminStorage.updateModifierGroup, adminStorage.deleteModifierGroup);
+adminCrudRoute("modifiers", adminStorage.listModifiers, adminStorage.getModifier, adminStorage.createModifier, adminStorage.updateModifier, adminStorage.deleteModifier);
+adminCrudRoute("inventory-items", adminStorage.listInventoryItems, adminStorage.getInventoryItem, adminStorage.createInventoryItem, adminStorage.updateInventoryItem, adminStorage.deleteInventoryItem);
+adminCrudRoute("bom", adminStorage.listBom, adminStorage.getBom, adminStorage.createBom, adminStorage.updateBom, adminStorage.deleteBom);
+adminCrudRoute("invoices", adminStorage.listInvoices, adminStorage.getInvoice, adminStorage.createInvoice, adminStorage.updateInvoice, adminStorage.deleteInvoice);
+adminCrudRoute("invoice-line-items", adminStorage.listInvoiceLineItems, adminStorage.getInvoiceLineItem, adminStorage.createInvoiceLineItem, adminStorage.updateInvoiceLineItem, adminStorage.deleteInvoiceLineItem);
+
+router.get("/api/admin/product-modifier-groups", async (_req: Request, res: Response) => {
+  try { res.json(await adminStorage.listProductModifierGroups()); } catch (err) { res.status(500).json({ error: "Failed to list pmg" }); }
+});
+
+router.post("/api/admin/product-modifier-groups/set", async (req: Request, res: Response) => {
+  try {
+    const { productId, groupIds } = req.body;
+    await adminStorage.setProductModifierGroups(productId, groupIds);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: "Failed to set pmg" }); }
+});
+
+router.post("/api/admin/product-modifier-groups/scale-factors", async (req: Request, res: Response) => {
+  try {
+    const { productId, modifierGroupId, scaleFactors } = req.body;
+    await adminStorage.setProductModifierGroupScaleFactors(productId, modifierGroupId, scaleFactors);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: "Failed to set scale factors" }); }
+});
+
+router.post("/api/admin/inventory-items/:id/adjust", async (req: Request, res: Response) => {
+  try {
+    const r = await adminStorage.adjustInventoryQuantity(req.params.id, req.body.delta);
+    if (!r) return res.status(404).json({ error: "Not found" });
+    res.json(r);
+  } catch (err) { res.status(500).json({ error: "Failed to adjust inventory" }); }
+});
+
+router.post("/api/admin/invoices/with-line-items", async (req: Request, res: Response) => {
+  try {
+    const { invoice, lineItems } = req.body;
+    const result = await adminStorage.createInvoiceWithLineItems(invoice, lineItems);
+    res.json(result);
+  } catch (err) { res.status(500).json({ error: "Failed to create invoice with line items" }); }
+});
+
+router.get("/api/admin/all-data", async (_req: Request, res: Response) => {
+  try { res.json(await adminStorage.getAllAdminData()); } catch (err) { res.status(500).json({ error: "Failed to get all admin data" }); }
+});
+
+router.get("/api/admin/all-data-with-deleted", async (_req: Request, res: Response) => {
+  try { res.json(await adminStorage.getAllAdminDataWithDeleted()); } catch (err) { res.status(500).json({ error: "Failed to get all admin data" }); }
+});
+
+router.get("/api/admin/client-data/:clientCode", async (req: Request, res: Response) => {
+  try {
+    const data = await adminStorage.getClientSyncData(req.params.clientCode);
+    if (!data) return res.status(404).json({ error: "Client not found" });
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: "Failed to get client sync data" }); }
+});
+
+router.post("/api/admin/apply-sync-changes", async (req: Request, res: Response) => {
+  try {
+    const { changes } = req.body;
+    await adminStorage.applyChanges(changes);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: "Failed to apply sync changes" }); }
+});
+
+router.post("/api/admin/apply-client-sync-changes/:clientCode", async (req: Request, res: Response) => {
+  try {
+    const { changes } = req.body;
+    const result = await adminStorage.applyClientSyncChanges(req.params.clientCode, changes);
+    if (!result) return res.status(404).json({ error: "Client not found" });
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: "Failed to apply client sync changes" }); }
 });
 
 if (process.env.NODE_ENV !== "production") {

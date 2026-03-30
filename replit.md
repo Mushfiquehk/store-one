@@ -31,6 +31,12 @@ All entities include `updatedAt: number` (epoch ms timestamp) and `deletedAt: nu
 - `backups` — full JSON snapshots of a client's IndexedDB data (id, client_id, snapshot JSONB, created_at)
 - `sync_records` — incremental sync records (id, client_id, table_name, record_id, data JSONB, updated_at BIGINT, deleted_at BIGINT); unique on (client_id, table_name, record_id)
 
+### Admin-side (PostgreSQL / Drizzle) — dedicated tables for server-side data management
+- `admin_products`, `admin_variants`, `admin_modifier_groups`, `admin_product_modifier_groups`, `admin_modifiers`, `admin_inventory_items`, `admin_bill_of_materials`, `admin_invoices`, `admin_invoice_line_items`
+- Mirror the client-side Dexie schema but live in PostgreSQL with proper typed columns
+- Each record has `updatedAt` (bigint epoch ms) and `deletedAt` (bigint, nullable) for soft-delete
+- Full CRUD via `/api/admin/*` endpoints
+
 ## Sync System
 
 ### Categories
@@ -73,7 +79,10 @@ All entities include `updatedAt: number` (epoch ms timestamp) and `deletedAt: nu
 - `server/schema.ts` — Drizzle ORM schema for clients, backups, and sync_records tables
 - `server/routes.ts` — API routes for backup, restore, clients list, admin metrics, incremental sync, and dev seed/clear endpoints
 - `server/seed-data.ts` — Server-side demo data definitions for dev seed endpoint
-- `server/storage.ts` — Server-side storage interface using Drizzle (backup + sync operations)
+- `server/storage.ts` — Server-side storage interface using Drizzle (backup + sync + admin CRUD operations)
+- `client/src/lib/admin-store.tsx` — AdminStoreProvider that exposes the same StoreContextType as useStore() but backed by fetch() to /api/admin/ endpoints
+- `client/src/components/admin-invoice-intake.tsx` — Invoice intake UI for admin section
+- `client/src/components/interactive-sync.tsx` — Interactive sync UI with diff comparison and per-item accept/reject
 - `server/db.ts` — PostgreSQL connection pool and Drizzle instance
 - `vite.config.ts` — Vite configuration with `/api` proxy to Express
 
@@ -82,6 +91,21 @@ All entities include `updatedAt: number` (epoch ms timestamp) and `deletedAt: nu
 - `GET /api/backup/:clientCode` — Get latest backup snapshot for a client
 - `GET /api/clients` — List all registered clients with last backup timestamps
 - `GET /api/admin/metrics` — Aggregated metrics across all client backups
+- `GET/POST/PUT/DELETE /api/admin/products` — Admin product CRUD
+- `GET/POST/PUT/DELETE /api/admin/variants` — Admin variant CRUD
+- `GET/POST/PUT/DELETE /api/admin/modifier-groups` — Admin modifier group CRUD
+- `GET/POST/PUT/DELETE /api/admin/modifiers` — Admin modifier CRUD
+- `GET/POST/PUT/DELETE /api/admin/inventory-items` — Admin inventory CRUD
+- `POST /api/admin/inventory-items/:id/adjust` — Adjust inventory quantity
+- `GET/POST/PUT/DELETE /api/admin/bom` — Admin bill of materials CRUD
+- `GET/POST/PUT/DELETE /api/admin/invoices` — Admin invoice CRUD
+- `POST /api/admin/invoices/with-line-items` — Create invoice with line items (updates inventory)
+- `GET/POST/PUT/DELETE /api/admin/invoice-line-items` — Admin invoice line item CRUD
+- `GET /api/admin/product-modifier-groups` — List product-modifier group links
+- `POST /api/admin/product-modifier-groups/set` — Set product modifier groups
+- `POST /api/admin/product-modifier-groups/scale-factors` — Set scale factors
+- `GET /api/admin/all-data` — Fetch all admin data for sync comparison
+- `POST /api/admin/apply-sync-changes` — Apply sync changes to admin data
 - `POST /api/sync/:category` — Push local changes, receive server-side changes (category: menu, ingredients, sales)
 - `GET /api/sync/:category/status` — Get sync status for a category (requires ?clientCode query param)
 - `POST /api/dev/seed` — (Dev only) Seed demo data into sync_records. Optional body: `{ "clientCode": "my-client" }` (defaults to "dev-seed"). Returns `{ success, clientCode, recordsInserted, recordsUpdated, totalRecords }`.
@@ -95,7 +119,7 @@ All entities include `updatedAt: number` (epoch ms timestamp) and `deletedAt: nu
 - `/reports` — Sales trends, product mix, inventory status
 - `/integrations` — Third-party connections (placeholder)
 - `/settings` — Tax rate, Incremental Sync (per-category controls + auto-sync), Full Backup & Restore
-- `/admin` — Admin dashboard with aggregated metrics and client list
+- `/admin` — Admin dashboard with tabbed interface: Dashboard (metrics + clients), Products (reuses POS components via AdminStoreProvider), Invoice Intake, and Interactive Sync
 
 ## Schema Migrations
 This project does not use automated schema migration tooling. When the data shape changes (modifications to `shared/schema.ts` types or `client/src/lib/db.ts` Dexie schema), all local and server data should be wiped and recreated:

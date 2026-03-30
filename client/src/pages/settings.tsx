@@ -10,8 +10,9 @@ import { useStore } from "@/lib/store";
 import { useState, useEffect, useCallback } from "react";
 import {
   Settings, Percent, CloudUpload, CloudDownload, Database, CheckCircle2,
-  XCircle, Loader2, RefreshCw, Package, Warehouse, ShoppingCart, Clock, Timer,
+  XCircle, Loader2, RefreshCw, Package, Warehouse, ShoppingCart, Clock, Timer, FileText,
 } from "lucide-react";
+import InteractiveSyncUI from "@/components/interactive-sync";
 import { db } from "@/lib/db";
 import {
   syncCategory, syncAll, getLastSyncedAt, getAutoSyncEnabled,
@@ -32,6 +33,7 @@ const CATEGORY_CONFIG: { key: SyncCategory; label: string; icon: typeof Package;
   { key: "menu", label: "Menu Items", icon: Package, description: "Products, variants, modifier groups, and modifiers" },
   { key: "ingredients", label: "Ingredients", icon: Warehouse, description: "Inventory items and bill of materials" },
   { key: "sales", label: "Sales", icon: ShoppingCart, description: "Sales transactions and line items" },
+  { key: "invoices", label: "Invoices", icon: FileText, description: "Invoices and invoice line items" },
 ];
 
 export default function SettingsPage() {
@@ -45,6 +47,7 @@ export default function SettingsPage() {
     menu: { status: "idle", message: "", lastSynced: getLastSyncedAt("menu") },
     ingredients: { status: "idle", message: "", lastSynced: getLastSyncedAt("ingredients") },
     sales: { status: "idle", message: "", lastSynced: getLastSyncedAt("sales") },
+    invoices: { status: "idle", message: "", lastSynced: getLastSyncedAt("invoices") },
   });
 
   const [autoSync, setAutoSync] = useState(getAutoSyncEnabled());
@@ -94,7 +97,7 @@ export default function SettingsPage() {
     }
 
     setSyncAllStatus("syncing");
-    const categories: SyncCategory[] = ["menu", "ingredients", "sales"];
+    const categories: SyncCategory[] = ["menu", "ingredients", "sales", "invoices"];
     for (const cat of categories) {
       updateCategoryState(cat, { status: "syncing", message: "Syncing..." });
     }
@@ -428,6 +431,8 @@ export default function SettingsPage() {
               </div>
             </CardContent>
           </Card>
+
+          <InteractiveSyncUI mode="pos" />
 
           <Card className="border shadow-soft rounded-2xl overflow-hidden">
             <CardHeader className="bg-muted/20 pb-4">

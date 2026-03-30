@@ -22,12 +22,13 @@ export type SaleLine = {
   unitPrice: number;
 };
 
-export type SyncCategory = "menu" | "ingredients" | "sales";
+export type SyncCategory = "menu" | "ingredients" | "sales" | "invoices";
 
 export const SYNC_CATEGORY_TABLES: Record<SyncCategory, string[]> = {
   menu: ["products", "variants", "modifierGroups", "productModifierGroups", "modifiers"],
   ingredients: ["inventoryItems", "billOfMaterials"],
   sales: ["sales"],
+  invoices: ["invoices", "invoiceLineItems"],
 };
 
 export type SyncRecord = {
