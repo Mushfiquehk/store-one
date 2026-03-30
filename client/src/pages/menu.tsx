@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { ClipboardList, Plus, Filter, Tag, Trash2, X } from "lucide-react";
+import { ClipboardList, Plus, Filter, Tag, Trash2, X, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 import AppShell from "@/components/app-shell";
 import ProductWizard from "@/components/product-wizard";
 import ProductEditor from "@/components/product-editor";
@@ -12,6 +12,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useStore, type Product } from "@/lib/store";
+
+type SortKey = "name" | "type" | "sku" | "tags" | "price";
+type SortDir = "asc" | "desc";
 
 function formatMoney(cents: number) {
   return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(cents / 100);
@@ -29,10 +32,69 @@ export default function MenuPage({ isTab = false }: { isTab?: boolean }) {
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
 
+  const [sortKey, setSortKey] = useState<SortKey>("name");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
+
+  function toggleSort(key: SortKey) {
+    if (sortKey === key) {
+      setSortDir(d => d === "asc" ? "desc" : "asc");
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  }
+
+  function SortIcon({ col }: { col: SortKey }) {
+    if (sortKey !== col) return <ArrowUpDown className="h-3 w-3 ml-1 opacity-40" />;
+    return sortDir === "asc"
+      ? <ArrowUp className="h-3 w-3 ml-1" />
+      : <ArrowDown className="h-3 w-3 ml-1" />;
+  }
+
   const filteredProducts = useMemo(() => {
     if (filterType === "all") return products;
     return products.filter(p => p.type === filterType);
   }, [products, filterType]);
+
+  type FlatRow = { product: Product; variant: typeof variants[0]; tags: string[] };
+
+  const sortedRows = useMemo(() => {
+    const rows: FlatRow[] = [];
+    filteredProducts.forEach(p => {
+      const pvariants = variants.filter(v => v.productId === p.id);
+      const tags = p.attributes?.tags || [];
+      pvariants.forEach(v => {
+        rows.push({ product: p, variant: v, tags });
+      });
+    });
+
+    rows.sort((a, b) => {
+      let cmp = 0;
+      switch (sortKey) {
+        case "name": {
+          const nameA = `${a.product.name} ${a.variant.name}`.toLowerCase();
+          const nameB = `${b.product.name} ${b.variant.name}`.toLowerCase();
+          cmp = nameA.localeCompare(nameB);
+          break;
+        }
+        case "type":
+          cmp = a.product.type.localeCompare(b.product.type);
+          break;
+        case "sku":
+          cmp = (a.variant.sku || "").localeCompare(b.variant.sku || "");
+          break;
+        case "tags":
+          cmp = (a.tags.join(",")).localeCompare(b.tags.join(","));
+          break;
+        case "price":
+          cmp = a.variant.basePrice - b.variant.basePrice;
+          break;
+      }
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+
+    return rows;
+  }, [filteredProducts, variants, sortKey, sortDir]);
 
   const tagStats = useMemo(() => {
     const map: Record<string, string[]> = {};
@@ -123,15 +185,25 @@ export default function MenuPage({ isTab = false }: { isTab?: boolean }) {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-[30%]">Product</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>SKU</TableHead>
-                    <TableHead>Tags</TableHead>
-                    <TableHead className="text-right">Price</TableHead>
+                    <TableHead className="w-[30%] cursor-pointer select-none" onClick={() => toggleSort("name")} data-testid="sort-product">
+                      <span className="flex items-center">Product <SortIcon col="name" /></span>
+                    </TableHead>
+                    <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("type")} data-testid="sort-type">
+                      <span className="flex items-center">Type <SortIcon col="type" /></span>
+                    </TableHead>
+                    <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("sku")} data-testid="sort-sku">
+                      <span className="flex items-center">SKU <SortIcon col="sku" /></span>
+                    </TableHead>
+                    <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("tags")} data-testid="sort-tags">
+                      <span className="flex items-center">Tags <SortIcon col="tags" /></span>
+                    </TableHead>
+                    <TableHead className="text-right cursor-pointer select-none" onClick={() => toggleSort("price")} data-testid="sort-price">
+                      <span className="flex items-center justify-end">Price <SortIcon col="price" /></span>
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredProducts.length === 0 ? (
+                  {sortedRows.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={5} className="text-center py-12 text-muted-foreground">
                         <div className="flex flex-col items-center gap-2">
@@ -141,12 +213,12 @@ export default function MenuPage({ isTab = false }: { isTab?: boolean }) {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filteredProducts.map(p => {
-                      const pvariants = getProductVariants(p.id);
+                    sortedRows.map(({ product: p, variant: v, tags }) => {
                       const selected = p.id === selectedProductId;
-                      const tags: string[] = p.attributes?.tags || [];
+                      const pvariants = variants.filter(vr => vr.productId === p.id);
+                      const showVariant = pvariants.length > 1;
 
-                      return pvariants.map((v, vi) => (
+                      return (
                         <TableRow
                           key={v.id}
                           className={selected ? "bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors" : "cursor-pointer hover:bg-muted/50 transition-colors"}
@@ -158,16 +230,16 @@ export default function MenuPage({ isTab = false }: { isTab?: boolean }) {
                         >
                           <TableCell className="font-medium" data-testid={`text-menu-row-name-${v.id}`}>
                             <span className="text-primary hover:underline">
-                              {vi === 0 ? p.name : ""} {pvariants.length > 1 ? `(${v.name})` : ""}
+                              {p.name}{showVariant ? ` (${v.name})` : ""}
                             </span>
-                            {vi === 0 && p.isComposite && (
+                            {p.isComposite && (
                               <Badge variant="outline" className="ml-2 text-[10px]">Prepared</Badge>
                             )}
                           </TableCell>
-                          <TableCell className="text-muted-foreground">{vi === 0 ? p.type : ""}</TableCell>
+                          <TableCell className="text-muted-foreground">{p.type}</TableCell>
                           <TableCell className="text-muted-foreground font-mono text-xs">{v.sku || "-"}</TableCell>
                           <TableCell>
-                            {vi === 0 && tags.map(t => (
+                            {tags.map(t => (
                               <span key={t} className="inline-block mr-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs">{t}</span>
                             ))}
                           </TableCell>
@@ -175,7 +247,7 @@ export default function MenuPage({ isTab = false }: { isTab?: boolean }) {
                             {formatMoney(v.basePrice)}
                           </TableCell>
                         </TableRow>
-                      ));
+                      );
                     })
                   )}
                 </TableBody>
