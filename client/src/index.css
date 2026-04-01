@@ -253,11 +253,13 @@
     box-shadow: var(--shadow-lg);
   }
 
-  .nav-scroll {
+  .nav-scroll,
+  .scrollbar-hide {
     scrollbar-width: none;
   }
 
-  .nav-scroll::-webkit-scrollbar {
+  .nav-scroll::-webkit-scrollbar,
+  .scrollbar-hide::-webkit-scrollbar {
     display: none;
   }
 }

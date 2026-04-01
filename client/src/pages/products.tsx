@@ -16,21 +16,21 @@ export default function ProductsPage({ embedded = false }: { embedded?: boolean 
   const content = (
     <div className="flex flex-col gap-6">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <div className="flex items-center justify-between mb-6">
-           <TabsList className="bg-card border shadow-sm rounded-xl h-12 p-1 w-fit">
-            <TabsTrigger value="menu" className="rounded-lg h-full px-4">
+        <div className="flex items-center justify-between mb-6 min-w-0">
+           <TabsList className="bg-card border shadow-sm rounded-xl h-12 p-1 max-w-full overflow-x-auto scrollbar-hide">
+            <TabsTrigger value="menu" className="rounded-lg h-full px-4 flex-shrink-0">
               <ClipboardList className="h-4 w-4 mr-2" /> Station Menu
             </TabsTrigger>
-            <TabsTrigger value="modifiers" className="rounded-lg h-full px-4" data-testid="tab-modifiers">
+            <TabsTrigger value="modifiers" className="rounded-lg h-full px-4 flex-shrink-0" data-testid="tab-modifiers">
               <SlidersHorizontal className="h-4 w-4 mr-2" /> Modifiers
             </TabsTrigger>
-            <TabsTrigger value="combos" className="rounded-lg h-full px-4" data-testid="tab-combos">
+            <TabsTrigger value="combos" className="rounded-lg h-full px-4 flex-shrink-0" data-testid="tab-combos">
               <Layers className="h-4 w-4 mr-2" /> Combos
             </TabsTrigger>
-            <TabsTrigger value="recipes" className="rounded-lg h-full px-4">
+            <TabsTrigger value="recipes" className="rounded-lg h-full px-4 flex-shrink-0">
               <Fuel className="h-4 w-4 mr-2" /> Bill of Materials
             </TabsTrigger>
-            <TabsTrigger value="inventory" className="rounded-lg h-full px-4">
+            <TabsTrigger value="inventory" className="rounded-lg h-full px-4 flex-shrink-0">
               <Package className="h-4 w-4 mr-2" /> Bulk Inventory
             </TabsTrigger>
           </TabsList>
