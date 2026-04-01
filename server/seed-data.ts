@@ -329,6 +329,8 @@ function generateSales(): Sale[] {
           variantId: tmpl.variantId, productId: tmpl.productId,
           productName: tmpl.productName, variantName: tmpl.variantName,
           qty: 1, modifiers: modEntries, unitPrice: tmpl.basePrice + modTotal,
+          comboId: null, comboName: null,
+          originalPriceCents: tmpl.basePrice + modTotal, finalPriceCents: tmpl.basePrice + modTotal,
         });
       }
 
@@ -345,6 +347,7 @@ function generateSales(): Sale[] {
         linesJson: lines,
         customerName: "",
         closedAt: saleTime,
+        comboDiscountCents: 0,
         updatedAt: now, deletedAt: null,
       });
     }

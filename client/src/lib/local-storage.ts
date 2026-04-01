@@ -12,6 +12,10 @@ import type {
   Invoice,
   InvoiceLineItem,
   ModifierScaleFactors,
+  Combo,
+  ComboItem,
+  ProductGroup,
+  ProductGroupItem,
 } from "./db";
 
 function notDeleted<T extends { deletedAt: number | null }>(items: T[]): T[] {
@@ -370,6 +374,7 @@ export const storage = {
       linesJson: data.linesJson!,
       customerName: data.customerName ?? "",
       closedAt: data.closedAt ?? null,
+      comboDiscountCents: data.comboDiscountCents ?? 0,
       updatedAt: data.updatedAt ?? now,
       deletedAt: null,
     };
@@ -520,5 +525,120 @@ export const storage = {
       await db.invoiceLineItems.where("invoiceId").equals(id).modify({ deletedAt: now, updatedAt: now });
       await db.invoices.update(id, { deletedAt: now, updatedAt: now });
     });
+  },
+
+  async getCombos(): Promise<Combo[]> {
+    return notDeleted(await db.combos.toArray());
+  },
+
+  async createCombo(data: Partial<Combo>): Promise<Combo> {
+    const now = Date.now();
+    const combo: Combo = {
+      id: data.id!,
+      name: data.name!,
+      pricingStrategy: data.pricingStrategy!,
+      fixedPriceCents: data.fixedPriceCents ?? null,
+      discountValueCents: data.discountValueCents ?? null,
+      discountPercent: data.discountPercent ?? null,
+      active: data.active ?? true,
+      updatedAt: data.updatedAt ?? now,
+      deletedAt: null,
+    };
+    await db.combos.put(combo);
+    return combo;
+  },
+
+  async updateCombo(id: string, data: Partial<Combo>): Promise<Combo | undefined> {
+    await db.combos.update(id, { ...data, updatedAt: Date.now() });
+    return db.combos.get(id);
+  },
+
+  async deleteCombo(id: string): Promise<void> {
+    const now = Date.now();
+    await db.transaction("rw", [db.combos, db.comboItems], async () => {
+      await db.comboItems.where("comboId").equals(id).modify({ deletedAt: now, updatedAt: now });
+      await db.combos.update(id, { deletedAt: now, updatedAt: now });
+    });
+  },
+
+  async getComboItems(comboId?: string): Promise<ComboItem[]> {
+    if (comboId) {
+      return notDeleted(await db.comboItems.where("comboId").equals(comboId).toArray());
+    }
+    return notDeleted(await db.comboItems.toArray());
+  },
+
+  async createComboItem(data: Partial<ComboItem>): Promise<ComboItem> {
+    const now = Date.now();
+    const item: ComboItem = {
+      id: data.id!,
+      comboId: data.comboId!,
+      itemType: data.itemType!,
+      itemId: data.itemId!,
+      updatedAt: data.updatedAt ?? now,
+      deletedAt: null,
+    };
+    await db.comboItems.put(item);
+    return item;
+  },
+
+  async deleteComboItem(id: string): Promise<void> {
+    const now = Date.now();
+    await db.comboItems.update(id, { deletedAt: now, updatedAt: now });
+  },
+
+  async getProductGroups(): Promise<ProductGroup[]> {
+    return notDeleted(await db.productGroups.toArray());
+  },
+
+  async createProductGroup(data: Partial<ProductGroup>): Promise<ProductGroup> {
+    const now = Date.now();
+    const group: ProductGroup = {
+      id: data.id!,
+      name: data.name!,
+      updatedAt: data.updatedAt ?? now,
+      deletedAt: null,
+    };
+    await db.productGroups.put(group);
+    return group;
+  },
+
+  async updateProductGroup(id: string, data: Partial<ProductGroup>): Promise<ProductGroup | undefined> {
+    await db.productGroups.update(id, { ...data, updatedAt: Date.now() });
+    return db.productGroups.get(id);
+  },
+
+  async deleteProductGroup(id: string): Promise<void> {
+    const now = Date.now();
+    await db.transaction("rw", [db.productGroups, db.productGroupItems], async () => {
+      await db.productGroupItems.where("productGroupId").equals(id).modify({ deletedAt: now, updatedAt: now });
+      await db.productGroups.update(id, { deletedAt: now, updatedAt: now });
+    });
+  },
+
+  async getProductGroupItems(groupId?: string): Promise<ProductGroupItem[]> {
+    if (groupId) {
+      return notDeleted(await db.productGroupItems.where("productGroupId").equals(groupId).toArray());
+    }
+    return notDeleted(await db.productGroupItems.toArray());
+  },
+
+  async createProductGroupItem(data: Partial<ProductGroupItem>): Promise<ProductGroupItem> {
+    const now = Date.now();
+    const item: ProductGroupItem = {
+      id: data.id!,
+      productGroupId: data.productGroupId!,
+      itemType: data.itemType!,
+      itemId: data.itemId!,
+      updatedAt: data.updatedAt ?? now,
+      deletedAt: null,
+    };
+    await db.productGroupItems.put(item);
+    return item;
+  },
+
+  async deleteProductGroupItem(id: string): Promise<void> {
+    const now = Date.now();
+    await db.productGroupItems.update(id, { deletedAt: now, updatedAt: now });
   },
 };

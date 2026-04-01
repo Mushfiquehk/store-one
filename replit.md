@@ -24,7 +24,11 @@ All entities include `updatedAt: number` (epoch ms timestamp) and `deletedAt: nu
 - `billOfMaterials` (BomEntry) — links variants/modifiers to inventory items with quantity deduction and scale factors
 - `employees` — staff with role, payRate, and PIN access
 - `timePunches` — clock in/out records
-- `sales` — completed transactions with native `linesJson: SaleLine[]`, `customerName`, and `closedAt` (null = open order)
+- `sales` — completed transactions with native `linesJson: SaleLine[]`, `customerName`, `closedAt` (null = open order), and `comboDiscountCents`
+- `combos` — combo definitions with `name`, `pricingStrategy` ("FIXED" | "DISCOUNT_VALUE" | "DISCOUNT_PERCENT"), pricing fields (`fixedPriceCents`, `discountValueCents`, `discountPercent`), and `active` flag
+- `comboItems` — items belonging to a combo; each references a `comboId` and one of `productId`, `variantId`, or `productGroupId`
+- `productGroups` — named collections of products/variants (e.g., "Any Hot Drink")
+- `productGroupItems` — members of a product group; each references `productGroupId` and one of `productId` or `variantId`
 
 ### Server-side (PostgreSQL / Drizzle)
 - `clients` — registered POS terminal instances (id, code, name, created_at)
@@ -40,7 +44,7 @@ All entities include `updatedAt: number` (epoch ms timestamp) and `deletedAt: nu
 ## Sync System
 
 ### Categories
-- `menu` → products, variants, modifierGroups, productModifierGroups, modifiers
+- `menu` → products, variants, modifierGroups, productModifierGroups, modifiers, combos, comboItems, productGroups, productGroupItems
 - `ingredients` → inventoryItems, billOfMaterials
 - `sales` → sales
 
@@ -64,11 +68,12 @@ All entities include `updatedAt: number` (epoch ms timestamp) and `deletedAt: nu
 - **Scale factor keys use variant IDs**, not variant names
 - **All stringified JSON fields have been eliminated** — native objects/arrays throughout
 - **SaleLine includes denormalized names** captured at sale time
-- **Dexie migration history**: v1 (initial), v2, v3 (JSON parsing), v4 (rekey scale factors), v5 (add updatedAt/deletedAt indexes), v6 (add customerName/closedAt to sales)
+- **SaleLine includes combo tracking fields**: `comboId`, `comboName`, `originalPriceCents`, `finalPriceCents` for reporting
+- **Dexie migration history**: v1 (initial), v2, v3 (JSON parsing), v4 (rekey scale factors), v5 (add updatedAt/deletedAt indexes), v6 (add customerName/closedAt to sales), v7 (add combos, comboItems, productGroups, productGroupItems tables + comboDiscountCents on sales)
 - **productModifierGroups sync uses `${productId}::${modifierGroupId}` as recordId** for compound key serialization
 
 ## Key Files
-- `client/src/lib/db.ts` — Dexie.js database definition with IndexedDB schema and migrations (v1–v6)
+- `client/src/lib/db.ts` — Dexie.js database definition with IndexedDB schema and migrations (v1–v7)
 - `client/src/lib/local-storage.ts` — CRUD storage layer for all entities (with soft deletes and updatedAt stamping)
 - `client/src/lib/store.tsx` — React context provider using Dexie live queries (filters soft-deleted records)
 - `client/src/lib/sync.ts` — Client-side sync service (syncCategory, syncAll, startAutoSync, stopAutoSync)
@@ -80,6 +85,7 @@ All entities include `updatedAt: number` (epoch ms timestamp) and `deletedAt: nu
 - `server/routes.ts` — API routes for backup, restore, clients list, admin metrics, incremental sync, and dev seed/clear endpoints
 - `server/seed-data.ts` — Server-side demo data definitions for dev seed endpoint
 - `server/storage.ts` — Server-side storage interface using Drizzle (backup + sync + admin CRUD operations)
+- `client/src/pages/combos.tsx` — Combo management UI: ProductGroupManager + ComboEditor with pricing strategy config and item picker
 - `client/src/lib/admin-store.tsx` — AdminStoreProvider that exposes the same StoreContextType as useStore() but backed by fetch() to /api/admin/ endpoints
 - `client/src/components/admin-invoice-intake.tsx` — Invoice intake UI for admin section
 - `client/src/components/interactive-sync.tsx` — Interactive sync UI with diff comparison and per-item accept/reject
@@ -114,7 +120,7 @@ All entities include `updatedAt: number` (epoch ms timestamp) and `deletedAt: nu
 ## Pages
 - `/` — POS register
 - `/start` — Onboarding/getting started
-- `/products` — Station Menu, Modifiers, Bill of Materials, Bulk Inventory
+- `/products` — Station Menu, Modifiers, Combos, Bill of Materials, Bulk Inventory
 - `/employees` — Staff management
 - `/reports` — Sales trends, product mix, inventory status
 - `/integrations` — Third-party connections (placeholder)

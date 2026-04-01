@@ -16,9 +16,13 @@ import type {
   Invoice,
   InvoiceLineItem,
   ModifierScaleFactors,
+  Combo,
+  ComboItem,
+  ProductGroup,
+  ProductGroupItem,
 } from "./db";
 
-export type { Product, Variant, ModifierGroup, Modifier, InventoryItem, BomEntry, Employee, TimePunch, Sale, Invoice, InvoiceLineItem, ModifierScaleFactors };
+export type { Product, Variant, ModifierGroup, Modifier, InventoryItem, BomEntry, Employee, TimePunch, Sale, Invoice, InvoiceLineItem, ModifierScaleFactors, Combo, ComboItem, ProductGroup, ProductGroupItem };
 
 export type CartItem = {
   instanceId: string;
@@ -45,6 +49,10 @@ type StoreContextType = {
   sales: Sale[];
   invoices: Invoice[];
   invoiceLineItems: InvoiceLineItem[];
+  combos: Combo[];
+  comboItems: ComboItem[];
+  productGroups: ProductGroup[];
+  productGroupItems: ProductGroupItem[];
   integrations: string[];
   productModifierLinks: Record<string, string[]>;
   productModifierScaleFactors: Record<string, ModifierScaleFactors | null>;
@@ -101,6 +109,17 @@ type StoreContextType = {
   updateInvoice: (id: string, data: Partial<Invoice>) => Promise<any>;
   deleteInvoice: (id: string) => Promise<void>;
 
+  addCombo: (data: Partial<Combo>) => Promise<any>;
+  updateCombo: (id: string, data: Partial<Combo>) => void;
+  deleteCombo: (id: string) => void;
+  addComboItem: (data: Partial<ComboItem>) => Promise<any>;
+  deleteComboItem: (id: string) => void;
+  addProductGroup: (data: Partial<ProductGroup>) => Promise<any>;
+  updateProductGroup: (id: string, data: Partial<ProductGroup>) => void;
+  deleteProductGroup: (id: string) => void;
+  addProductGroupItem: (data: Partial<ProductGroupItem>) => Promise<any>;
+  deleteProductGroupItem: (id: string) => void;
+
   toggleIntegration: (id: string) => void;
 };
 
@@ -122,6 +141,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const sales = useLiveQuery(() => db.sales.filter(r => !r.deletedAt).toArray(), []) as Sale[] | undefined;
   const invoices = useLiveQuery(() => db.invoices.filter(r => !r.deletedAt).toArray(), []) as Invoice[] | undefined;
   const invoiceLineItemsList = useLiveQuery(() => db.invoiceLineItems.filter(r => !r.deletedAt).toArray(), []) as InvoiceLineItem[] | undefined;
+  const combosList = useLiveQuery(() => db.combos.filter(r => !r.deletedAt).toArray(), []) as Combo[] | undefined;
+  const comboItemsList = useLiveQuery(() => db.comboItems.filter(r => !r.deletedAt).toArray(), []) as ComboItem[] | undefined;
+  const productGroupsList = useLiveQuery(() => db.productGroups.filter(r => !r.deletedAt).toArray(), []) as ProductGroup[] | undefined;
+  const productGroupItemsList = useLiveQuery(() => db.productGroupItems.filter(r => !r.deletedAt).toArray(), []) as ProductGroupItem[] | undefined;
 
   const productModifierData = useLiveQuery(async () => {
     const rows = await db.productModifierGroups.filter(r => !r.deletedAt).toArray();
@@ -199,6 +222,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const updateInvoice = useCallback((id: string, data: Partial<Invoice>) => storage.updateInvoice(id, data), []);
   const deleteInvoice = useCallback((id: string) => storage.deleteInvoice(id), []);
 
+  const addCombo = useCallback((data: Partial<Combo>) => storage.createCombo(data), []);
+  const updateCombo = useCallback((id: string, data: Partial<Combo>) => { storage.updateCombo(id, data); }, []);
+  const deleteCombo = useCallback((id: string) => { storage.deleteCombo(id); }, []);
+  const addComboItem = useCallback((data: Partial<ComboItem>) => storage.createComboItem(data), []);
+  const deleteComboItem = useCallback((id: string) => { storage.deleteComboItem(id); }, []);
+  const addProductGroup = useCallback((data: Partial<ProductGroup>) => storage.createProductGroup(data), []);
+  const updateProductGroup = useCallback((id: string, data: Partial<ProductGroup>) => { storage.updateProductGroup(id, data); }, []);
+  const deleteProductGroup = useCallback((id: string) => { storage.deleteProductGroup(id); }, []);
+  const addProductGroupItem = useCallback((data: Partial<ProductGroupItem>) => storage.createProductGroupItem(data), []);
+  const deleteProductGroupItem = useCallback((id: string) => { storage.deleteProductGroupItem(id); }, []);
+
   const toggleIntegration = useCallback((id: string) => {
     setIntegrations(prev => {
       if (prev.includes(id)) return prev.filter(i => i !== id);
@@ -219,6 +253,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     sales: sales ?? [],
     invoices: invoices ?? [],
     invoiceLineItems: invoiceLineItemsList ?? [],
+    combos: combosList ?? [],
+    comboItems: comboItemsList ?? [],
+    productGroups: productGroupsList ?? [],
+    productGroupItems: productGroupItemsList ?? [],
     integrations,
     productModifierLinks,
     productModifierScaleFactors,
@@ -274,6 +312,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     deleteInvoiceLineItem,
     updateInvoice,
     deleteInvoice,
+
+    addCombo,
+    updateCombo,
+    deleteCombo,
+    addComboItem,
+    deleteComboItem,
+    addProductGroup,
+    updateProductGroup,
+    deleteProductGroup,
+    addProductGroupItem,
+    deleteProductGroupItem,
 
     toggleIntegration,
   };

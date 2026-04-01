@@ -4,9 +4,11 @@ import type {
   ModifierScaleFactors,
   ScaleFactorMatrix,
   SaleLine,
+  PricingStrategy,
+  ComboItemType,
 } from "@shared/schema";
 
-export type { ProductAttributes, ModifierScaleFactors, ScaleFactorMatrix, SaleLine };
+export type { ProductAttributes, ModifierScaleFactors, ScaleFactorMatrix, SaleLine, PricingStrategy, ComboItemType };
 
 export interface Product {
   id: string;
@@ -135,6 +137,44 @@ export interface Sale {
   linesJson: SaleLine[];
   customerName: string;
   closedAt: number | null;
+  comboDiscountCents: number;
+  updatedAt: number;
+  deletedAt: number | null;
+}
+
+export interface Combo {
+  id: string;
+  name: string;
+  pricingStrategy: PricingStrategy;
+  fixedPriceCents: number | null;
+  discountValueCents: number | null;
+  discountPercent: number | null;
+  active: boolean;
+  updatedAt: number;
+  deletedAt: number | null;
+}
+
+export interface ComboItem {
+  id: string;
+  comboId: string;
+  itemType: ComboItemType;
+  itemId: string;
+  updatedAt: number;
+  deletedAt: number | null;
+}
+
+export interface ProductGroup {
+  id: string;
+  name: string;
+  updatedAt: number;
+  deletedAt: number | null;
+}
+
+export interface ProductGroupItem {
+  id: string;
+  productGroupId: string;
+  itemType: "PRODUCT" | "VARIANT";
+  itemId: string;
   updatedAt: number;
   deletedAt: number | null;
 }
@@ -152,6 +192,10 @@ class PosDatabase extends Dexie {
   sales!: Table<Sale, string>;
   invoices!: Table<Invoice, string>;
   invoiceLineItems!: Table<InvoiceLineItem, string>;
+  combos!: Table<Combo, string>;
+  comboItems!: Table<ComboItem, string>;
+  productGroups!: Table<ProductGroup, string>;
+  productGroupItems!: Table<ProductGroupItem, string>;
 
   constructor() {
     super("cornerpos");
@@ -347,6 +391,25 @@ class PosDatabase extends Dexie {
       await tx.table("sales").toCollection().modify(sale => {
         if (sale.customerName === undefined) sale.customerName = "";
         if (sale.closedAt === undefined) sale.closedAt = sale.createdAt;
+      });
+    });
+
+    this.version(7).stores({
+      combos: "id, name, updatedAt",
+      comboItems: "id, comboId, itemType, itemId, updatedAt",
+      productGroups: "id, name, updatedAt",
+      productGroupItems: "id, productGroupId, itemType, itemId, updatedAt",
+    }).upgrade(async tx => {
+      await tx.table("sales").toCollection().modify(sale => {
+        if (sale.comboDiscountCents === undefined) sale.comboDiscountCents = 0;
+        if (Array.isArray(sale.linesJson)) {
+          for (const line of sale.linesJson) {
+            if (line.comboId === undefined) line.comboId = null;
+            if (line.comboName === undefined) line.comboName = null;
+            if (line.originalPriceCents === undefined) line.originalPriceCents = line.unitPrice;
+            if (line.finalPriceCents === undefined) line.finalPriceCents = line.unitPrice;
+          }
+        }
       });
     });
   }

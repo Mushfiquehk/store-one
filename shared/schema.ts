@@ -20,12 +20,16 @@ export type SaleLine = {
     unitPrice: number;
   }[];
   unitPrice: number;
+  comboId: string | null;
+  comboName: string | null;
+  originalPriceCents: number;
+  finalPriceCents: number;
 };
 
 export type SyncCategory = "menu" | "ingredients" | "sales" | "invoices";
 
 export const SYNC_CATEGORY_TABLES: Record<SyncCategory, string[]> = {
-  menu: ["products", "variants", "modifierGroups", "productModifierGroups", "modifiers"],
+  menu: ["products", "variants", "modifierGroups", "productModifierGroups", "modifiers", "combos", "comboItems", "productGroups", "productGroupItems"],
   ingredients: ["inventoryItems", "billOfMaterials"],
   sales: ["sales"],
   invoices: ["invoices", "invoiceLineItems"],
@@ -166,6 +170,48 @@ export type Sale = {
   linesJson: SaleLine[];
   customerName: string;
   closedAt: number | null;
+  comboDiscountCents: number;
+  updatedAt: number;
+  deletedAt: number | null;
+};
+
+export type PricingStrategy = "FIXED" | "DISCOUNT_VALUE" | "DISCOUNT_PERCENT";
+
+export type Combo = {
+  id: string;
+  name: string;
+  pricingStrategy: PricingStrategy;
+  fixedPriceCents: number | null;
+  discountValueCents: number | null;
+  discountPercent: number | null;
+  active: boolean;
+  updatedAt: number;
+  deletedAt: number | null;
+};
+
+export type ComboItemType = "PRODUCT" | "VARIANT" | "PRODUCT_GROUP";
+
+export type ComboItem = {
+  id: string;
+  comboId: string;
+  itemType: ComboItemType;
+  itemId: string;
+  updatedAt: number;
+  deletedAt: number | null;
+};
+
+export type ProductGroup = {
+  id: string;
+  name: string;
+  updatedAt: number;
+  deletedAt: number | null;
+};
+
+export type ProductGroupItem = {
+  id: string;
+  productGroupId: string;
+  itemType: "PRODUCT" | "VARIANT";
+  itemId: string;
   updatedAt: number;
   deletedAt: number | null;
 };

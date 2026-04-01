@@ -1,6 +1,6 @@
 import { useMemo, useState, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { LayoutGrid, Receipt, ShoppingBag, X, Clock, Search, SlidersHorizontal, Ruler } from "lucide-react";
+import { LayoutGrid, Receipt, ShoppingBag, X, Clock, Search, SlidersHorizontal, Ruler, Layers, Tag } from "lucide-react";
 import AppShell from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,6 +14,7 @@ import { useStore, type CartItem } from "@/lib/store";
 import ModifierSelector, { type SelectedModifier } from "@/components/modifier-selector";
 import OrderReceipts from "@/components/order-receipts";
 import { format } from "date-fns";
+import type { Combo } from "@/lib/db";
 
 function formatMoney(cents: number) {
   return new Intl.NumberFormat(undefined, {
@@ -31,10 +32,13 @@ export default function PosPage() {
   const {
     products, variants, inventory, bom, sales, modifierGroups, modifiers,
     productModifierLinks, productModifierScaleFactors, addSale, updateSale, adjustInventory, integrations, isLoading,
+    combos, comboItems, productGroups, productGroupItems,
   } = useStore();
 
   const [taxRatePct, setTaxRatePct] = useState(8.25);
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [appliedCombos, setAppliedCombos] = useState<Map<string, string>>(new Map());
+  const [dismissedCombos, setDismissedCombos] = useState<Set<string>>(new Set());
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
   const [paymentType, setPaymentType] = useState<"Cash" | "Card">("Cash");
 
@@ -128,6 +132,118 @@ export default function PosPage() {
 
   const hasPaymentIntegration = useMemo(() => integrations.some(id => id.startsWith('pay_')), [integrations]);
 
+  const comboVariantMap = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    combos.filter(c => c.active).forEach(c => {
+      const vids = new Set<string>();
+      const items = comboItems.filter(i => i.comboId === c.id);
+      items.forEach(i => {
+        if (i.itemType === "VARIANT") {
+          vids.add(i.itemId);
+        } else if (i.itemType === "PRODUCT") {
+          (variantsByProduct[i.itemId] || []).forEach(v => vids.add(v.id));
+        } else if (i.itemType === "PRODUCT_GROUP") {
+          const groupItems = productGroupItems.filter(gi => gi.productGroupId === i.itemId);
+          groupItems.forEach(gi => {
+            if (gi.itemType === "VARIANT") vids.add(gi.itemId);
+            else if (gi.itemType === "PRODUCT") {
+              (variantsByProduct[gi.itemId] || []).forEach(v => vids.add(v.id));
+            }
+          });
+        }
+      });
+      map.set(c.id, vids);
+    });
+    return map;
+  }, [combos, comboItems, variantsByProduct, productGroupItems]);
+
+  const suggestedCombos = useMemo(() => {
+    if (cart.length === 0) return [];
+    const cartVariantIds = new Set(cart.map(c => c.variantId));
+    const suggestions: Combo[] = [];
+    combos.filter(c => c.active).forEach(c => {
+      const alreadyApplied = Array.from(appliedCombos.values()).includes(c.id);
+      if (alreadyApplied) return;
+      if (dismissedCombos.has(c.id)) return;
+      const allowedVids = comboVariantMap.get(c.id);
+      if (!allowedVids || allowedVids.size === 0) return;
+      let matchCount = 0;
+      for (const vid of cartVariantIds) {
+        if (allowedVids.has(vid)) matchCount++;
+      }
+      if (matchCount >= 2) {
+        suggestions.push(c);
+      }
+    });
+    return suggestions;
+  }, [cart, combos, comboVariantMap, appliedCombos, dismissedCombos]);
+
+  function applyCombo(combo: Combo) {
+    const allowedVids = comboVariantMap.get(combo.id);
+    if (!allowedVids) return;
+    const comboSlotCount = comboItems.filter(i => i.comboId === combo.id).length;
+    const newApplied = new Map(appliedCombos);
+    let assigned = 0;
+    for (const item of cart) {
+      if (assigned >= comboSlotCount) break;
+      if (allowedVids.has(item.variantId) && !newApplied.has(item.instanceId)) {
+        newApplied.set(item.instanceId, combo.id);
+        assigned++;
+      }
+    }
+    if (assigned === 0) return;
+    setAppliedCombos(newApplied);
+    setDismissedCombos(prev => { const n = new Set(prev); n.delete(combo.id); return n; });
+    toast({ title: `Combo applied: ${combo.name}` });
+  }
+
+  function removeCombo(comboId: string) {
+    setAppliedCombos(prev => {
+      const n = new Map(prev);
+      for (const [k, v] of n) {
+        if (v === comboId) n.delete(k);
+      }
+      return n;
+    });
+  }
+
+  function getComboDiscount(combo: Combo, itemsInCombo: CartItem[]): number {
+    const originalTotal = itemsInCombo.reduce((sum, item) => sum + getCartItemPrice(item) * item.qty, 0);
+    let discount = 0;
+    if (combo.pricingStrategy === "FIXED" && combo.fixedPriceCents != null) {
+      discount = originalTotal - combo.fixedPriceCents;
+    } else if (combo.pricingStrategy === "DISCOUNT_VALUE" && combo.discountValueCents != null) {
+      discount = combo.discountValueCents;
+    } else if (combo.pricingStrategy === "DISCOUNT_PERCENT" && combo.discountPercent != null) {
+      discount = Math.round(originalTotal * Math.min(combo.discountPercent, 100) / 100);
+    }
+    return Math.max(0, Math.min(discount, originalTotal));
+  }
+
+  const comboDiscounts = useMemo(() => {
+    const discountsByCombo = new Map<string, { combo: Combo; discount: number; items: CartItem[] }>();
+    const comboItemsMap = new Map<string, CartItem[]>();
+    appliedCombos.forEach((comboId, instanceId) => {
+      const item = cart.find(c => c.instanceId === instanceId);
+      if (!item) return;
+      if (!comboItemsMap.has(comboId)) comboItemsMap.set(comboId, []);
+      comboItemsMap.get(comboId)!.push(item);
+    });
+    comboItemsMap.forEach((items, comboId) => {
+      const combo = combos.find(c => c.id === comboId);
+      if (!combo) return;
+      const discount = getComboDiscount(combo, items);
+      discountsByCombo.set(comboId, { combo, discount, items });
+    });
+    return discountsByCombo;
+  }, [appliedCombos, cart, combos]);
+
+  const totalComboDiscount = useMemo(() => {
+    let total = 0;
+    comboDiscounts.forEach(({ discount }) => { total += discount; });
+    return total;
+  }, [comboDiscounts]);
+
   function getLinkedGroupIds(productId: string): string[] {
     return productModifierLinks[productId] || [];
   }
@@ -168,10 +284,17 @@ export default function PosPage() {
 
   function removeFromCart(instanceId: string) {
     setCart(prev => prev.filter(item => item.instanceId !== instanceId));
+    setAppliedCombos(prev => {
+      const n = new Map(prev);
+      n.delete(instanceId);
+      return n;
+    });
   }
 
   function clearCart() {
     setCart([]);
+    setAppliedCombos(new Map());
+    setDismissedCombos(new Set());
   }
 
   function getModifierPrice(mod: typeof modifiers[0], variantId: string): number {
@@ -206,10 +329,11 @@ export default function PosPage() {
     return basePrice + modTotal;
   }
 
-  const subtotalCents = cart.reduce((acc, item) => {
+  const subtotalCentsBeforeCombo = cart.reduce((acc, item) => {
     return acc + getCartItemPrice(item) * item.qty;
   }, 0);
 
+  const subtotalCents = Math.max(0, subtotalCentsBeforeCombo - totalComboDiscount);
   const taxCents = Math.round((subtotalCents * taxRatePct) / 100);
   const totalCents = subtotalCents + taxCents;
 
@@ -311,6 +435,14 @@ export default function PosPage() {
       });
     });
 
+    const itemComboMap = new Map<string, { comboId: string; comboName: string }>();
+    comboDiscounts.forEach(({ combo, discount, items }) => {
+      const perItemDiscount = items.length > 0 ? Math.floor(discount / items.reduce((s, i) => s + i.qty, 0)) : 0;
+      items.forEach(item => {
+        itemComboMap.set(item.instanceId, { comboId: combo.id, comboName: combo.name });
+      });
+    });
+
     addSale({
       id: uid("sale"),
       createdAt: Date.now(),
@@ -321,9 +453,26 @@ export default function PosPage() {
       status: "completed",
       customerName: customerName.trim(),
       closedAt: null,
+      comboDiscountCents: totalComboDiscount,
       linesJson: cart.map(c => {
         const prod = products.find(p => p.id === c.productId);
         const vari = variants.find(v => v.id === c.variantId);
+        const originalPrice = getCartItemPrice(c);
+        const comboInfo = itemComboMap.get(c.instanceId);
+        const comboId = comboInfo?.comboId ?? null;
+        const comboName = comboInfo?.comboName ?? null;
+        let finalPrice = originalPrice;
+        if (comboId) {
+          const cd = comboDiscounts.get(comboId);
+          if (cd) {
+            const totalItems = cd.items.reduce((s, i) => s + i.qty, 0);
+            const totalOriginal = cd.items.reduce((s, i) => s + getCartItemPrice(i) * i.qty, 0);
+            if (totalOriginal > 0) {
+              const ratio = (originalPrice * c.qty) / totalOriginal;
+              finalPrice = Math.round(originalPrice - (cd.discount * ratio / c.qty));
+            }
+          }
+        }
         return {
           variantId: c.variantId,
           productId: c.productId,
@@ -339,7 +488,11 @@ export default function PosPage() {
               unitPrice: mod ? getModifierPrice(mod, c.variantId) : 0,
             };
           }),
-          unitPrice: getCartItemPrice(c),
+          unitPrice: originalPrice,
+          comboId,
+          comboName,
+          originalPriceCents: originalPrice,
+          finalPriceCents: finalPrice,
         };
       }),
     });
@@ -567,17 +720,79 @@ export default function PosPage() {
                 <div className="flex-1 overflow-auto p-4">
                   {cart.length > 0 ? (
                     <div className="space-y-4">
+                      <AnimatePresence>
+                        {suggestedCombos.map(c => (
+                          <motion.div
+                            key={`suggestion-${c.id}`}
+                            initial={{ opacity: 0, y: -10, height: 0 }}
+                            animate={{ opacity: 1, y: 0, height: "auto" }}
+                            exit={{ opacity: 0, y: -10, height: 0 }}
+                            className="overflow-hidden"
+                          >
+                            <div className="flex items-center justify-between p-2.5 rounded-xl border border-primary/30 bg-primary/5 mb-2" data-testid={`combo-suggestion-${c.id}`}>
+                              <div className="flex items-center gap-2 flex-1 min-w-0">
+                                <Layers className="h-4 w-4 text-primary shrink-0" />
+                                <button
+                                  className="text-sm font-medium text-primary hover:underline truncate text-left"
+                                  onClick={() => applyCombo(c)}
+                                  data-testid={`button-apply-combo-${c.id}`}
+                                >
+                                  {c.name}
+                                </button>
+                                <Badge variant="secondary" className="text-[10px] shrink-0">
+                                  {c.pricingStrategy === "FIXED" && c.fixedPriceCents != null && formatMoney(c.fixedPriceCents)}
+                                  {c.pricingStrategy === "DISCOUNT_VALUE" && c.discountValueCents != null && `-${formatMoney(c.discountValueCents)}`}
+                                  {c.pricingStrategy === "DISCOUNT_PERCENT" && c.discountPercent != null && `-${c.discountPercent}%`}
+                                </Badge>
+                              </div>
+                              <Button
+                                variant="ghost" size="sm"
+                                className="h-6 w-6 p-0 shrink-0"
+                                onClick={() => setDismissedCombos(prev => new Set(prev).add(c.id))}
+                                data-testid={`button-dismiss-combo-${c.id}`}
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </motion.div>
+                        ))}
+                      </AnimatePresence>
+
+                      {comboDiscounts.size > 0 && (
+                        <div className="space-y-1 mb-2">
+                          {Array.from(comboDiscounts.entries()).map(([comboId, { combo, discount }]) => (
+                            <div key={comboId} className="flex items-center justify-between py-1.5 px-3 rounded-lg bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800/50" data-testid={`applied-combo-${comboId}`}>
+                              <div className="flex items-center gap-2">
+                                <Tag className="h-3.5 w-3.5 text-green-600" />
+                                <span className="text-xs font-medium text-green-700 dark:text-green-400">{combo.name}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-medium text-green-700 dark:text-green-400">-{formatMoney(discount)}</span>
+                                <Button variant="ghost" size="sm" className="h-5 w-5 p-0 text-green-600 hover:text-red-500" onClick={() => removeCombo(comboId)} data-testid={`button-remove-combo-${comboId}`}>
+                                  <X className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
                       <ul className="space-y-3">
                         {[...cart].reverse().map(item => {
                           const v = variants.find(x => x.id === item.variantId);
                           const p = products.find(x => x.id === item.productId);
                           const itemPrice = getCartItemPrice(item);
                           const hasItemModifiers = item.modifiers.length > 0;
+                          const itemComboId = appliedCombos.get(item.instanceId);
+                          const itemCombo = itemComboId ? combos.find(c => c.id === itemComboId) : null;
                           return (
-                            <li key={item.instanceId} className="flex flex-col gap-1 rounded-xl border bg-background p-3" data-testid={`cart-item-${item.instanceId}`}>
+                            <li key={item.instanceId} className={`flex flex-col gap-1 rounded-xl border p-3 ${itemCombo ? "bg-green-50/50 dark:bg-green-950/20 border-green-200/50 dark:border-green-800/30" : "bg-background"}`} data-testid={`cart-item-${item.instanceId}`}>
                               <div className="flex items-start justify-between">
                                 <div>
-                                  <p className="font-medium">{p?.name} {v?.name !== "Per Litre" && v?.name !== p?.name ? `(${v?.name})` : ""}</p>
+                                  <div className="flex items-center gap-1.5">
+                                    <p className="font-medium">{p?.name} {v?.name !== "Per Litre" && v?.name !== p?.name ? `(${v?.name})` : ""}</p>
+                                    {itemCombo && <Badge variant="outline" className="text-[9px] h-4 border-green-300 text-green-700 dark:text-green-400">{itemCombo.name}</Badge>}
+                                  </div>
                                   <p className="text-xs text-muted-foreground">{formatMoney(itemPrice)} x {item.qty}</p>
                                 </div>
                                 <div className="flex items-center gap-2">
@@ -618,8 +833,14 @@ export default function PosPage() {
                       <div className="rounded-xl bg-muted/30 p-4 border border-border/50 space-y-1.5 text-sm mt-4">
                         <div className="flex justify-between text-muted-foreground">
                           <span>Subtotal</span>
-                          <span>{formatMoney(subtotalCents)}</span>
+                          <span>{formatMoney(subtotalCentsBeforeCombo)}</span>
                         </div>
+                        {totalComboDiscount > 0 && (
+                          <div className="flex justify-between text-green-600">
+                            <span>Combo Discount</span>
+                            <span>-{formatMoney(totalComboDiscount)}</span>
+                          </div>
+                        )}
                         <div className="flex justify-between text-muted-foreground">
                           <span>Tax ({taxRatePct}%)</span>
                           <span>{formatMoney(taxCents)}</span>
@@ -717,8 +938,14 @@ export default function PosPage() {
               <div className="rounded-xl bg-muted/30 p-4 border border-border/50 text-sm">
                 <div className="flex justify-between mb-1">
                   <span className="text-muted-foreground">Subtotal</span>
-                  <span>{formatMoney(subtotalCents)}</span>
+                  <span>{formatMoney(subtotalCentsBeforeCombo)}</span>
                 </div>
+                {totalComboDiscount > 0 && (
+                  <div className="flex justify-between mb-1 text-green-600">
+                    <span>Combo Discount</span>
+                    <span>-{formatMoney(totalComboDiscount)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between mb-1">
                   <span className="text-muted-foreground">Tax</span>
                   <span>{formatMoney(taxCents)}</span>
