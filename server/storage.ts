@@ -200,9 +200,116 @@ export const storage: IStorage = {
     const serverChanges: SyncChange[] = [];
     const processedRecordKeys = new Set<string>();
 
+    const adminLookups: Record<string, (recordId: string) => Promise<Record<string, unknown> | null>> = {
+      products: async (recordId) => {
+        const [r] = await db.select().from(adminProducts).where(eq(adminProducts.id, recordId)).limit(1);
+        return r ? (r as unknown as Record<string, unknown>) : null;
+      },
+      variants: async (recordId) => {
+        const [r] = await db.select().from(adminVariants).where(eq(adminVariants.id, recordId)).limit(1);
+        return r ? (r as unknown as Record<string, unknown>) : null;
+      },
+      modifierGroups: async (recordId) => {
+        const [r] = await db.select().from(adminModifierGroups).where(eq(adminModifierGroups.id, recordId)).limit(1);
+        return r ? (r as unknown as Record<string, unknown>) : null;
+      },
+      modifiers: async (recordId) => {
+        const [r] = await db.select().from(adminModifiers).where(eq(adminModifiers.id, recordId)).limit(1);
+        return r ? (r as unknown as Record<string, unknown>) : null;
+      },
+      inventoryItems: async (recordId) => {
+        const [r] = await db.select().from(adminInventoryItems).where(eq(adminInventoryItems.id, recordId)).limit(1);
+        return r ? (r as unknown as Record<string, unknown>) : null;
+      },
+      billOfMaterials: async (recordId) => {
+        const [r] = await db.select().from(adminBillOfMaterials).where(eq(adminBillOfMaterials.id, recordId)).limit(1);
+        return r ? (r as unknown as Record<string, unknown>) : null;
+      },
+      invoices: async (recordId) => {
+        const [r] = await db.select().from(adminInvoices).where(eq(adminInvoices.id, recordId)).limit(1);
+        return r ? (r as unknown as Record<string, unknown>) : null;
+      },
+      invoiceLineItems: async (recordId) => {
+        const [r] = await db.select().from(adminInvoiceLineItems).where(eq(adminInvoiceLineItems.id, recordId)).limit(1);
+        return r ? (r as unknown as Record<string, unknown>) : null;
+      },
+      productModifierGroups: async (recordId) => {
+        const [pId, gId] = recordId.split("::");
+        if (!pId || !gId) return null;
+        const [r] = await db.select().from(adminProductModifierGroups)
+          .where(and(eq(adminProductModifierGroups.productId, pId), eq(adminProductModifierGroups.modifierGroupId, gId)))
+          .limit(1);
+        return r ? (r as unknown as Record<string, unknown>) : null;
+      },
+    };
+
     for (const change of changes) {
       const key = `${change.tableName}::${change.recordId}`;
       processedRecordKeys.add(key);
+
+      const getAdminRecord = adminLookups[change.tableName];
+      if (getAdminRecord) {
+        const adminRecord = await getAdminRecord(change.recordId);
+        if (adminRecord) {
+          const adminUpdatedAt = (adminRecord.updatedAt as number) || 0;
+          const adminDeletedAt = (adminRecord.deletedAt as number) || null;
+          const adminData = { ...adminRecord };
+
+          const posDataJson = JSON.stringify(change.data);
+          const adminDataJson = JSON.stringify(adminData);
+          const dataMatches = posDataJson === adminDataJson && change.deletedAt === adminDeletedAt;
+
+          if (!dataMatches) {
+            await db
+              .insert(syncRecords)
+              .values({
+                clientId,
+                tableName: change.tableName,
+                recordId: change.recordId,
+                data: adminData,
+                updatedAt: adminUpdatedAt,
+                deletedAt: adminDeletedAt,
+              })
+              .onConflictDoUpdate({
+                target: [syncRecords.clientId, syncRecords.tableName, syncRecords.recordId],
+                set: {
+                  data: adminData,
+                  updatedAt: adminUpdatedAt,
+                  deletedAt: adminDeletedAt,
+                },
+              });
+
+            serverChanges.push({
+              tableName: change.tableName,
+              recordId: change.recordId,
+              data: adminData,
+              updatedAt: adminUpdatedAt,
+              deletedAt: adminDeletedAt,
+            });
+            continue;
+          }
+
+          await db
+            .insert(syncRecords)
+            .values({
+              clientId,
+              tableName: change.tableName,
+              recordId: change.recordId,
+              data: adminData,
+              updatedAt: adminUpdatedAt,
+              deletedAt: adminDeletedAt,
+            })
+            .onConflictDoUpdate({
+              target: [syncRecords.clientId, syncRecords.tableName, syncRecords.recordId],
+              set: {
+                data: adminData,
+                updatedAt: adminUpdatedAt,
+                deletedAt: adminDeletedAt,
+              },
+            });
+          continue;
+        }
+      }
 
       const existing = await db
         .select()

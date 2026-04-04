@@ -16,6 +16,12 @@ interface SyncResult {
   syncedAt: number;
 }
 
+const ADMIN_AUTHORITATIVE_TABLES = new Set([
+  "products", "variants", "modifierGroups", "productModifierGroups",
+  "modifiers", "inventoryItems", "billOfMaterials",
+  "invoices", "invoiceLineItems",
+]);
+
 const SYNC_STATE_PREFIX = "cornerpos_sync_";
 
 function getSyncStateKey(category: SyncCategory): string {
@@ -115,13 +121,15 @@ async function applyServerChanges(serverChanges: SyncChange[]): Promise<void> {
 
     const table = (db as Record<string, unknown>)[dexieTable] as import("dexie").Table;
 
+    const isAdminAuthoritative = ADMIN_AUTHORITATIVE_TABLES.has(tableName);
+
     for (const change of changes) {
       if (tableName === "productModifierGroups") {
         const data = change.data;
         const key = [data.productId as string, data.modifierGroupId as string] as [string, string];
         const existing = await table.get(key);
         if (existing) {
-          if (change.updatedAt > (existing.updatedAt || 0)) {
+          if (isAdminAuthoritative || change.updatedAt > (existing.updatedAt || 0)) {
             await table.update(key, change.data);
           }
         } else {
@@ -130,7 +138,7 @@ async function applyServerChanges(serverChanges: SyncChange[]): Promise<void> {
       } else {
         const existing = await table.get(change.recordId);
         if (existing) {
-          if (change.updatedAt > (existing.updatedAt || 0)) {
+          if (isAdminAuthoritative || change.updatedAt > (existing.updatedAt || 0)) {
             await table.update(change.recordId, change.data);
           }
         } else {

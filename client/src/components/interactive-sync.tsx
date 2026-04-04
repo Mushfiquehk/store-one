@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { RefreshCw, Check, X, ArrowRightLeft, Plus, Pencil, Trash2 } from "lucide-react";
+import { RefreshCw, Check, X, ArrowRightLeft, Plus, Pencil, Trash2, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -136,71 +136,62 @@ export default function InteractiveSyncUI({ mode }: InteractiveSyncProps) {
 
           if (adminRec && posRec) {
             if (adminDeleted && !posDeleted) {
-              if (adminTime >= posTime) {
-                allDiffs.push({
-                  id: `diff_${counter++}`,
-                  tableName, recordId: id,
-                  action: "delete_from_pos",
-                  label: `Delete from POS: ${getRecordLabel(tableName, posRec)}`,
-                  detail: `Deleted on admin (${new Date(adminTime).toLocaleString()}), POS version older (${new Date(posTime).toLocaleString()})`,
-                  data: adminRec,
-                  accepted: true,
-                });
-              } else {
-                allDiffs.push({
-                  id: `diff_${counter++}`,
-                  tableName, recordId: id,
-                  action: "update_admin",
-                  label: `Restore on Admin: ${getRecordLabel(tableName, posRec)}`,
-                  detail: `POS version is newer (${new Date(posTime).toLocaleString()}) than admin deletion (${new Date(adminTime).toLocaleString()})`,
-                  data: posRec,
-                  accepted: true,
-                });
-              }
+              allDiffs.push({
+                id: `diff_${counter++}`,
+                tableName, recordId: id,
+                action: "delete_from_pos",
+                label: `Delete from POS: ${getRecordLabel(tableName, posRec)}`,
+                detail: `Deleted on admin (${new Date(adminTime).toLocaleString()}). Admin takes priority.`,
+                data: adminRec,
+                accepted: true,
+              });
+              allDiffs.push({
+                id: `diff_${counter++}`,
+                tableName, recordId: id,
+                action: "update_admin",
+                label: `Restore on Admin: ${getRecordLabel(tableName, posRec)}`,
+                detail: `POS version (${new Date(posTime).toLocaleString()}) — override admin deletion`,
+                data: posRec,
+                accepted: false,
+              });
             } else if (!adminDeleted && posDeleted) {
-              if (posTime >= adminTime) {
-                allDiffs.push({
-                  id: `diff_${counter++}`,
-                  tableName, recordId: id,
-                  action: "delete_from_admin",
-                  label: `Delete from Admin: ${getRecordLabel(tableName, adminRec)}`,
-                  detail: `Deleted on POS (${new Date(posTime).toLocaleString()}), admin version older (${new Date(adminTime).toLocaleString()})`,
-                  data: posRec,
-                  accepted: true,
-                });
-              } else {
-                allDiffs.push({
-                  id: `diff_${counter++}`,
-                  tableName, recordId: id,
-                  action: "update_pos",
-                  label: `Restore on POS: ${getRecordLabel(tableName, adminRec)}`,
-                  detail: `Admin version is newer (${new Date(adminTime).toLocaleString()}) than POS deletion (${new Date(posTime).toLocaleString()})`,
-                  data: adminRec,
-                  accepted: true,
-                });
-              }
+              allDiffs.push({
+                id: `diff_${counter++}`,
+                tableName, recordId: id,
+                action: "update_pos",
+                label: `Restore on POS: ${getRecordLabel(tableName, adminRec)}`,
+                detail: `Admin version (${new Date(adminTime).toLocaleString()}) takes priority over POS deletion (${new Date(posTime).toLocaleString()})`,
+                data: adminRec,
+                accepted: true,
+              });
+              allDiffs.push({
+                id: `diff_${counter++}`,
+                tableName, recordId: id,
+                action: "delete_from_admin",
+                label: `Delete from Admin: ${getRecordLabel(tableName, adminRec)}`,
+                detail: `Accept POS deletion (${new Date(posTime).toLocaleString()}) — override admin`,
+                data: posRec,
+                accepted: false,
+              });
             } else if (!adminDeleted && !posDeleted && adminTime !== posTime) {
-              if (adminTime > posTime) {
-                allDiffs.push({
-                  id: `diff_${counter++}`,
-                  tableName, recordId: id,
-                  action: "update_pos",
-                  label: `Update POS: ${getRecordLabel(tableName, adminRec)}`,
-                  detail: `Admin version is newer (${new Date(adminTime).toLocaleString()} vs ${new Date(posTime).toLocaleString()})`,
-                  data: adminRec,
-                  accepted: true,
-                });
-              } else {
-                allDiffs.push({
-                  id: `diff_${counter++}`,
-                  tableName, recordId: id,
-                  action: "update_admin",
-                  label: `Update Admin: ${getRecordLabel(tableName, posRec)}`,
-                  detail: `POS version is newer (${new Date(posTime).toLocaleString()} vs ${new Date(adminTime).toLocaleString()})`,
-                  data: posRec,
-                  accepted: true,
-                });
-              }
+              allDiffs.push({
+                id: `diff_${counter++}`,
+                tableName, recordId: id,
+                action: "update_pos",
+                label: `Update POS: ${getRecordLabel(tableName, adminRec)}`,
+                detail: `Admin version (${new Date(adminTime).toLocaleString()}) takes priority${posTime > adminTime ? ` — POS is newer (${new Date(posTime).toLocaleString()})` : ` vs POS (${new Date(posTime).toLocaleString()})`}`,
+                data: adminRec,
+                accepted: true,
+              });
+              allDiffs.push({
+                id: `diff_${counter++}`,
+                tableName, recordId: id,
+                action: "update_admin",
+                label: `Update Admin: ${getRecordLabel(tableName, posRec)}`,
+                detail: `POS version (${new Date(posTime).toLocaleString()})${posTime > adminTime ? " is newer" : ""} — override admin`,
+                data: posRec,
+                accepted: false,
+              });
             }
           } else if (adminRec && !posRec) {
             if (!adminDeleted) {
@@ -436,6 +427,12 @@ export default function InteractiveSyncUI({ mode }: InteractiveSyncProps) {
             </div>
           </CardHeader>
           <CardContent className="space-y-2">
+            <div className="flex items-start gap-2 p-3 rounded-lg bg-blue-50 border border-blue-200 text-blue-800 text-sm" data-testid="admin-priority-note">
+              <ShieldCheck className="h-4 w-4 mt-0.5 flex-shrink-0" />
+              <span>
+                <strong>Admin priority:</strong> When the same record exists on both sides, admin changes are pre-selected by default. You can manually override any item before applying.
+              </span>
+            </div>
             {diffs.map(diff => (
               <div
                 key={diff.id}
