@@ -3,6 +3,7 @@ import { storage, adminStorage, type ListOptions } from "./storage";
 import { z } from "zod";
 import { createInsertSchema } from "drizzle-zod";
 import { SYNC_CATEGORY_TABLES, type SyncCategory } from "../shared/schema";
+import { createApiHandlers, type ApiAdminStorage, type ApiRequest } from "../shared/api-handlers";
 import { getDemoSeedRecords, getDemoAdminData, DEMO_PREFIX_VALUE } from "./seed-data";
 import { db } from "./db";
 import {
@@ -560,6 +561,128 @@ router.post("/api/admin/invoices/with-line-items", async (req: Request, res: Res
 router.get("/api/admin/all-data", async (_req: Request, res: Response) => {
   try { res.json({ data: await adminStorage.getAllAdminData() }); } catch (err) { res.status(500).json({ error: "Failed to get all admin data" }); }
 });
+
+const serverAdminAdapter: ApiAdminStorage = {
+  listProducts: () => adminStorage.listProducts(),
+  getProduct: (id) => adminStorage.getProduct(id),
+  createProduct: (d) => adminStorage.createProduct(d),
+  updateProduct: (id, d) => adminStorage.updateProduct(id, d),
+  deleteProduct: (id) => adminStorage.deleteProduct(id),
+
+  listVariants: () => adminStorage.listVariants(),
+  getVariant: (id) => adminStorage.getVariant(id),
+  createVariant: (d) => adminStorage.createVariant(d),
+  updateVariant: (id, d) => adminStorage.updateVariant(id, d),
+  deleteVariant: (id) => adminStorage.deleteVariant(id),
+
+  listModifierGroups: () => adminStorage.listModifierGroups(),
+  getModifierGroup: (id) => adminStorage.getModifierGroup(id),
+  createModifierGroup: (d) => adminStorage.createModifierGroup(d),
+  updateModifierGroup: (id, d) => adminStorage.updateModifierGroup(id, d),
+  deleteModifierGroup: (id) => adminStorage.deleteModifierGroup(id),
+
+  listModifiers: () => adminStorage.listModifiers(),
+  getModifier: (id) => adminStorage.getModifier(id),
+  createModifier: (d) => adminStorage.createModifier(d),
+  updateModifier: (id, d) => adminStorage.updateModifier(id, d),
+  deleteModifier: (id) => adminStorage.deleteModifier(id),
+
+  listProductModifierGroups: () => adminStorage.listProductModifierGroups(),
+  setProductModifierGroups: (pId, gIds) => adminStorage.setProductModifierGroups(pId, gIds),
+  setProductModifierGroupScaleFactors: (pId, mgId, sf) => adminStorage.setProductModifierGroupScaleFactors(pId, mgId, sf),
+
+  listInventoryItems: () => adminStorage.listInventoryItems(),
+  getInventoryItem: (id) => adminStorage.getInventoryItem(id),
+  createInventoryItem: (d) => adminStorage.createInventoryItem(d),
+  updateInventoryItem: (id, d) => adminStorage.updateInventoryItem(id, d),
+  adjustInventoryQuantity: (id, delta) => adminStorage.adjustInventoryQuantity(id, delta),
+  deleteInventoryItem: (id) => adminStorage.deleteInventoryItem(id),
+
+  listBom: () => adminStorage.listBom(),
+  getBom: (id) => adminStorage.getBom(id),
+  createBom: (d) => adminStorage.createBom(d),
+  updateBom: (id, d) => adminStorage.updateBom(id, d),
+  deleteBom: (id) => adminStorage.deleteBom(id),
+
+  listInvoices: () => adminStorage.listInvoices(),
+  getInvoice: (id) => adminStorage.getInvoice(id),
+  createInvoice: (d) => adminStorage.createInvoice(d),
+  updateInvoice: (id, d) => adminStorage.updateInvoice(id, d),
+  deleteInvoice: (id) => adminStorage.deleteInvoice(id),
+
+  listInvoiceLineItems: () => adminStorage.listInvoiceLineItems(),
+  getInvoiceLineItem: (id) => adminStorage.getInvoiceLineItem(id),
+  createInvoiceLineItem: (d) => adminStorage.createInvoiceLineItem(d),
+  updateInvoiceLineItem: (id, d) => adminStorage.updateInvoiceLineItem(id, d),
+  deleteInvoiceLineItem: (id) => adminStorage.deleteInvoiceLineItem(id),
+
+  createInvoiceWithLineItems: (inv, lis) => adminStorage.createInvoiceWithLineItems(inv, lis),
+
+  async listSales() { return []; },
+  async getSale() { return null; },
+  async createSale(d) { return d; },
+  async updateSale() { return null; },
+
+  async listEmployees() { return []; },
+  async getEmployee() { return null; },
+  async createEmployee(d) { return d; },
+  async updateEmployee() { return null; },
+
+  async listTimePunches() { return []; },
+
+  getAllData: () => adminStorage.getAllAdminData(),
+};
+
+const apiHandlers = createApiHandlers(serverAdminAdapter);
+
+async function handleViaSharedHandlers(req: Request, res: Response): Promise<boolean> {
+  const apiReq: ApiRequest = {
+    method: req.method,
+    path: req.path,
+    params: req.params || {},
+    body: req.body,
+  };
+  const apiRes = await apiHandlers.handle(apiReq);
+  res.status(apiRes.status).json(apiRes.data);
+  return true;
+}
+
+router.get("/api/admin/sales", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
+router.get("/api/admin/sales/:id", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
+router.post("/api/admin/sales", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
+router.put("/api/admin/sales/:id", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
+
+router.get("/api/admin/employees", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
+router.get("/api/admin/employees/:id", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
+router.post("/api/admin/employees", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
+router.put("/api/admin/employees/:id", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
+
+router.get("/api/admin/time-punches", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
+
+router.get("/api/local/status", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
+
+router.post("/api/orders/simulate", async (req: Request, res: Response) => {
+  res.status(501).json({
+    error: "Order simulation is only available on the local Capacitor server (http://127.0.0.1:8080). " +
+           "The Express server does not have direct access to POS sales data — sales are stored client-side in IndexedDB.",
+  });
+});
+
+router.get("/api/reports/sales-summary", async (req: Request, res: Response) => {
+  res.status(501).json({
+    error: "Sales reports are only available on the local Capacitor server. " +
+           "Sales data is stored client-side in IndexedDB, not in the server PostgreSQL database.",
+  });
+});
+
+router.get("/api/reports/product-mix", async (req: Request, res: Response) => {
+  res.status(501).json({
+    error: "Product mix reports are only available on the local Capacitor server. " +
+           "Sales data is stored client-side in IndexedDB.",
+  });
+});
+
+router.get("/api/reports/inventory-status", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
 
 router.get("/api/admin/all-data-with-deleted", async (_req: Request, res: Response) => {
   try { res.json({ data: await adminStorage.getAllAdminDataWithDeleted() }); } catch (err) { res.status(500).json({ error: "Failed to get all admin data" }); }

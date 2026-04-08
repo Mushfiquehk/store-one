@@ -122,6 +122,12 @@ All entities include `updatedAt: number` (epoch ms timestamp) and `deletedAt: nu
 - `GET /api/admin/test-orders/:id` — Get a single test order sale by ID.
 - `GET /api/admin/reports/summary` — Aggregate data: sale count, revenue, avg order value, product/variant/inventory counts, low-stock items. Optional `?since=` (unix ms timestamp).
 - `GET /api/admin/reports/inventory` — All inventory items with current quantities, low-stock status, last purchase price, and cumulative per-item movement data (BOM-based sales deductions, order counts, invoice additions).
+- `POST /api/orders/simulate` — Simulate an order (stub, returns 501 on Express — client-only data)
+- `GET /api/reports/sales-summary` — Aggregate sales totals (stub, returns 501 on Express)
+- `GET /api/reports/product-mix` — Product mix breakdown by variant (stub, returns 501 on Express)
+- `GET /api/reports/inventory-status` — Inventory levels with low-stock flags
+- `GET /api/admin/time-punches` — List employee time punches (stub on Express)
+- `GET /api/local/status` — Health check for local Capacitor HTTP server
 - `POST /api/demo/seed` — Seed coffee shop demo data into both sync_records and admin tables. Optional body: `{ "clientCode": "my-client" }` (defaults to "demo-client"). Returns `{ success, clientCode, recordsInserted, recordsUpdated, totalRecords, adminRecords }`.
 - `POST /api/demo/clear` — Delete all `demo_*` records from sync_records and all admin tables. Returns `{ success, recordsDeleted, adminTablesCleared }`.
 
@@ -148,6 +154,38 @@ This project does not use automated schema migration tooling. When the data shap
 2. **Reset PostgreSQL**: Run `npx drizzle-kit push` to recreate server tables, or drop and recreate the database if needed.
 3. **Re-seed demo data**: Call `POST /api/dev/seed` to populate the sync_records table with demo data, then sync from a client to pull it down. Alternatively, use the `/demo` page UI to seed data directly into IndexedDB on the client side.
 4. **Clear demo data**: Call `POST /api/dev/clear` to remove all demo-prefixed records (`demo_*`) from the server sync_records table.
+
+## Capacitor / Native iOS App
+- Capacitor is configured to wrap the Vite build output (`dist/public`) as a native iOS app
+- `capacitor.config.ts` — Capacitor configuration (appId: `com.cornerpos.app`, webDir: `dist/public`)
+- To build for iOS: `npm run build` then `npx cap sync` then `npx cap open ios` (requires macOS + Xcode)
+- The existing `npm run dev` and `npm run build` workflows are unaffected
+- When running as a native Capacitor app, a local HTTP server starts on port 8080, exposing the full admin API surface backed by Dexie (IndexedDB) — no PostgreSQL needed
+- An AI agent on the same device can make HTTP requests to `http://localhost:8080/api/admin/*`, `http://localhost:8080/api/orders/simulate`, `http://localhost:8080/api/reports/*`, and `http://localhost:8080/api/local/status`
+- Platform detection via `Capacitor.isNativePlatform()` ensures the local server only starts on iOS
+- App lifecycle events (foreground/background) manage the local server start/stop
+- Native iOS plugin (`ios-plugin/CornerPOSHttpServer/`) uses GCDWebServer to run the HTTP server, registered via `registerPlugin()` from `@capacitor/core`
+
+### Platform-Specific Endpoint Behavior
+The following endpoints are **only functional on the local Capacitor server** (backed by Dexie/IndexedDB). On the Express server, they return HTTP 501 because sales, employees, and time punches are stored client-side only and have no corresponding PostgreSQL admin tables:
+- `POST /api/orders/simulate` — Creates a sale from variant/modifier selections (local only)
+- `GET /api/reports/sales-summary` — Aggregate sales totals (local only)
+- `GET /api/reports/product-mix` — Product mix breakdown (local only)
+
+The following endpoint works on **both** Express and local Capacitor servers:
+- `GET /api/reports/inventory-status` — Inventory levels with low-stock flags
+
+## PWA Support
+- `client/public/manifest.json` — PWA manifest with CornerPOS branding
+- `client/public/sw.js` — Service worker for offline caching (stale-while-revalidate for app shell, bypasses `/api/` requests)
+- Service worker registered in `client/src/main.tsx`
+
+## Key Files (Capacitor / Local Server)
+- `capacitor.config.ts` — Capacitor configuration
+- `client/src/lib/local-server.ts` — Local HTTP server module (starts on Capacitor native, no-op in browser)
+- `client/src/lib/dexie-admin-storage.ts` — Dexie-backed implementation of ApiAdminStorage for local server
+- `shared/api-handlers.ts` — Transport-agnostic API request handlers (used by both Express routes and local server)
+- `ios-plugin/CornerPOSHttpServer/` — Native iOS Swift plugin (GCDWebServer-based) implementing the local HTTP server for Capacitor
 
 ## Development
 - Workflow runs: `concurrently "vite dev --host 0.0.0.0 --port 5000" "npx tsx server/index.ts"`
