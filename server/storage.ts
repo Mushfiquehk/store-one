@@ -4,6 +4,7 @@ import {
   adminProducts, adminVariants, adminModifierGroups,
   adminProductModifierGroups, adminModifiers, adminInventoryItems,
   adminBillOfMaterials, adminInvoices, adminInvoiceLineItems,
+  adminSales,
 } from "./schema";
 import type { Client, Backup, SyncRecord } from "./schema";
 import { eq, desc, sql, and, gt, inArray, isNull, count } from "drizzle-orm";
@@ -128,6 +129,11 @@ export interface IAdminStorage {
   deleteInvoiceLineItem(id: string): Promise<void>;
 
   createInvoiceWithLineItems(invoiceData: Record<string, unknown>, lineItems: Record<string, unknown>[]): Promise<unknown>;
+
+  listSales(): Promise<unknown[]>;
+  getSale(id: string): Promise<unknown | null>;
+  createSale(data: Record<string, unknown>): Promise<unknown>;
+
   getAllAdminData(): Promise<Record<string, unknown[]>>;
   getAllAdminDataWithDeleted(): Promise<Record<string, unknown[]>>;
   applyChanges(changes: { tableName: string; recordId: string; data: Record<string, unknown>; action: string }[]): Promise<void>;
@@ -842,6 +848,35 @@ export const adminStorage: IAdminStorage = {
   async deleteInvoiceLineItem(id: string) {
     const now = Date.now();
     await db.update(adminInvoiceLineItems).set({ deletedAt: now, updatedAt: now }).where(eq(adminInvoiceLineItems.id, id));
+  },
+
+  async listSales() {
+    return db.select().from(adminSales).where(isNull(adminSales.deletedAt));
+  },
+  async getSale(id: string) {
+    const [r] = await db.select().from(adminSales).where(and(eq(adminSales.id, id), isNull(adminSales.deletedAt))).limit(1);
+    return r || null;
+  },
+  async createSale(data: Record<string, unknown>) {
+    const now = Date.now();
+    const row = {
+      id: data.id as string,
+      createdAt: (data.createdAt as number) ?? now,
+      subtotalCents: (data.subtotalCents as number) ?? 0,
+      taxCents: (data.taxCents as number) ?? 0,
+      totalCents: (data.totalCents as number) ?? 0,
+      comboDiscountCents: (data.comboDiscountCents as number) ?? 0,
+      paymentMethod: (data.paymentMethod as string) ?? "test",
+      status: (data.status as string) ?? "completed",
+      customerName: (data.customerName as string) ?? "",
+      linesJson: data.linesJson ?? [],
+      closedAt: (data.closedAt as number) ?? null,
+      updatedAt: now,
+      deletedAt: null,
+    };
+    const [r] = await db.insert(adminSales).values(row)
+      .onConflictDoUpdate({ target: adminSales.id, set: { ...row, updatedAt: now } }).returning();
+    return r;
   },
 
   async createInvoiceWithLineItems(invoiceData: Record<string, unknown>, lineItems: Record<string, unknown>[]) {

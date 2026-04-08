@@ -127,6 +127,22 @@ export const adminInvoiceLineItems = pgTable("admin_invoice_line_items", {
   deletedAt: bigint("deleted_at", { mode: "number" }),
 });
 
+export const adminSales = pgTable("admin_sales", {
+  id: text("id").primaryKey(),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  subtotalCents: integer("subtotal_cents").notNull().default(0),
+  taxCents: integer("tax_cents").notNull().default(0),
+  totalCents: integer("total_cents").notNull().default(0),
+  comboDiscountCents: integer("combo_discount_cents").notNull().default(0),
+  paymentMethod: text("payment_method").notNull().default("test"),
+  status: text("status").notNull().default("completed"),
+  customerName: text("customer_name").notNull().default(""),
+  linesJson: jsonb("lines_json").notNull(),
+  closedAt: bigint("closed_at", { mode: "number" }),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+  deletedAt: bigint("deleted_at", { mode: "number" }),
+});
+
 export const insertClientSchema = createInsertSchema(clients).omit({ id: true, createdAt: true });
 export const insertBackupSchema = createInsertSchema(backups).omit({ id: true, createdAt: true });
 

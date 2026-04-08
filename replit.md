@@ -36,7 +36,7 @@ All entities include `updatedAt: number` (epoch ms timestamp) and `deletedAt: nu
 - `sync_records` — incremental sync records (id, client_id, table_name, record_id, data JSONB, updated_at BIGINT, deleted_at BIGINT); unique on (client_id, table_name, record_id)
 
 ### Admin-side (PostgreSQL / Drizzle) — dedicated tables for server-side data management
-- `admin_products`, `admin_variants`, `admin_modifier_groups`, `admin_product_modifier_groups`, `admin_modifiers`, `admin_inventory_items`, `admin_bill_of_materials`, `admin_invoices`, `admin_invoice_line_items`
+- `admin_products`, `admin_variants`, `admin_modifier_groups`, `admin_product_modifier_groups`, `admin_modifiers`, `admin_inventory_items`, `admin_bill_of_materials`, `admin_invoices`, `admin_invoice_line_items`, `admin_sales`
 - Mirror the client-side Dexie schema but live in PostgreSQL with proper typed columns
 - Each record has `updatedAt` (bigint epoch ms) and `deletedAt` (bigint, nullable) for soft-delete
 - Full CRUD via `/api/admin/*` endpoints with Zod validation, pagination/filtering, and `{ data, meta? }` response envelopes
@@ -85,6 +85,7 @@ All entities include `updatedAt: number` (epoch ms timestamp) and `deletedAt: nu
 - `server/schema.ts` — Drizzle ORM schema for clients, backups, and sync_records tables
 - `server/routes.ts` — API routes for backup, restore, clients list, admin metrics, incremental sync, and dev seed/clear endpoints
 - `server/seed-data.ts` — Server-side demo data definitions for dev seed endpoint
+- `server/bom-engine.ts` — Server-side BOM-based inventory deduction engine (extracted from POS client logic), test order processing
 - `server/storage.ts` — Server-side storage interface using Drizzle (backup + sync + admin CRUD operations)
 - `client/src/pages/combos.tsx` — Combo management UI: ProductGroupManager + ComboEditor with pricing strategy config and item picker
 - `client/src/lib/admin-store.tsx` — AdminStoreProvider that exposes the same StoreContextType as useStore() but backed by fetch() to /api/admin/ endpoints
@@ -115,6 +116,12 @@ All entities include `updatedAt: number` (epoch ms timestamp) and `deletedAt: nu
 - `POST /api/admin/apply-sync-changes` — Apply sync changes to admin data
 - `POST /api/sync/:category` — Push local changes, receive server-side changes (category: menu, ingredients, sales)
 - `GET /api/sync/:category/status` — Get sync status for a category (requires ?clientCode query param)
+- `POST /api/admin/test-orders` — Place a test order: validates line items, calculates pricing, deducts inventory via BOM logic, persists sale. Returns sale object, per-line pricing, inventory effects (before/after), and warnings.
+- `POST /api/admin/test-orders/dry-run` — Same as test-orders but without persisting sale or deducting inventory. Preview mode.
+- `GET /api/admin/test-orders` — List all persisted test order sales.
+- `GET /api/admin/test-orders/:id` — Get a single test order sale by ID.
+- `GET /api/admin/reports/summary` — Aggregate data: sale count, revenue, avg order value, product/variant/inventory counts, low-stock items. Optional `?since=` (unix ms timestamp).
+- `GET /api/admin/reports/inventory` — All inventory items with current quantities, low-stock status, last purchase price, and cumulative per-item movement data (BOM-based sales deductions, order counts, invoice additions).
 - `POST /api/demo/seed` — Seed coffee shop demo data into both sync_records and admin tables. Optional body: `{ "clientCode": "my-client" }` (defaults to "demo-client"). Returns `{ success, clientCode, recordsInserted, recordsUpdated, totalRecords, adminRecords }`.
 - `POST /api/demo/clear` — Delete all `demo_*` records from sync_records and all admin tables. Returns `{ success, recordsDeleted, adminTablesCleared }`.
 

@@ -8,9 +8,10 @@ import { db } from "./db";
 import {
   syncRecords, adminProducts, adminVariants, adminModifierGroups,
   adminModifiers, adminProductModifierGroups, adminInventoryItems,
-  adminBillOfMaterials, adminInvoices, adminInvoiceLineItems,
+  adminBillOfMaterials, adminInvoices, adminInvoiceLineItems, adminSales,
 } from "./schema";
-import { sql, and, eq } from "drizzle-orm";
+import { sql, and, eq, isNull, gt } from "drizzle-orm";
+import { processTestOrder, computeInventoryDeductions, type LineItemInput, type ComboInput } from "./bom-engine";
 
 export const router = Router();
 
@@ -730,5 +731,221 @@ router.post("/api/demo/clear", async (_req: Request, res: Response) => {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.error("Demo clear error:", message);
     res.status(500).json({ error: "Failed to clear demo data", details: message });
+  }
+});
+
+const testOrderLineSchema = z.object({
+  variantId: z.string().min(1),
+  qty: z.number().int().min(1),
+  modifiers: z.array(z.object({
+    modifierId: z.string().min(1),
+    qty: z.number().int().min(1).default(1),
+  })).optional().default([]),
+});
+
+const comboSchema = z.object({
+  name: z.string().min(1),
+  pricingStrategy: z.enum(["FIXED", "DISCOUNT_VALUE", "DISCOUNT_PERCENT"]),
+  fixedPriceCents: z.number().optional(),
+  discountValueCents: z.number().optional(),
+  discountPercent: z.number().min(0).max(100).optional(),
+  lineIndices: z.array(z.number().int().min(0)),
+});
+
+const testOrderBodySchema = z.object({
+  lineItems: z.array(testOrderLineSchema).min(1),
+  taxRatePct: z.number().min(0).max(100).optional().default(0),
+  customerName: z.string().optional().default(""),
+  combos: z.array(comboSchema).optional().default([]),
+});
+
+router.post("/api/admin/test-orders", async (req: Request, res: Response) => {
+  try {
+    const parsed = testOrderBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid request body", details: parsed.error.flatten() });
+    }
+    const { lineItems, taxRatePct, customerName, combos } = parsed.data;
+    const result = await processTestOrder(lineItems as LineItemInput[], { dryRun: false, taxRatePct, customerName, combos: combos as ComboInput[] });
+    res.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    if (message.startsWith("Validation failed:")) {
+      return res.status(400).json({ error: message });
+    }
+    console.error("Test order error:", message);
+    res.status(500).json({ error: "Failed to process test order" });
+  }
+});
+
+router.post("/api/admin/test-orders/dry-run", async (req: Request, res: Response) => {
+  try {
+    const parsed = testOrderBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid request body", details: parsed.error.flatten() });
+    }
+    const { lineItems, taxRatePct, customerName, combos } = parsed.data;
+    const result = await processTestOrder(lineItems as LineItemInput[], { dryRun: true, taxRatePct, customerName, combos: combos as ComboInput[] });
+    res.json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    if (message.startsWith("Validation failed:")) {
+      return res.status(400).json({ error: message });
+    }
+    console.error("Test order dry-run error:", message);
+    res.status(500).json({ error: "Failed to process test order dry-run" });
+  }
+});
+
+router.get("/api/admin/test-orders", async (_req: Request, res: Response) => {
+  try {
+    const sales = await adminStorage.listSales();
+    res.json(sales);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to list test orders" });
+  }
+});
+
+router.get("/api/admin/test-orders/:id", async (req: Request, res: Response) => {
+  try {
+    const sale = await adminStorage.getSale(req.params.id);
+    if (!sale) return res.status(404).json({ error: "Not found" });
+    res.json(sale);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to get test order" });
+  }
+});
+
+router.get("/api/admin/reports/summary", async (req: Request, res: Response) => {
+  try {
+    const sinceParam = req.query.since as string | undefined;
+    let since: number | undefined;
+    if (sinceParam !== undefined) {
+      since = parseInt(sinceParam, 10);
+      if (isNaN(since) || since < 0) {
+        return res.status(400).json({ error: "Invalid 'since' parameter: must be a non-negative unix timestamp in milliseconds" });
+      }
+    }
+
+    const allSales = since !== undefined
+      ? await db.select().from(adminSales).where(and(isNull(adminSales.deletedAt), gt(adminSales.createdAt, since)))
+      : await db.select().from(adminSales).where(isNull(adminSales.deletedAt));
+
+    const saleCount = allSales.length;
+    const totalRevenue = allSales.reduce((s, sale) => s + sale.totalCents, 0);
+    const averageOrderValue = saleCount > 0 ? Math.round(totalRevenue / saleCount) : 0;
+
+    const [products, variants, inventoryItems] = await Promise.all([
+      db.select().from(adminProducts).where(isNull(adminProducts.deletedAt)),
+      db.select().from(adminVariants).where(isNull(adminVariants.deletedAt)),
+      db.select().from(adminInventoryItems).where(isNull(adminInventoryItems.deletedAt)),
+    ]);
+
+    const productCountByType: Record<string, number> = {};
+    products.forEach(p => {
+      productCountByType[p.type] = (productCountByType[p.type] || 0) + 1;
+    });
+
+    const lowStockItems = inventoryItems.filter(i =>
+      i.lowStockThreshold != null && i.currentQuantity < i.lowStockThreshold
+    );
+
+    res.json({
+      saleCount,
+      totalRevenueCents: totalRevenue,
+      averageOrderValueCents: averageOrderValue,
+      productCount: products.length,
+      productCountByType,
+      variantCount: variants.length,
+      inventoryItemCount: inventoryItems.length,
+      lowStockItemCount: lowStockItems.length,
+      lowStockItems: lowStockItems.map(i => ({
+        id: i.id,
+        name: i.name,
+        currentQuantity: i.currentQuantity,
+        lowStockThreshold: i.lowStockThreshold,
+      })),
+      ...(since !== undefined ? { since } : {}),
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("Reports summary error:", message);
+    res.status(500).json({ error: "Failed to get reports summary" });
+  }
+});
+
+router.get("/api/admin/reports/inventory", async (_req: Request, res: Response) => {
+  try {
+    const [inventoryItems, recentSales, invoiceLineItems, products, variants, modifiers, bomEntries] = await Promise.all([
+      db.select().from(adminInventoryItems).where(isNull(adminInventoryItems.deletedAt)),
+      db.select().from(adminSales).where(isNull(adminSales.deletedAt)),
+      db.select().from(adminInvoiceLineItems).where(isNull(adminInvoiceLineItems.deletedAt)),
+      db.select().from(adminProducts).where(isNull(adminProducts.deletedAt)),
+      db.select().from(adminVariants).where(isNull(adminVariants.deletedAt)),
+      db.select().from(adminModifiers).where(isNull(adminModifiers.deletedAt)),
+      db.select().from(adminBillOfMaterials).where(isNull(adminBillOfMaterials.deletedAt)),
+    ]);
+
+    const salesDeductionsByItem = new Map<string, number>();
+    const orderCountByItem = new Map<string, number>();
+
+    for (const sale of recentSales) {
+      const lines = sale.linesJson as { variantId: string; qty: number; modifiers?: { modifierId: string; qty: number }[] }[];
+      if (!Array.isArray(lines)) continue;
+
+      const lineInputs: LineItemInput[] = lines.map(l => ({
+        variantId: l.variantId,
+        qty: l.qty,
+        modifiers: (l.modifiers || []).map(m => ({ modifierId: m.modifierId, qty: m.qty })),
+      }));
+
+      const deltas = computeInventoryDeductions(lineInputs, {
+        products, variants, modifiers, inventoryItems, bomEntries,
+      });
+
+      for (const [itemId, delta] of deltas) {
+        salesDeductionsByItem.set(itemId, (salesDeductionsByItem.get(itemId) || 0) + delta);
+        orderCountByItem.set(itemId, (orderCountByItem.get(itemId) || 0) + 1);
+      }
+    }
+
+    const invoiceMovement = new Map<string, { totalQuantity: number; invoiceCount: number }>();
+    for (const li of invoiceLineItems) {
+      const existing = invoiceMovement.get(li.inventoryItemId) || { totalQuantity: 0, invoiceCount: 0 };
+      existing.totalQuantity += li.quantity;
+      existing.invoiceCount += 1;
+      invoiceMovement.set(li.inventoryItemId, existing);
+    }
+
+    const items = inventoryItems.map(i => {
+      const invMov = invoiceMovement.get(i.id);
+      const salesDelta = salesDeductionsByItem.get(i.id) ?? 0;
+      const ordersAffecting = orderCountByItem.get(i.id) ?? 0;
+      return {
+        id: i.id,
+        name: i.name,
+        unitOfMeasure: i.unitOfMeasure,
+        currentQuantity: i.currentQuantity,
+        lowStockThreshold: i.lowStockThreshold,
+        lowStock: i.lowStockThreshold != null && i.currentQuantity < i.lowStockThreshold,
+        lastPurchasePrice: i.lastPurchasePrice,
+        recentMovement: {
+          salesDeductions: salesDelta,
+          ordersAffecting,
+          invoiceAdditions: invMov?.totalQuantity ?? 0,
+          invoiceLineCount: invMov?.invoiceCount ?? 0,
+        },
+      };
+    });
+
+    res.json({
+      items,
+      totalItems: items.length,
+      lowStockCount: items.filter(i => i.lowStock).length,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("Reports inventory error:", message);
+    res.status(500).json({ error: "Failed to get inventory report" });
   }
 });
