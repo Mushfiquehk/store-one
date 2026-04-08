@@ -39,7 +39,8 @@ All entities include `updatedAt: number` (epoch ms timestamp) and `deletedAt: nu
 - `admin_products`, `admin_variants`, `admin_modifier_groups`, `admin_product_modifier_groups`, `admin_modifiers`, `admin_inventory_items`, `admin_bill_of_materials`, `admin_invoices`, `admin_invoice_line_items`
 - Mirror the client-side Dexie schema but live in PostgreSQL with proper typed columns
 - Each record has `updatedAt` (bigint epoch ms) and `deletedAt` (bigint, nullable) for soft-delete
-- Full CRUD via `/api/admin/*` endpoints
+- Full CRUD via `/api/admin/*` endpoints with Zod validation, pagination/filtering, and `{ data, meta? }` response envelopes
+- API reference documentation at `docs/api-reference.md`
 
 ## Sync System
 

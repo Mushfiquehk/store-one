@@ -87,7 +87,8 @@ export default function InteractiveSyncUI({ mode }: InteractiveSyncProps) {
     try {
       const adminRes = await fetch("/api/admin/all-data-with-deleted");
       if (!adminRes.ok) throw new Error("Failed to fetch admin data");
-      const adminData = await adminRes.json();
+      const adminJson = await adminRes.json();
+      const adminData = adminJson.data ?? adminJson;
 
       let posData: Record<string, Record<string, unknown>[]>;
 
@@ -97,7 +98,8 @@ export default function InteractiveSyncUI({ mode }: InteractiveSyncProps) {
           const errBody = await clientRes.json().catch(() => ({}));
           throw new Error(errBody.error || "Failed to fetch POS client data from server");
         }
-        posData = await clientRes.json();
+        const clientJson = await clientRes.json();
+        posData = clientJson.data ?? clientJson;
       } else {
         posData = {};
         for (const tableName of SYNC_TABLES) {

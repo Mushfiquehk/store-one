@@ -1,10 +1,15 @@
 import { Router, type Request, type Response } from "express";
-import { storage, adminStorage } from "./storage";
+import { storage, adminStorage, type ListOptions } from "./storage";
 import { z } from "zod";
+import { createInsertSchema } from "drizzle-zod";
 import { SYNC_CATEGORY_TABLES, type SyncCategory } from "../shared/schema";
 import { getDemoSeedRecords, getDemoAdminData, DEMO_PREFIX_VALUE } from "./seed-data";
 import { db } from "./db";
-import { syncRecords, adminProducts, adminVariants, adminModifierGroups, adminModifiers, adminProductModifierGroups, adminInventoryItems, adminBillOfMaterials } from "./schema";
+import {
+  syncRecords, adminProducts, adminVariants, adminModifierGroups,
+  adminModifiers, adminProductModifierGroups, adminInventoryItems,
+  adminBillOfMaterials, adminInvoices, adminInvoiceLineItems,
+} from "./schema";
 import { sql, and, eq } from "drizzle-orm";
 
 export const router = Router();
@@ -88,7 +93,7 @@ router.get("/api/clients", async (_req: Request, res: Response) => {
 router.get("/api/admin/metrics", async (_req: Request, res: Response) => {
   try {
     const metrics = await storage.getAggregatedMetrics();
-    res.json(metrics);
+    res.json({ data: metrics });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.error("Metrics error:", message);
@@ -157,112 +162,432 @@ router.get("/api/sync/:category/status", async (req: Request, res: Response) => 
   }
 });
 
-const adminBodySchema = z.object({
-  id: z.string().min(1),
-}).passthrough();
+const paginationSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+  offset: z.coerce.number().int().min(0).optional(),
+});
 
-const adminCrudRoute = (entity: string, listFn: () => Promise<unknown[]>, getFn: (id: string) => Promise<unknown | null>, createFn: (d: Record<string, unknown>) => Promise<unknown>, updateFn: (id: string, d: Record<string, unknown>) => Promise<unknown>, deleteFn: (id: string) => Promise<void>) => {
-  router.get(`/api/admin/${entity}`, async (_req: Request, res: Response) => {
-    try { res.json(await listFn()); } catch (err) { res.status(500).json({ error: `Failed to list ${entity}` }); }
+function requireNonEmpty(fields: string[]) {
+  return (data: Record<string, unknown>, ctx: z.RefinementCtx) => {
+    for (const f of fields) {
+      if (typeof data[f] === "string" && (data[f] as string).length === 0) {
+        ctx.addIssue({ code: "custom", path: [f], message: `${f} must not be empty` });
+      }
+    }
+  };
+}
+
+const createProductSchema = createInsertSchema(adminProducts)
+  .omit({ updatedAt: true, deletedAt: true })
+  .superRefine(requireNonEmpty(["id", "name"]));
+const updateProductSchema = createInsertSchema(adminProducts)
+  .omit({ updatedAt: true, deletedAt: true, id: true })
+  .partial()
+  .superRefine(requireNonEmpty(["name"]));
+
+const createVariantSchema = createInsertSchema(adminVariants)
+  .omit({ updatedAt: true, deletedAt: true })
+  .superRefine(requireNonEmpty(["id", "productId", "name"]));
+const updateVariantSchema = createInsertSchema(adminVariants)
+  .omit({ updatedAt: true, deletedAt: true, id: true })
+  .partial()
+  .superRefine(requireNonEmpty(["name", "productId"]));
+
+const createModifierGroupSchema = createInsertSchema(adminModifierGroups)
+  .omit({ updatedAt: true, deletedAt: true })
+  .superRefine(requireNonEmpty(["id", "name"]));
+const updateModifierGroupSchema = createInsertSchema(adminModifierGroups)
+  .omit({ updatedAt: true, deletedAt: true, id: true })
+  .partial()
+  .superRefine(requireNonEmpty(["name"]));
+
+const createModifierSchema = createInsertSchema(adminModifiers)
+  .omit({ updatedAt: true, deletedAt: true })
+  .superRefine(requireNonEmpty(["id", "modifierGroupId", "name"]));
+const updateModifierSchema = createInsertSchema(adminModifiers)
+  .omit({ updatedAt: true, deletedAt: true, id: true })
+  .partial()
+  .superRefine(requireNonEmpty(["name", "modifierGroupId"]));
+
+const createInventoryItemSchema = createInsertSchema(adminInventoryItems)
+  .omit({ updatedAt: true, deletedAt: true })
+  .superRefine(requireNonEmpty(["id", "name"]));
+const updateInventoryItemSchema = createInsertSchema(adminInventoryItems)
+  .omit({ updatedAt: true, deletedAt: true, id: true })
+  .partial()
+  .superRefine(requireNonEmpty(["name"]));
+
+const createBomSchema = createInsertSchema(adminBillOfMaterials)
+  .omit({ updatedAt: true, deletedAt: true })
+  .superRefine(requireNonEmpty(["id", "sourceType", "sourceId", "inventoryItemId"]));
+const updateBomSchema = createInsertSchema(adminBillOfMaterials)
+  .omit({ updatedAt: true, deletedAt: true, id: true })
+  .partial()
+  .superRefine(requireNonEmpty(["sourceType", "sourceId", "inventoryItemId"]));
+
+const createInvoiceSchema = createInsertSchema(adminInvoices)
+  .omit({ updatedAt: true, deletedAt: true })
+  .superRefine(requireNonEmpty(["id", "supplierName", "invoiceNumber", "date"]));
+const updateInvoiceSchema = createInsertSchema(adminInvoices)
+  .omit({ updatedAt: true, deletedAt: true, id: true })
+  .partial()
+  .superRefine(requireNonEmpty(["supplierName", "invoiceNumber", "date"]));
+
+const createInvoiceLineItemSchema = createInsertSchema(adminInvoiceLineItems)
+  .omit({ updatedAt: true, deletedAt: true })
+  .superRefine(requireNonEmpty(["id", "invoiceId", "inventoryItemId"]));
+const updateInvoiceLineItemSchema = createInsertSchema(adminInvoiceLineItems)
+  .omit({ updatedAt: true, deletedAt: true, id: true })
+  .partial()
+  .superRefine(requireNonEmpty(["inventoryItemId"]));
+
+const setProductModifierGroupsSchema = z.object({
+  productId: z.string().min(1),
+  groupIds: z.array(z.string().min(1)),
+});
+
+const setScaleFactorsSchema = z.object({
+  productId: z.string().min(1),
+  modifierGroupId: z.string().min(1),
+  scaleFactors: z.unknown(),
+});
+
+const adjustInventorySchema = z.object({
+  delta: z.number(),
+});
+
+const invoiceWithLineItemsInvoiceSchema = createInsertSchema(adminInvoices)
+  .omit({ updatedAt: true, deletedAt: true })
+  .superRefine(requireNonEmpty(["id", "supplierName", "invoiceNumber", "date"]));
+
+const invoiceWithLineItemsLineItemSchema = createInsertSchema(adminInvoiceLineItems)
+  .omit({ updatedAt: true, deletedAt: true })
+  .partial({ invoiceId: true })
+  .superRefine(requireNonEmpty(["id", "inventoryItemId"]));
+
+const syncChangeItemSchema = z.object({
+  tableName: z.string().min(1),
+  recordId: z.string().min(1),
+  data: z.record(z.unknown()),
+  action: z.enum(["add", "update", "delete"]),
+});
+
+const applySyncChangesSchema = z.object({
+  changes: z.array(syncChangeItemSchema),
+});
+
+function parseQueryOpts(query: Record<string, unknown>, extraFilters: string[] = []): { opts: ListOptions; error?: string } {
+  const hasLimit = query.limit !== undefined;
+  const hasOffset = query.offset !== undefined;
+  if (hasLimit || hasOffset) {
+    const parsed = paginationSchema.safeParse(query);
+    if (!parsed.success) {
+      return { opts: {}, error: "Invalid pagination parameters: " + parsed.error.issues.map(i => i.message).join(", ") };
+    }
+  }
+  const opts: ListOptions = {};
+  if (hasLimit) opts.limit = Number(query.limit);
+  if (hasOffset) opts.offset = Number(query.offset);
+  for (const key of extraFilters) {
+    if (typeof query[key] === "string" && (query[key] as string).length > 0) {
+      opts[key] = query[key];
+    }
+  }
+  return { opts };
+}
+
+interface CrudConfig {
+  entity: string;
+  createSchema: z.ZodTypeAny;
+  updateSchema: z.ZodTypeAny;
+  listFn: (opts?: ListOptions) => Promise<{ items: unknown[]; total: number }>;
+  getFn: (id: string) => Promise<unknown | null>;
+  createFn: (d: Record<string, unknown>) => Promise<unknown>;
+  updateFn: (id: string, d: Record<string, unknown>) => Promise<unknown | null>;
+  deleteFn: (id: string) => Promise<void>;
+  listFilters?: string[];
+}
+
+const adminCrudRoute = (cfg: CrudConfig) => {
+  const { entity, createSchema, updateSchema, listFn, getFn, createFn, updateFn, deleteFn, listFilters = [] } = cfg;
+
+  router.get(`/api/admin/${entity}`, async (req: Request, res: Response) => {
+    try {
+      const { opts, error } = parseQueryOpts(req.query as Record<string, unknown>, listFilters);
+      if (error) return res.status(400).json({ error });
+      const result = await listFn(opts);
+      res.json({
+        data: result.items,
+        meta: { total: Number(result.total), limit: opts.limit ?? null, offset: opts.offset ?? 0 },
+      });
+    } catch (err) {
+      res.status(500).json({ error: `Failed to list ${entity}` });
+    }
   });
+
   router.get(`/api/admin/${entity}/:id`, async (req: Request, res: Response) => {
-    try { const r = await getFn(req.params.id); if (!r) return res.status(404).json({ error: "Not found" }); res.json(r); } catch (err) { res.status(500).json({ error: `Failed to get ${entity}` }); }
+    try {
+      const r = await getFn(req.params.id);
+      if (!r) return res.status(404).json({ error: "Not found" });
+      res.json({ data: r });
+    } catch (err) {
+      res.status(500).json({ error: `Failed to get ${entity}` });
+    }
   });
+
   router.post(`/api/admin/${entity}`, async (req: Request, res: Response) => {
     try {
-      const parsed = adminBodySchema.safeParse(req.body);
-      if (!parsed.success) return res.status(400).json({ error: "Invalid request body: id is required", details: parsed.error.format() });
-      res.json(await createFn(parsed.data));
-    } catch (err) { res.status(500).json({ error: `Failed to create ${entity}` }); }
+      const parsed = createSchema.safeParse(req.body);
+      if (!parsed.success) {
+        const zodError = parsed.error as z.ZodError;
+        return res.status(400).json({ error: "Validation failed", details: zodError.flatten() });
+      }
+      const created = await createFn(parsed.data as Record<string, unknown>);
+      res.json({ data: created });
+    } catch (err) {
+      res.status(500).json({ error: `Failed to create ${entity}` });
+    }
   });
+
   router.put(`/api/admin/${entity}/:id`, async (req: Request, res: Response) => {
     try {
-      if (!req.body || typeof req.body !== "object") return res.status(400).json({ error: "Request body must be a JSON object" });
-      const r = await updateFn(req.params.id, req.body);
+      if (!req.body || typeof req.body !== "object") {
+        return res.status(400).json({ error: "Request body must be a JSON object" });
+      }
+      const parsed = updateSchema.safeParse(req.body);
+      if (!parsed.success) {
+        const zodError = parsed.error as z.ZodError;
+        return res.status(400).json({ error: "Validation failed", details: zodError.flatten() });
+      }
+      const r = await updateFn(req.params.id, parsed.data as Record<string, unknown>);
       if (!r) return res.status(404).json({ error: "Not found" });
-      res.json(r);
-    } catch (err) { res.status(500).json({ error: `Failed to update ${entity}` }); }
+      res.json({ data: r });
+    } catch (err) {
+      res.status(500).json({ error: `Failed to update ${entity}` });
+    }
   });
+
   router.delete(`/api/admin/${entity}/:id`, async (req: Request, res: Response) => {
-    try { await deleteFn(req.params.id); res.json({ success: true }); } catch (err) { res.status(500).json({ error: `Failed to delete ${entity}` }); }
+    try {
+      await deleteFn(req.params.id);
+      res.json({ data: { success: true } });
+    } catch (err) {
+      res.status(500).json({ error: `Failed to delete ${entity}` });
+    }
   });
 };
 
-adminCrudRoute("products", adminStorage.listProducts, adminStorage.getProduct, adminStorage.createProduct, adminStorage.updateProduct, adminStorage.deleteProduct);
-adminCrudRoute("variants", adminStorage.listVariants, adminStorage.getVariant, adminStorage.createVariant, adminStorage.updateVariant, adminStorage.deleteVariant);
-adminCrudRoute("modifier-groups", adminStorage.listModifierGroups, adminStorage.getModifierGroup, adminStorage.createModifierGroup, adminStorage.updateModifierGroup, adminStorage.deleteModifierGroup);
-adminCrudRoute("modifiers", adminStorage.listModifiers, adminStorage.getModifier, adminStorage.createModifier, adminStorage.updateModifier, adminStorage.deleteModifier);
-adminCrudRoute("inventory-items", adminStorage.listInventoryItems, adminStorage.getInventoryItem, adminStorage.createInventoryItem, adminStorage.updateInventoryItem, adminStorage.deleteInventoryItem);
-adminCrudRoute("bom", adminStorage.listBom, adminStorage.getBom, adminStorage.createBom, adminStorage.updateBom, adminStorage.deleteBom);
-adminCrudRoute("invoices", adminStorage.listInvoices, adminStorage.getInvoice, adminStorage.createInvoice, adminStorage.updateInvoice, adminStorage.deleteInvoice);
-adminCrudRoute("invoice-line-items", adminStorage.listInvoiceLineItems, adminStorage.getInvoiceLineItem, adminStorage.createInvoiceLineItem, adminStorage.updateInvoiceLineItem, adminStorage.deleteInvoiceLineItem);
+adminCrudRoute({
+  entity: "products",
+  createSchema: createProductSchema,
+  updateSchema: updateProductSchema,
+  listFn: adminStorage.listProducts.bind(adminStorage),
+  getFn: adminStorage.getProduct.bind(adminStorage),
+  createFn: adminStorage.createProduct.bind(adminStorage),
+  updateFn: adminStorage.updateProduct.bind(adminStorage),
+  deleteFn: adminStorage.deleteProduct.bind(adminStorage),
+});
 
-router.get("/api/admin/product-modifier-groups", async (_req: Request, res: Response) => {
-  try { res.json(await adminStorage.listProductModifierGroups()); } catch (err) { res.status(500).json({ error: "Failed to list pmg" }); }
+adminCrudRoute({
+  entity: "variants",
+  createSchema: createVariantSchema,
+  updateSchema: updateVariantSchema,
+  listFn: adminStorage.listVariants.bind(adminStorage),
+  getFn: adminStorage.getVariant.bind(adminStorage),
+  createFn: adminStorage.createVariant.bind(adminStorage),
+  updateFn: adminStorage.updateVariant.bind(adminStorage),
+  deleteFn: adminStorage.deleteVariant.bind(adminStorage),
+  listFilters: ["productId"],
+});
+
+adminCrudRoute({
+  entity: "modifier-groups",
+  createSchema: createModifierGroupSchema,
+  updateSchema: updateModifierGroupSchema,
+  listFn: adminStorage.listModifierGroups.bind(adminStorage),
+  getFn: adminStorage.getModifierGroup.bind(adminStorage),
+  createFn: adminStorage.createModifierGroup.bind(adminStorage),
+  updateFn: adminStorage.updateModifierGroup.bind(adminStorage),
+  deleteFn: adminStorage.deleteModifierGroup.bind(adminStorage),
+});
+
+adminCrudRoute({
+  entity: "modifiers",
+  createSchema: createModifierSchema,
+  updateSchema: updateModifierSchema,
+  listFn: adminStorage.listModifiers.bind(adminStorage),
+  getFn: adminStorage.getModifier.bind(adminStorage),
+  createFn: adminStorage.createModifier.bind(adminStorage),
+  updateFn: adminStorage.updateModifier.bind(adminStorage),
+  deleteFn: adminStorage.deleteModifier.bind(adminStorage),
+  listFilters: ["modifierGroupId"],
+});
+
+adminCrudRoute({
+  entity: "inventory-items",
+  createSchema: createInventoryItemSchema,
+  updateSchema: updateInventoryItemSchema,
+  listFn: adminStorage.listInventoryItems.bind(adminStorage),
+  getFn: adminStorage.getInventoryItem.bind(adminStorage),
+  createFn: adminStorage.createInventoryItem.bind(adminStorage),
+  updateFn: adminStorage.updateInventoryItem.bind(adminStorage),
+  deleteFn: adminStorage.deleteInventoryItem.bind(adminStorage),
+});
+
+adminCrudRoute({
+  entity: "bom",
+  createSchema: createBomSchema,
+  updateSchema: updateBomSchema,
+  listFn: adminStorage.listBom.bind(adminStorage),
+  getFn: adminStorage.getBom.bind(adminStorage),
+  createFn: adminStorage.createBom.bind(adminStorage),
+  updateFn: adminStorage.updateBom.bind(adminStorage),
+  deleteFn: adminStorage.deleteBom.bind(adminStorage),
+  listFilters: ["sourceId", "sourceProductId", "inventoryItemId"],
+});
+
+adminCrudRoute({
+  entity: "invoices",
+  createSchema: createInvoiceSchema,
+  updateSchema: updateInvoiceSchema,
+  listFn: adminStorage.listInvoices.bind(adminStorage),
+  getFn: adminStorage.getInvoice.bind(adminStorage),
+  createFn: adminStorage.createInvoice.bind(adminStorage),
+  updateFn: adminStorage.updateInvoice.bind(adminStorage),
+  deleteFn: adminStorage.deleteInvoice.bind(adminStorage),
+});
+
+adminCrudRoute({
+  entity: "invoice-line-items",
+  createSchema: createInvoiceLineItemSchema,
+  updateSchema: updateInvoiceLineItemSchema,
+  listFn: adminStorage.listInvoiceLineItems.bind(adminStorage),
+  getFn: adminStorage.getInvoiceLineItem.bind(adminStorage),
+  createFn: adminStorage.createInvoiceLineItem.bind(adminStorage),
+  updateFn: adminStorage.updateInvoiceLineItem.bind(adminStorage),
+  deleteFn: adminStorage.deleteInvoiceLineItem.bind(adminStorage),
+  listFilters: ["invoiceId"],
+});
+
+router.get("/api/admin/product-modifier-groups", async (req: Request, res: Response) => {
+  try {
+    const { opts, error } = parseQueryOpts(req.query as Record<string, unknown>, ["productId"]);
+    if (error) return res.status(400).json({ error });
+    const result = await adminStorage.listProductModifierGroups(opts);
+    res.json({
+      data: result.items,
+      meta: { total: Number(result.total), limit: opts.limit ?? null, offset: opts.offset ?? 0 },
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to list product-modifier-groups" });
+  }
 });
 
 router.post("/api/admin/product-modifier-groups/set", async (req: Request, res: Response) => {
   try {
-    const { productId, groupIds } = req.body;
-    await adminStorage.setProductModifierGroups(productId, groupIds);
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: "Failed to set pmg" }); }
+    const parsed = setProductModifierGroupsSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+    await adminStorage.setProductModifierGroups(parsed.data.productId, parsed.data.groupIds);
+    res.json({ data: { success: true } });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to set product-modifier-groups" });
+  }
 });
 
 router.post("/api/admin/product-modifier-groups/scale-factors", async (req: Request, res: Response) => {
   try {
-    const { productId, modifierGroupId, scaleFactors } = req.body;
-    await adminStorage.setProductModifierGroupScaleFactors(productId, modifierGroupId, scaleFactors);
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: "Failed to set scale factors" }); }
+    const parsed = setScaleFactorsSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+    await adminStorage.setProductModifierGroupScaleFactors(parsed.data.productId, parsed.data.modifierGroupId, parsed.data.scaleFactors);
+    res.json({ data: { success: true } });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to set scale factors" });
+  }
 });
 
 router.post("/api/admin/inventory-items/:id/adjust", async (req: Request, res: Response) => {
   try {
-    const r = await adminStorage.adjustInventoryQuantity(req.params.id, req.body.delta);
+    const parsed = adjustInventorySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+    const r = await adminStorage.adjustInventoryQuantity(req.params.id, parsed.data.delta);
     if (!r) return res.status(404).json({ error: "Not found" });
-    res.json(r);
-  } catch (err) { res.status(500).json({ error: "Failed to adjust inventory" }); }
+    res.json({ data: r });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to adjust inventory" });
+  }
 });
 
 router.post("/api/admin/invoices/with-line-items", async (req: Request, res: Response) => {
   try {
-    const { invoice, lineItems } = req.body;
-    const result = await adminStorage.createInvoiceWithLineItems(invoice, lineItems);
-    res.json(result);
-  } catch (err) { res.status(500).json({ error: "Failed to create invoice with line items" }); }
+    const body = req.body;
+    if (!body || typeof body !== "object") {
+      return res.status(400).json({ error: "Request body must be a JSON object" });
+    }
+    const invoiceParsed = invoiceWithLineItemsInvoiceSchema.safeParse(body.invoice);
+    if (!invoiceParsed.success) {
+      const zodError = invoiceParsed.error as z.ZodError;
+      return res.status(400).json({ error: "Validation failed (invoice)", details: zodError.flatten() });
+    }
+    if (!Array.isArray(body.lineItems)) {
+      return res.status(400).json({ error: "Validation failed", details: { formErrors: ["lineItems must be an array"], fieldErrors: {} } });
+    }
+    const lineItemErrors: Record<string, unknown>[] = [];
+    const parsedLineItems: Record<string, unknown>[] = [];
+    const rawLineItems = body.lineItems;
+    for (let i = 0; i < rawLineItems.length; i++) {
+      const liParsed = invoiceWithLineItemsLineItemSchema.safeParse(rawLineItems[i]);
+      if (!liParsed.success) {
+        const zodError = liParsed.error as z.ZodError;
+        lineItemErrors.push({ index: i, details: zodError.flatten() });
+      } else {
+        parsedLineItems.push(liParsed.data as Record<string, unknown>);
+      }
+    }
+    if (lineItemErrors.length > 0) {
+      return res.status(400).json({ error: "Validation failed (lineItems)", details: lineItemErrors });
+    }
+    const result = await adminStorage.createInvoiceWithLineItems(
+      invoiceParsed.data as Record<string, unknown>,
+      parsedLineItems,
+    );
+    res.json({ data: result });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to create invoice with line items" });
+  }
 });
 
 router.get("/api/admin/all-data", async (_req: Request, res: Response) => {
-  try { res.json(await adminStorage.getAllAdminData()); } catch (err) { res.status(500).json({ error: "Failed to get all admin data" }); }
+  try { res.json({ data: await adminStorage.getAllAdminData() }); } catch (err) { res.status(500).json({ error: "Failed to get all admin data" }); }
 });
 
 router.get("/api/admin/all-data-with-deleted", async (_req: Request, res: Response) => {
-  try { res.json(await adminStorage.getAllAdminDataWithDeleted()); } catch (err) { res.status(500).json({ error: "Failed to get all admin data" }); }
+  try { res.json({ data: await adminStorage.getAllAdminDataWithDeleted() }); } catch (err) { res.status(500).json({ error: "Failed to get all admin data" }); }
 });
 
 router.get("/api/admin/client-data/:clientCode", async (req: Request, res: Response) => {
   try {
     const data = await adminStorage.getClientSyncData(req.params.clientCode);
     if (!data) return res.status(404).json({ error: "Client not found" });
-    res.json(data);
+    res.json({ data });
   } catch (err) { res.status(500).json({ error: "Failed to get client sync data" }); }
 });
 
 router.post("/api/admin/apply-sync-changes", async (req: Request, res: Response) => {
   try {
-    const { changes } = req.body;
-    await adminStorage.applyChanges(changes);
-    res.json({ success: true });
+    const parsed = applySyncChangesSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+    await adminStorage.applyChanges(parsed.data.changes);
+    res.json({ data: { success: true } });
   } catch (err) { res.status(500).json({ error: "Failed to apply sync changes" }); }
 });
 
 router.post("/api/admin/apply-client-sync-changes/:clientCode", async (req: Request, res: Response) => {
   try {
-    const { changes } = req.body;
-    const result = await adminStorage.applyClientSyncChanges(req.params.clientCode, changes);
+    const parsed = applySyncChangesSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+    const result = await adminStorage.applyClientSyncChanges(req.params.clientCode, parsed.data.changes);
     if (!result) return res.status(404).json({ error: "Client not found" });
-    res.json({ success: true });
+    res.json({ data: { success: true } });
   } catch (err) { res.status(500).json({ error: "Failed to apply client sync changes" }); }
 });
 

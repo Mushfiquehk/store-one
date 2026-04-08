@@ -58,7 +58,8 @@ function DashboardTab() {
         fetch("/api/clients"),
       ]);
       if (!metricsRes.ok || !clientsRes.ok) throw new Error("Failed to fetch data");
-      setMetrics(await metricsRes.json());
+      const metricsJson = await metricsRes.json();
+      setMetrics(metricsJson.data ?? metricsJson);
       setClients(await clientsRes.json());
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load dashboard data");

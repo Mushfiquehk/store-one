@@ -6,7 +6,18 @@ import {
   adminBillOfMaterials, adminInvoices, adminInvoiceLineItems,
 } from "./schema";
 import type { Client, Backup, SyncRecord } from "./schema";
-import { eq, desc, sql, and, gt, inArray, isNull } from "drizzle-orm";
+import { eq, desc, sql, and, gt, inArray, isNull, count } from "drizzle-orm";
+
+export interface ListOptions {
+  limit?: number;
+  offset?: number;
+  [key: string]: unknown;
+}
+
+export interface ListResult<T> {
+  items: T[];
+  total: number;
+}
 
 interface BackupSnapshot {
   products: unknown[];
@@ -63,54 +74,54 @@ export interface IStorage {
 }
 
 export interface IAdminStorage {
-  listProducts(): Promise<unknown[]>;
+  listProducts(opts?: ListOptions): Promise<ListResult<unknown>>;
   getProduct(id: string): Promise<unknown | null>;
   createProduct(data: Record<string, unknown>): Promise<unknown>;
   updateProduct(id: string, data: Record<string, unknown>): Promise<unknown | null>;
   deleteProduct(id: string): Promise<void>;
 
-  listVariants(): Promise<unknown[]>;
+  listVariants(opts?: ListOptions): Promise<ListResult<unknown>>;
   getVariant(id: string): Promise<unknown | null>;
   createVariant(data: Record<string, unknown>): Promise<unknown>;
   updateVariant(id: string, data: Record<string, unknown>): Promise<unknown | null>;
   deleteVariant(id: string): Promise<void>;
 
-  listModifierGroups(): Promise<unknown[]>;
+  listModifierGroups(opts?: ListOptions): Promise<ListResult<unknown>>;
   getModifierGroup(id: string): Promise<unknown | null>;
   createModifierGroup(data: Record<string, unknown>): Promise<unknown>;
   updateModifierGroup(id: string, data: Record<string, unknown>): Promise<unknown | null>;
   deleteModifierGroup(id: string): Promise<void>;
 
-  listModifiers(): Promise<unknown[]>;
+  listModifiers(opts?: ListOptions): Promise<ListResult<unknown>>;
   getModifier(id: string): Promise<unknown | null>;
   createModifier(data: Record<string, unknown>): Promise<unknown>;
   updateModifier(id: string, data: Record<string, unknown>): Promise<unknown | null>;
   deleteModifier(id: string): Promise<void>;
 
-  listProductModifierGroups(): Promise<unknown[]>;
+  listProductModifierGroups(opts?: ListOptions): Promise<ListResult<unknown>>;
   setProductModifierGroups(productId: string, groupIds: string[]): Promise<void>;
   setProductModifierGroupScaleFactors(productId: string, modifierGroupId: string, scaleFactors: unknown): Promise<unknown | null>;
 
-  listInventoryItems(): Promise<unknown[]>;
+  listInventoryItems(opts?: ListOptions): Promise<ListResult<unknown>>;
   getInventoryItem(id: string): Promise<unknown | null>;
   createInventoryItem(data: Record<string, unknown>): Promise<unknown>;
   updateInventoryItem(id: string, data: Record<string, unknown>): Promise<unknown | null>;
   adjustInventoryQuantity(id: string, delta: number): Promise<unknown | null>;
   deleteInventoryItem(id: string): Promise<void>;
 
-  listBom(): Promise<unknown[]>;
+  listBom(opts?: ListOptions): Promise<ListResult<unknown>>;
   getBom(id: string): Promise<unknown | null>;
   createBom(data: Record<string, unknown>): Promise<unknown>;
   updateBom(id: string, data: Record<string, unknown>): Promise<unknown | null>;
   deleteBom(id: string): Promise<void>;
 
-  listInvoices(): Promise<unknown[]>;
+  listInvoices(opts?: ListOptions): Promise<ListResult<unknown>>;
   getInvoice(id: string): Promise<unknown | null>;
   createInvoice(data: Record<string, unknown>): Promise<unknown>;
   updateInvoice(id: string, data: Record<string, unknown>): Promise<unknown | null>;
   deleteInvoice(id: string): Promise<void>;
 
-  listInvoiceLineItems(): Promise<unknown[]>;
+  listInvoiceLineItems(opts?: ListOptions): Promise<ListResult<unknown>>;
   getInvoiceLineItem(id: string): Promise<unknown | null>;
   createInvoiceLineItem(data: Record<string, unknown>): Promise<unknown>;
   updateInvoiceLineItem(id: string, data: Record<string, unknown>): Promise<unknown | null>;
@@ -408,8 +419,14 @@ export const storage: IStorage = {
 };
 
 export const adminStorage: IAdminStorage = {
-  async listProducts() {
-    return db.select().from(adminProducts).where(isNull(adminProducts.deletedAt));
+  async listProducts(opts: ListOptions = {}): Promise<ListResult<unknown>> {
+    const conditions = [isNull(adminProducts.deletedAt)];
+    const [totalResult] = await db.select({ count: count() }).from(adminProducts).where(and(...conditions));
+    let query = db.select().from(adminProducts).where(and(...conditions)).$dynamic();
+    if (opts.limit) query = query.limit(opts.limit);
+    if (opts.offset) query = query.offset(opts.offset);
+    const items = await query;
+    return { items, total: totalResult.count };
   },
   async getProduct(id: string) {
     const [r] = await db.select().from(adminProducts).where(eq(adminProducts.id, id)).limit(1);
@@ -453,8 +470,15 @@ export const adminStorage: IAdminStorage = {
     }
   },
 
-  async listVariants() {
-    return db.select().from(adminVariants).where(isNull(adminVariants.deletedAt));
+  async listVariants(opts: ListOptions = {}): Promise<ListResult<unknown>> {
+    const conditions = [isNull(adminVariants.deletedAt)];
+    if (opts.productId) conditions.push(eq(adminVariants.productId, opts.productId as string));
+    const [totalResult] = await db.select({ count: count() }).from(adminVariants).where(and(...conditions));
+    let query = db.select().from(adminVariants).where(and(...conditions)).$dynamic();
+    if (opts.limit) query = query.limit(opts.limit);
+    if (opts.offset) query = query.offset(opts.offset);
+    const items = await query;
+    return { items, total: totalResult.count };
   },
   async getVariant(id: string) {
     const [r] = await db.select().from(adminVariants).where(eq(adminVariants.id, id)).limit(1);
@@ -490,8 +514,14 @@ export const adminStorage: IAdminStorage = {
     await db.update(adminBillOfMaterials).set({ deletedAt: now, updatedAt: now }).where(and(eq(adminBillOfMaterials.sourceType, "VARIANT"), eq(adminBillOfMaterials.sourceId, id)));
   },
 
-  async listModifierGroups() {
-    return db.select().from(adminModifierGroups).where(isNull(adminModifierGroups.deletedAt));
+  async listModifierGroups(opts: ListOptions = {}): Promise<ListResult<unknown>> {
+    const conditions = [isNull(adminModifierGroups.deletedAt)];
+    const [totalResult] = await db.select({ count: count() }).from(adminModifierGroups).where(and(...conditions));
+    let query = db.select().from(adminModifierGroups).where(and(...conditions)).$dynamic();
+    if (opts.limit) query = query.limit(opts.limit);
+    if (opts.offset) query = query.offset(opts.offset);
+    const items = await query;
+    return { items, total: totalResult.count };
   },
   async getModifierGroup(id: string) {
     const [r] = await db.select().from(adminModifierGroups).where(eq(adminModifierGroups.id, id)).limit(1);
@@ -525,8 +555,15 @@ export const adminStorage: IAdminStorage = {
     await db.update(adminProductModifierGroups).set({ deletedAt: now, updatedAt: now }).where(eq(adminProductModifierGroups.modifierGroupId, id));
   },
 
-  async listModifiers() {
-    return db.select().from(adminModifiers).where(isNull(adminModifiers.deletedAt));
+  async listModifiers(opts: ListOptions = {}): Promise<ListResult<unknown>> {
+    const conditions = [isNull(adminModifiers.deletedAt)];
+    if (opts.modifierGroupId) conditions.push(eq(adminModifiers.modifierGroupId, opts.modifierGroupId as string));
+    const [totalResult] = await db.select({ count: count() }).from(adminModifiers).where(and(...conditions));
+    let query = db.select().from(adminModifiers).where(and(...conditions)).$dynamic();
+    if (opts.limit) query = query.limit(opts.limit);
+    if (opts.offset) query = query.offset(opts.offset);
+    const items = await query;
+    return { items, total: totalResult.count };
   },
   async getModifier(id: string) {
     const [r] = await db.select().from(adminModifiers).where(eq(adminModifiers.id, id)).limit(1);
@@ -561,8 +598,15 @@ export const adminStorage: IAdminStorage = {
     await db.update(adminModifiers).set({ deletedAt: now, updatedAt: now }).where(eq(adminModifiers.id, id));
   },
 
-  async listProductModifierGroups() {
-    return db.select().from(adminProductModifierGroups).where(isNull(adminProductModifierGroups.deletedAt));
+  async listProductModifierGroups(opts: ListOptions = {}): Promise<ListResult<unknown>> {
+    const conditions = [isNull(adminProductModifierGroups.deletedAt)];
+    if (opts.productId) conditions.push(eq(adminProductModifierGroups.productId, opts.productId as string));
+    const [totalResult] = await db.select({ count: count() }).from(adminProductModifierGroups).where(and(...conditions));
+    let query = db.select().from(adminProductModifierGroups).where(and(...conditions)).$dynamic();
+    if (opts.limit) query = query.limit(opts.limit);
+    if (opts.offset) query = query.offset(opts.offset);
+    const items = await query;
+    return { items, total: totalResult.count };
   },
   async setProductModifierGroups(productId: string, groupIds: string[]) {
     const now = Date.now();
@@ -613,8 +657,14 @@ export const adminStorage: IAdminStorage = {
       ));
   },
 
-  async listInventoryItems() {
-    return db.select().from(adminInventoryItems).where(isNull(adminInventoryItems.deletedAt));
+  async listInventoryItems(opts: ListOptions = {}): Promise<ListResult<unknown>> {
+    const conditions = [isNull(adminInventoryItems.deletedAt)];
+    const [totalResult] = await db.select({ count: count() }).from(adminInventoryItems).where(and(...conditions));
+    let query = db.select().from(adminInventoryItems).where(and(...conditions)).$dynamic();
+    if (opts.limit) query = query.limit(opts.limit);
+    if (opts.offset) query = query.offset(opts.offset);
+    const items = await query;
+    return { items, total: totalResult.count };
   },
   async getInventoryItem(id: string) {
     const [r] = await db.select().from(adminInventoryItems).where(eq(adminInventoryItems.id, id)).limit(1);
@@ -660,8 +710,17 @@ export const adminStorage: IAdminStorage = {
     await db.update(adminBillOfMaterials).set({ deletedAt: now, updatedAt: now }).where(eq(adminBillOfMaterials.inventoryItemId, id));
   },
 
-  async listBom() {
-    return db.select().from(adminBillOfMaterials).where(isNull(adminBillOfMaterials.deletedAt));
+  async listBom(opts: ListOptions = {}): Promise<ListResult<unknown>> {
+    const conditions = [isNull(adminBillOfMaterials.deletedAt)];
+    if (opts.sourceId) conditions.push(eq(adminBillOfMaterials.sourceId, opts.sourceId as string));
+    if (opts.sourceProductId) conditions.push(eq(adminBillOfMaterials.sourceProductId, opts.sourceProductId as string));
+    if (opts.inventoryItemId) conditions.push(eq(adminBillOfMaterials.inventoryItemId, opts.inventoryItemId as string));
+    const [totalResult] = await db.select({ count: count() }).from(adminBillOfMaterials).where(and(...conditions));
+    let query = db.select().from(adminBillOfMaterials).where(and(...conditions)).$dynamic();
+    if (opts.limit) query = query.limit(opts.limit);
+    if (opts.offset) query = query.offset(opts.offset);
+    const items = await query;
+    return { items, total: totalResult.count };
   },
   async getBom(id: string) {
     const [r] = await db.select().from(adminBillOfMaterials).where(eq(adminBillOfMaterials.id, id)).limit(1);
@@ -700,8 +759,14 @@ export const adminStorage: IAdminStorage = {
     await db.update(adminBillOfMaterials).set({ deletedAt: now, updatedAt: now }).where(eq(adminBillOfMaterials.id, id));
   },
 
-  async listInvoices() {
-    return db.select().from(adminInvoices).where(isNull(adminInvoices.deletedAt));
+  async listInvoices(opts: ListOptions = {}): Promise<ListResult<unknown>> {
+    const conditions = [isNull(adminInvoices.deletedAt)];
+    const [totalResult] = await db.select({ count: count() }).from(adminInvoices).where(and(...conditions));
+    let query = db.select().from(adminInvoices).where(and(...conditions)).$dynamic();
+    if (opts.limit) query = query.limit(opts.limit);
+    if (opts.offset) query = query.offset(opts.offset);
+    const items = await query;
+    return { items, total: totalResult.count };
   },
   async getInvoice(id: string) {
     const [r] = await db.select().from(adminInvoices).where(eq(adminInvoices.id, id)).limit(1);
@@ -736,8 +801,15 @@ export const adminStorage: IAdminStorage = {
     await db.update(adminInvoiceLineItems).set({ deletedAt: now, updatedAt: now }).where(eq(adminInvoiceLineItems.invoiceId, id));
   },
 
-  async listInvoiceLineItems() {
-    return db.select().from(adminInvoiceLineItems).where(isNull(adminInvoiceLineItems.deletedAt));
+  async listInvoiceLineItems(opts: ListOptions = {}): Promise<ListResult<unknown>> {
+    const conditions = [isNull(adminInvoiceLineItems.deletedAt)];
+    if (opts.invoiceId) conditions.push(eq(adminInvoiceLineItems.invoiceId, opts.invoiceId as string));
+    const [totalResult] = await db.select({ count: count() }).from(adminInvoiceLineItems).where(and(...conditions));
+    let query = db.select().from(adminInvoiceLineItems).where(and(...conditions)).$dynamic();
+    if (opts.limit) query = query.limit(opts.limit);
+    if (opts.offset) query = query.offset(opts.offset);
+    const items = await query;
+    return { items, total: totalResult.count };
   },
   async getInvoiceLineItem(id: string) {
     const [r] = await db.select().from(adminInvoiceLineItems).where(eq(adminInvoiceLineItems.id, id)).limit(1);

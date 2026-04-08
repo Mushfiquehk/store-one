@@ -86,28 +86,33 @@ type StoreContextType = {
 };
 
 
+function unwrapEnvelope(json: any): any {
+  if (json && typeof json === "object" && "data" in json) return json.data;
+  return json;
+}
+
 async function apiGet(path: string) {
   const res = await fetch(path);
   if (!res.ok) throw new Error(`GET ${path} failed`);
-  return res.json();
+  return unwrapEnvelope(await res.json());
 }
 
 async function apiPost(path: string, body: unknown) {
   const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!res.ok) throw new Error(`POST ${path} failed`);
-  return res.json();
+  return unwrapEnvelope(await res.json());
 }
 
 async function apiPut(path: string, body: unknown) {
   const res = await fetch(path, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!res.ok) throw new Error(`PUT ${path} failed`);
-  return res.json();
+  return unwrapEnvelope(await res.json());
 }
 
 async function apiDelete(path: string) {
   const res = await fetch(path, { method: "DELETE" });
   if (!res.ok) throw new Error(`DELETE ${path} failed`);
-  return res.json();
+  return unwrapEnvelope(await res.json());
 }
 
 export function AdminStoreProvider({ children }: { children: React.ReactNode }) {
