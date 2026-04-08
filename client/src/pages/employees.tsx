@@ -38,7 +38,8 @@ export default function EmployeesPage() {
     name: "",
     role: "staff",
     payRate: 0,
-    pin: ""
+    pin: "",
+    email: ""
   });
 
   const filteredEmployees = employees.filter(e =>
@@ -51,7 +52,7 @@ export default function EmployeesPage() {
       setFormData({ ...employee });
     } else {
       setEditingEmployee(null);
-      setFormData({ name: "", role: "staff", payRate: 1500, pin: "" });
+      setFormData({ name: "", role: "staff", payRate: 1500, pin: "", email: "" });
     }
     setIsDialogOpen(true);
   };
@@ -71,7 +72,8 @@ export default function EmployeesPage() {
         name: formData.name!,
         role: formData.role || "staff",
         payRate: formData.payRate || 0,
-        pin: formData.pin!
+        pin: formData.pin!,
+        email: formData.email || ""
       });
       toast({ title: "Success", description: "New employee added." });
     }
@@ -196,6 +198,18 @@ export default function EmployeesPage() {
                     <SelectItem value="manager">Manager</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="email" className="text-right">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  value={formData.email}
+                  onChange={e => setFormData({...formData, email: e.target.value})}
+                  className="col-span-3"
+                  placeholder="jane@example.com"
+                  data-testid="input-employee-email"
+                />
               </div>
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="pin" className="text-right">Access PIN</Label>

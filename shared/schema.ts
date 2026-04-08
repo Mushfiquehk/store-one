@@ -146,6 +146,7 @@ export type Employee = {
   role: string;
   payRate: number;
   pin: string;
+  email: string;
   updatedAt: number;
   deletedAt: number | null;
 };

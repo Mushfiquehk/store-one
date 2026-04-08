@@ -130,15 +130,29 @@ All entities include `updatedAt: number` (epoch ms timestamp) and `deletedAt: nu
 - `GET /api/local/status` — Health check for local Capacitor HTTP server
 - `POST /api/demo/seed` — Seed coffee shop demo data into both sync_records and admin tables. Optional body: `{ "clientCode": "my-client" }` (defaults to "demo-client"). Returns `{ success, clientCode, recordsInserted, recordsUpdated, totalRecords, adminRecords }`.
 - `POST /api/demo/clear` — Delete all `demo_*` records from sync_records and all admin tables. Returns `{ success, recordsDeleted, adminTablesCleared }`.
+- `GET /api/schedule/shifts?weekStart=YYYY-MM-DD` — List schedule shifts for a given week
+- `POST /api/schedule/shifts` — Create a new shift (id, employeeId, weekStart, dayOfWeek, startMinutes, endMinutes)
+- `PUT /api/schedule/shifts/:id` — Update a shift's time or day
+- `DELETE /api/schedule/shifts/:id` — Soft-delete a shift
+- `POST /api/schedule/copy-week` — Copy shifts from one week to another (`{ fromWeek, toWeek }`)
+- `POST /api/schedule/publish` — Send schedule emails to employees with configured SMTP settings
+- `GET /api/settings` — Get all store settings
+- `GET /api/settings/:key` — Get a single setting by key
+- `PUT /api/settings/:key` — Update a setting (`{ value }`)
+
+## Store Settings (PostgreSQL `store_settings` table)
+- `hoursOfOperation` — `{ openHour, closeHour, operatingDays[] }` — Defines schedule board time range and visible days
+- `emailConfig` — `{ provider, host, port, secure, username, password, senderEmail, senderName }` — SMTP email backend for schedule publishing
 
 ## Pages
 - `/` — POS register
 - `/start` — Onboarding/getting started
 - `/products` — Station Menu, Modifiers, Combos, Bill of Materials, Bulk Inventory
-- `/employees` — Staff management
+- `/employees` — Staff management (name, role, email, PIN)
+- `/schedule` — Weekly drag-and-drop employee scheduling with resizable shift blocks, copy-previous-week, and publish-to-email
 - `/reports` — Sales trends, product mix, inventory status
 - `/integrations` — Third-party connections (placeholder)
-- `/settings` — Tax rate, Incremental Sync (per-category controls + auto-sync), Full Backup & Restore
+- `/settings` — Tax rate, Hours of Operation (open/close hours + operating days), Email Backend (SMTP config with provider presets), Incremental Sync, Full Backup & Restore
 - `/admin` — Admin dashboard with tabbed interface: Dashboard (metrics + clients), Products (reuses POS components via AdminStoreProvider), Invoice Intake, and Interactive Sync
 
 ## Auto-Seed Demo Data

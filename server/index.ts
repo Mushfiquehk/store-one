@@ -168,6 +168,13 @@ async function initDb() {
     )
   `);
   await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS store_settings (
+      key TEXT PRIMARY KEY,
+      value JSONB NOT NULL,
+      updated_at BIGINT NOT NULL
+    )
+  `);
+  await db.execute(sql`
     CREATE TABLE IF NOT EXISTS schedule_shifts (
       id TEXT PRIMARY KEY,
       employee_id TEXT NOT NULL,

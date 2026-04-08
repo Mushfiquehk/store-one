@@ -113,6 +113,7 @@ export interface Employee {
   role: string;
   payRate: number;
   pin: string;
+  email: string;
   updatedAt: number;
   deletedAt: number | null;
 }
@@ -410,6 +411,12 @@ class PosDatabase extends Dexie {
             if (line.finalPriceCents === undefined) line.finalPriceCents = line.unitPrice;
           }
         }
+      });
+    });
+
+    this.version(8).stores({}).upgrade(async tx => {
+      await tx.table("employees").toCollection().modify(emp => {
+        if (emp.email === undefined) emp.email = "";
       });
     });
   }

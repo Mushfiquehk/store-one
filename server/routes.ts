@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { storage, adminStorage, scheduleStorage, type ListOptions } from "./storage";
+import { storage, adminStorage, scheduleStorage, settingsStorage, type ListOptions } from "./storage";
 import { z } from "zod";
 import { createInsertSchema } from "drizzle-zod";
 import { SYNC_CATEGORY_TABLES, type SyncCategory } from "../shared/schema";
@@ -1141,5 +1141,124 @@ router.post("/api/schedule/copy-week", async (req: Request, res: Response) => {
     res.json({ shifts, copied: shifts.length });
   } catch (err) {
     res.status(500).json({ error: "Failed to copy week" });
+  }
+});
+
+router.get("/api/settings", async (_req: Request, res: Response) => {
+  try {
+    const all = await settingsStorage.getAll();
+    res.json({ settings: all });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to load settings" });
+  }
+});
+
+router.get("/api/settings/:key", async (req: Request, res: Response) => {
+  try {
+    const value = await settingsStorage.get(req.params.key);
+    res.json({ value });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to load setting" });
+  }
+});
+
+router.put("/api/settings/:key", async (req: Request, res: Response) => {
+  try {
+    const { value } = req.body;
+    if (value === undefined) return res.status(400).json({ error: "value is required" });
+    await settingsStorage.set(req.params.key, value);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to save setting" });
+  }
+});
+
+router.post("/api/schedule/publish", async (req: Request, res: Response) => {
+  try {
+    const { weekStart, shifts, employees } = req.body;
+    if (!weekStart || !shifts || !employees) {
+      return res.status(400).json({ error: "weekStart, shifts, and employees are required" });
+    }
+
+    const emailConfig = await settingsStorage.get("emailConfig") as {
+      provider: string; host: string; port: number;
+      secure: boolean; username: string; password: string; senderEmail: string; senderName: string;
+    } | null;
+
+    if (!emailConfig || !emailConfig.host || !emailConfig.senderEmail) {
+      return res.status(400).json({ error: "Email backend not configured. Please set up email settings first." });
+    }
+
+    const nodemailer = await import("nodemailer");
+    const transporter = nodemailer.default.createTransport({
+      host: emailConfig.host,
+      port: emailConfig.port || 587,
+      secure: emailConfig.secure ?? false,
+      auth: emailConfig.username ? {
+        user: emailConfig.username,
+        pass: emailConfig.password,
+      } : undefined,
+    });
+
+    const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+    const formatTime = (minutes: number) => {
+      const h = Math.floor(minutes / 60);
+      const m = minutes % 60;
+      const ampm = h >= 12 ? "PM" : "AM";
+      const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+      return `${h12}:${m.toString().padStart(2, "0")} ${ampm}`;
+    };
+
+    const results: { email: string; success: boolean; error?: string }[] = [];
+
+    for (const emp of employees) {
+      if (!emp.email) continue;
+      const empShifts = shifts.filter((s: any) => s.employeeId === emp.id);
+      if (empShifts.length === 0) continue;
+
+      const shiftLines = empShifts
+        .sort((a: any, b: any) => a.dayOfWeek - b.dayOfWeek || a.startMinutes - b.startMinutes)
+        .map((s: any) => {
+          const duration = ((s.endMinutes - s.startMinutes) / 60).toFixed(1);
+          return `  ${DAYS[s.dayOfWeek]}: ${formatTime(s.startMinutes)} - ${formatTime(s.endMinutes)} (${duration}h)`;
+        })
+        .join("\n");
+
+      const totalHours = empShifts.reduce((sum: number, s: any) => sum + (s.endMinutes - s.startMinutes) / 60, 0);
+
+      const html = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #333;">Your Schedule for Week of ${weekStart}</h2>
+          <p>Hi ${emp.name},</p>
+          <p>Here is your schedule for the upcoming week:</p>
+          <div style="background: #f8f9fa; border-radius: 8px; padding: 16px; margin: 16px 0;">
+            <pre style="font-family: monospace; font-size: 14px; line-height: 1.6; margin: 0;">${shiftLines}</pre>
+          </div>
+          <p style="color: #666;"><strong>Total Hours:</strong> ${totalHours.toFixed(1)}h</p>
+          <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;" />
+          <p style="color: #999; font-size: 12px;">This is an automated schedule notification from ${emailConfig.senderName || "CornerShop"}.</p>
+        </div>
+      `;
+
+      try {
+        await transporter.sendMail({
+          from: `"${emailConfig.senderName || "CornerShop"}" <${emailConfig.senderEmail}>`,
+          to: emp.email,
+          subject: `Your Schedule - Week of ${weekStart}`,
+          html,
+        });
+        results.push({ email: emp.email, success: true });
+      } catch (emailErr) {
+        results.push({ email: emp.email, success: false, error: emailErr instanceof Error ? emailErr.message : "Send failed" });
+      }
+    }
+
+    const sent = results.filter(r => r.success).length;
+    const failed = results.filter(r => !r.success).length;
+    res.json({ sent, failed, results });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("Publish schedule error:", message);
+    res.status(500).json({ error: "Failed to publish schedule: " + message });
   }
 });

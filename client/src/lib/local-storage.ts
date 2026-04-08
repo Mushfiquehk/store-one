@@ -314,6 +314,7 @@ export const storage = {
       role: data.role!,
       payRate: data.payRate!,
       pin: data.pin!,
+      email: data.email ?? "",
       updatedAt: data.updatedAt ?? now,
       deletedAt: null,
     };

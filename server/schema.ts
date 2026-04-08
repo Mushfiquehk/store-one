@@ -143,6 +143,12 @@ export const adminSales = pgTable("admin_sales", {
   deletedAt: bigint("deleted_at", { mode: "number" }),
 });
 
+export const storeSettings = pgTable("store_settings", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+});
+
 export const scheduleShifts = pgTable("schedule_shifts", {
   id: text("id").primaryKey(),
   employeeId: text("employee_id").notNull(),

@@ -4,7 +4,7 @@ import {
   adminProducts, adminVariants, adminModifierGroups,
   adminProductModifierGroups, adminModifiers, adminInventoryItems,
   adminBillOfMaterials, adminInvoices, adminInvoiceLineItems,
-  adminSales, scheduleShifts,
+  adminSales, scheduleShifts, storeSettings,
 } from "./schema";
 import type { Client, Backup, SyncRecord } from "./schema";
 import { eq, desc, sql, and, gt, inArray, isNull, count } from "drizzle-orm";
@@ -1060,6 +1060,32 @@ export const adminStorage: IAdminStorage = {
       }
     }
     return true;
+  },
+};
+
+export const settingsStorage = {
+  async get(key: string): Promise<unknown | null> {
+    const [row] = await db.select().from(storeSettings).where(eq(storeSettings.key, key)).limit(1);
+    return row ? row.value : null;
+  },
+
+  async set(key: string, value: unknown): Promise<void> {
+    const now = Date.now();
+    const [existing] = await db.select().from(storeSettings).where(eq(storeSettings.key, key)).limit(1);
+    if (existing) {
+      await db.update(storeSettings).set({ value, updatedAt: now }).where(eq(storeSettings.key, key));
+    } else {
+      await db.insert(storeSettings).values({ key, value, updatedAt: now });
+    }
+  },
+
+  async getAll(): Promise<Record<string, unknown>> {
+    const rows = await db.select().from(storeSettings);
+    const result: Record<string, unknown> = {};
+    for (const row of rows) {
+      result[row.key] = row.value;
+    }
+    return result;
   },
 };
 

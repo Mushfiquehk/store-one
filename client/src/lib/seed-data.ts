@@ -256,10 +256,10 @@ const bomEntries: BomEntry[] = [
 ];
 
 const employees: Employee[] = [
-  { id: `${D}emp_alex`, name: "Alex Rivera", role: "manager", payRate: 2200, pin: "1234", updatedAt: now, deletedAt: null },
-  { id: `${D}emp_jordan`, name: "Jordan Chen", role: "barista", payRate: 1600, pin: "5678", updatedAt: now, deletedAt: null },
-  { id: `${D}emp_sam`, name: "Sam Patel", role: "barista", payRate: 1550, pin: "9012", updatedAt: now, deletedAt: null },
-  { id: `${D}emp_casey`, name: "Casey Kim", role: "cashier", payRate: 1400, pin: "3456", updatedAt: now, deletedAt: null },
+  { id: `${D}emp_alex`, name: "Alex Rivera", role: "manager", payRate: 2200, pin: "1234", email: "", updatedAt: now, deletedAt: null },
+  { id: `${D}emp_jordan`, name: "Jordan Chen", role: "barista", payRate: 1600, pin: "5678", email: "", updatedAt: now, deletedAt: null },
+  { id: `${D}emp_sam`, name: "Sam Patel", role: "barista", payRate: 1550, pin: "9012", email: "", updatedAt: now, deletedAt: null },
+  { id: `${D}emp_casey`, name: "Casey Kim", role: "cashier", payRate: 1400, pin: "3456", email: "", updatedAt: now, deletedAt: null },
 ];
 
 function generateTimePunches(): TimePunch[] {

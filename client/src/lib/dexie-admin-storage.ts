@@ -463,6 +463,7 @@ export const dexieAdminStorage: ApiAdminStorage = {
       role: (data.role as string) ?? "",
       payRate: (data.payRate as number) ?? 0,
       pin: (data.pin as string) ?? "",
+      email: (data.email as string) ?? "",
       updatedAt: now,
       deletedAt: null,
     };

@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import { CalendarDays, ChevronLeft, ChevronRight, Copy, Trash2, GripVertical } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, Copy, Trash2, GripVertical, Send, Loader2 } from "lucide-react";
 import AppShell from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -9,9 +9,6 @@ import type { ScheduleShift } from "../../../shared/schema";
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const HOUR_HEIGHT = 60;
-const START_HOUR = 6;
-const END_HOUR = 24;
-const TOTAL_HOURS = END_HOUR - START_HOUR;
 const MIN_SHIFT_MINUTES = 30;
 
 const EMPLOYEE_COLORS = [
@@ -75,11 +72,11 @@ interface DragState {
   originalDay: number;
 }
 
-interface DropTarget {
-  employeeId: string;
-  dayOfWeek: number;
-  startMinutes: number;
-}
+type HoursOfOperation = {
+  openHour: number;
+  closeHour: number;
+  operatingDays: number[];
+};
 
 export default function SchedulePage() {
   const { employees } = useStore();
@@ -90,8 +87,25 @@ export default function SchedulePage() {
   const [loading, setLoading] = useState(false);
   const [selectedShiftId, setSelectedShiftId] = useState<string | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
-  const [dragOverCell, setDragOverCell] = useState<{ day: number; employeeId: string } | null>(null);
+  const [publishing, setPublishing] = useState(false);
   const gridRef = useRef<HTMLDivElement>(null);
+
+  const [hours, setHours] = useState<HoursOfOperation>({ openHour: 6, closeHour: 24, operatingDays: [0, 1, 2, 3, 4, 5, 6] });
+
+  useEffect(() => {
+    fetch("/api/settings/hoursOfOperation")
+      .then(r => r.json())
+      .then(d => { if (d.value) setHours(d.value as HoursOfOperation); })
+      .catch(() => {});
+  }, []);
+
+  const START_HOUR = hours.openHour;
+  const END_HOUR = hours.closeHour;
+  const TOTAL_HOURS = END_HOUR - START_HOUR;
+
+  const visibleDays = useMemo(() => {
+    return DAYS.map((name, i) => ({ name, index: i })).filter(d => hours.operatingDays.includes(d.index));
+  }, [hours.operatingDays]);
 
   const currentMonday = useMemo(() => {
     const now = new Date();
@@ -199,9 +213,40 @@ export default function SchedulePage() {
     }
   }, [currentMonday, weekStart, toast]);
 
+  const publishSchedule = useCallback(async () => {
+    if (shifts.length === 0) {
+      toast({ title: "No shifts", description: "Add shifts before publishing", variant: "destructive" });
+      return;
+    }
+    setPublishing(true);
+    try {
+      const res = await fetch("/api/schedule/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          weekStart,
+          shifts,
+          employees: employees.map(e => ({ id: e.id, name: e.name, email: e.email })),
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast({
+          title: "Schedule Published",
+          description: `${data.sent} email(s) sent${data.failed ? `, ${data.failed} failed` : ""}`,
+        });
+      } else {
+        toast({ title: "Error", description: data.error || "Failed to publish", variant: "destructive" });
+      }
+    } catch {
+      toast({ title: "Error", description: "Failed to publish schedule", variant: "destructive" });
+    } finally {
+      setPublishing(false);
+    }
+  }, [shifts, employees, weekStart, toast]);
+
   const handleDrop = useCallback((e: React.DragEvent, dayOfWeek: number) => {
     e.preventDefault();
-    setDragOverCell(null);
     const employeeId = e.dataTransfer.getData("employeeId");
     if (!employeeId) return;
 
@@ -219,9 +264,9 @@ export default function SchedulePage() {
       startMinutes,
       endMinutes,
     });
-  }, [weekStart, createShift]);
+  }, [weekStart, createShift, START_HOUR, END_HOUR]);
 
-  const handleDragOver = useCallback((e: React.DragEvent, dayOfWeek: number) => {
+  const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
   }, []);
@@ -288,7 +333,7 @@ export default function SchedulePage() {
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [dragState, shifts, updateShift]);
+  }, [dragState, shifts, updateShift, START_HOUR, END_HOUR]);
 
   const weekLabel = useMemo(() => {
     const end = new Date(currentMonday);
@@ -296,6 +341,8 @@ export default function SchedulePage() {
     const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
     return `${currentMonday.toLocaleDateString(undefined, opts)} - ${end.toLocaleDateString(undefined, opts)}, ${end.getFullYear()}`;
   }, [currentMonday]);
+
+  const colTemplate = `60px repeat(${visibleDays.length}, 1fr)`;
 
   return (
     <AppShell title="Schedule">
@@ -344,6 +391,16 @@ export default function SchedulePage() {
               <Copy className="h-4 w-4 mr-1" />
               Copy Previous Week
             </Button>
+            <Button
+              size="sm"
+              className="rounded-xl"
+              onClick={publishSchedule}
+              disabled={publishing || shifts.length === 0}
+              data-testid="button-publish-schedule"
+            >
+              {publishing ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Send className="h-4 w-4 mr-1" />}
+              Publish Schedule
+            </Button>
             {selectedShiftId && (
               <Button
                 variant="destructive"
@@ -387,19 +444,19 @@ export default function SchedulePage() {
 
           <Card className="flex-1 overflow-auto">
             <div className="min-w-[700px]">
-              <div className="grid grid-cols-[60px_repeat(7,1fr)] border-b sticky top-0 bg-card z-10">
+              <div className="border-b sticky top-0 bg-card z-10" style={{ display: "grid", gridTemplateColumns: colTemplate }}>
                 <div className="p-2" />
-                {DAYS.map((day, i) => (
-                  <div key={day} className="p-2 text-center border-l">
-                    <div className="text-xs font-medium text-muted-foreground">{day}</div>
-                    <div className="text-sm font-semibold" data-testid={`text-day-${i}`}>
-                      {weekDates[i].getDate()}
+                {visibleDays.map(({ name, index }) => (
+                  <div key={index} className="p-2 text-center border-l">
+                    <div className="text-xs font-medium text-muted-foreground">{name}</div>
+                    <div className="text-sm font-semibold" data-testid={`text-day-${index}`}>
+                      {weekDates[index].getDate()}
                     </div>
                   </div>
                 ))}
               </div>
 
-              <div ref={gridRef} className="grid grid-cols-[60px_repeat(7,1fr)] relative select-none">
+              <div ref={gridRef} className="relative select-none" style={{ display: "grid", gridTemplateColumns: colTemplate }}>
                 <div className="relative">
                   {Array.from({ length: TOTAL_HOURS }, (_, i) => (
                     <div
@@ -412,13 +469,13 @@ export default function SchedulePage() {
                   ))}
                 </div>
 
-                {DAYS.map((_, dayIdx) => (
+                {visibleDays.map(({ index: dayIdx }) => (
                   <div
                     key={dayIdx}
                     className="relative border-l"
                     style={{ height: TOTAL_HOURS * HOUR_HEIGHT }}
                     onDrop={(e) => handleDrop(e, dayIdx)}
-                    onDragOver={(e) => handleDragOver(e, dayIdx)}
+                    onDragOver={handleDragOver}
                     onClick={(e) => {
                       if ((e.target as HTMLElement).closest("[data-shift]")) return;
                       setSelectedShiftId(null);
