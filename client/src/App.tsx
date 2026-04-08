@@ -16,6 +16,7 @@ import SettingsPage from "@/pages/settings";
 import EmployeesPage from "@/pages/employees";
 import DemoPage from "@/pages/demo";
 import AdminPage from "@/pages/admin";
+import SchedulePage from "@/pages/schedule";
 
 function Router() {
   return (
@@ -29,6 +30,7 @@ function Router() {
       <Route path="/settings" component={SettingsPage} />
       <Route path="/demo" component={DemoPage} />
       <Route path="/admin" component={AdminPage} />
+      <Route path="/schedule" component={SchedulePage} />
 
       <Route component={NotFound} />
     </Switch>

@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { storage, adminStorage, type ListOptions } from "./storage";
+import { storage, adminStorage, scheduleStorage, type ListOptions } from "./storage";
 import { z } from "zod";
 import { createInsertSchema } from "drizzle-zod";
 import { SYNC_CATEGORY_TABLES, type SyncCategory } from "../shared/schema";
@@ -10,6 +10,7 @@ import {
   syncRecords, adminProducts, adminVariants, adminModifierGroups,
   adminModifiers, adminProductModifierGroups, adminInventoryItems,
   adminBillOfMaterials, adminInvoices, adminInvoiceLineItems, adminSales,
+  scheduleShifts,
 } from "./schema";
 import { sql, and, eq, isNull, gt } from "drizzle-orm";
 import { processTestOrder, computeInventoryDeductions, type LineItemInput, type ComboInput } from "./bom-engine";
@@ -1070,5 +1071,75 @@ router.get("/api/admin/reports/inventory", async (_req: Request, res: Response) 
     const message = err instanceof Error ? err.message : "Unknown error";
     console.error("Reports inventory error:", message);
     res.status(500).json({ error: "Failed to get inventory report" });
+  }
+});
+
+const createShiftSchema = z.object({
+  id: z.string().min(1),
+  employeeId: z.string().min(1),
+  weekStart: z.string().min(1),
+  dayOfWeek: z.number().int().min(0).max(6),
+  startMinutes: z.number().int().min(0).max(1440),
+  endMinutes: z.number().int().min(0).max(1440),
+});
+
+const updateShiftSchema = z.object({
+  employeeId: z.string().min(1).optional(),
+  dayOfWeek: z.number().int().min(0).max(6).optional(),
+  startMinutes: z.number().int().min(0).max(1440).optional(),
+  endMinutes: z.number().int().min(0).max(1440).optional(),
+});
+
+router.get("/api/schedule/shifts", async (req: Request, res: Response) => {
+  try {
+    const weekStart = req.query.weekStart as string;
+    if (!weekStart) return res.status(400).json({ error: "weekStart query param required" });
+    const shifts = await scheduleStorage.listShifts(weekStart);
+    res.json({ shifts });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to list shifts" });
+  }
+});
+
+router.post("/api/schedule/shifts", async (req: Request, res: Response) => {
+  try {
+    const parsed = createShiftSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Invalid shift data", details: parsed.error.flatten() });
+    const shift = await scheduleStorage.createShift(parsed.data);
+    res.json({ shift });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to create shift" });
+  }
+});
+
+router.put("/api/schedule/shifts/:id", async (req: Request, res: Response) => {
+  try {
+    const parsed = updateShiftSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Invalid update data", details: parsed.error.flatten() });
+    const shift = await scheduleStorage.updateShift(req.params.id, parsed.data);
+    if (!shift) return res.status(404).json({ error: "Shift not found" });
+    res.json({ shift });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to update shift" });
+  }
+});
+
+router.delete("/api/schedule/shifts/:id", async (req: Request, res: Response) => {
+  try {
+    await scheduleStorage.deleteShift(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to delete shift" });
+  }
+});
+
+router.post("/api/schedule/copy-week", async (req: Request, res: Response) => {
+  try {
+    const { fromWeek, toWeek } = req.body;
+    if (!fromWeek || !toWeek) return res.status(400).json({ error: "fromWeek and toWeek required" });
+    const shifts = await scheduleStorage.copyWeek(fromWeek, toWeek);
+    res.json({ shifts, copied: shifts.length });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to copy week" });
   }
 });

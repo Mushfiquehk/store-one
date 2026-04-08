@@ -215,3 +215,14 @@ export type ProductGroupItem = {
   updatedAt: number;
   deletedAt: number | null;
 };
+
+export type ScheduleShift = {
+  id: string;
+  employeeId: string;
+  weekStart: string;
+  dayOfWeek: number;
+  startMinutes: number;
+  endMinutes: number;
+  updatedAt: number;
+  deletedAt: number | null;
+};

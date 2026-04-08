@@ -4,7 +4,7 @@ import {
   adminProducts, adminVariants, adminModifierGroups,
   adminProductModifierGroups, adminModifiers, adminInventoryItems,
   adminBillOfMaterials, adminInvoices, adminInvoiceLineItems,
-  adminSales,
+  adminSales, scheduleShifts,
 } from "./schema";
 import type { Client, Backup, SyncRecord } from "./schema";
 import { eq, desc, sql, and, gt, inArray, isNull, count } from "drizzle-orm";
@@ -1060,5 +1060,61 @@ export const adminStorage: IAdminStorage = {
       }
     }
     return true;
+  },
+};
+
+export const scheduleStorage = {
+  async listShifts(weekStart: string) {
+    const rows = await db.select().from(scheduleShifts)
+      .where(and(eq(scheduleShifts.weekStart, weekStart), isNull(scheduleShifts.deletedAt)));
+    return rows;
+  },
+
+  async createShift(data: {
+    id: string; employeeId: string; weekStart: string;
+    dayOfWeek: number; startMinutes: number; endMinutes: number;
+  }) {
+    const now = Date.now();
+    const [row] = await db.insert(scheduleShifts).values({
+      ...data, updatedAt: now, deletedAt: null,
+    }).returning();
+    return row;
+  },
+
+  async updateShift(id: string, data: Partial<{
+    employeeId: string; dayOfWeek: number; startMinutes: number; endMinutes: number;
+  }>) {
+    const now = Date.now();
+    const [row] = await db.update(scheduleShifts)
+      .set({ ...data, updatedAt: now })
+      .where(and(eq(scheduleShifts.id, id), isNull(scheduleShifts.deletedAt)))
+      .returning();
+    return row ?? null;
+  },
+
+  async deleteShift(id: string) {
+    const now = Date.now();
+    await db.update(scheduleShifts)
+      .set({ deletedAt: now, updatedAt: now })
+      .where(eq(scheduleShifts.id, id));
+  },
+
+  async copyWeek(fromWeek: string, toWeek: string) {
+    const existing = await db.select().from(scheduleShifts)
+      .where(and(eq(scheduleShifts.weekStart, fromWeek), isNull(scheduleShifts.deletedAt)));
+    if (existing.length === 0) return [];
+    const now = Date.now();
+    const newShifts = existing.map(s => ({
+      id: `shift_${Math.random().toString(16).slice(2)}_${Date.now()}`,
+      employeeId: s.employeeId,
+      weekStart: toWeek,
+      dayOfWeek: s.dayOfWeek,
+      startMinutes: s.startMinutes,
+      endMinutes: s.endMinutes,
+      updatedAt: now,
+      deletedAt: null as number | null,
+    }));
+    const rows = await db.insert(scheduleShifts).values(newShifts).returning();
+    return rows;
   },
 };

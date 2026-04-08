@@ -143,6 +143,17 @@ export const adminSales = pgTable("admin_sales", {
   deletedAt: bigint("deleted_at", { mode: "number" }),
 });
 
+export const scheduleShifts = pgTable("schedule_shifts", {
+  id: text("id").primaryKey(),
+  employeeId: text("employee_id").notNull(),
+  weekStart: text("week_start").notNull(),
+  dayOfWeek: integer("day_of_week").notNull(),
+  startMinutes: integer("start_minutes").notNull(),
+  endMinutes: integer("end_minutes").notNull(),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+  deletedAt: bigint("deleted_at", { mode: "number" }),
+});
+
 export const insertClientSchema = createInsertSchema(clients).omit({ id: true, createdAt: true });
 export const insertBackupSchema = createInsertSchema(backups).omit({ id: true, createdAt: true });
 

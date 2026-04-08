@@ -167,6 +167,18 @@ async function initDb() {
       deleted_at BIGINT
     )
   `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS schedule_shifts (
+      id TEXT PRIMARY KEY,
+      employee_id TEXT NOT NULL,
+      week_start TEXT NOT NULL,
+      day_of_week INTEGER NOT NULL,
+      start_minutes INTEGER NOT NULL,
+      end_minutes INTEGER NOT NULL,
+      updated_at BIGINT NOT NULL,
+      deleted_at BIGINT
+    )
+  `);
 }
 
 async function autoSeedIfEmpty() {

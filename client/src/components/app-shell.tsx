@@ -1,6 +1,7 @@
 import { Link, useLocation, useRoute } from "wouter";
 import {
   BarChart3,
+  CalendarDays,
   ClipboardList,
   LayoutGrid,
   Menu as MenuIcon,
@@ -33,6 +34,7 @@ const nav = [
   { href: "/reports", label: "Reports", icon: BarChart3, testid: "link-nav-reports" },
   { href: "/products", label: "Products", icon: ClipboardList, testid: "link-nav-products" },
   { href: "/employees", label: "Employees", icon: Users, testid: "link-nav-employees" },
+  { href: "/schedule", label: "Schedule", icon: CalendarDays, testid: "link-nav-schedule" },
   { href: "/start", label: "Getting Started", icon: Sparkles, testid: "link-nav-start" },
   { href: "/integrations", label: "Integrations", icon: Link2, testid: "link-nav-integrations" },
   { href: "/settings", label: "Settings", icon: Settings, testid: "link-nav-settings" },
