@@ -4,7 +4,7 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "dev": "concurrently \"vite dev --host 0.0.0.0 --port 5000\" \"npx tsx server/index.ts\"",
+    "dev": "concurrently \"vite dev --host 0.0.0.0 --port 5000\" \"npx tsx --env-file=.env server/index.ts\"",
     "build": "vite build && npx esbuild server/index.ts --bundle --platform=node --format=esm --outfile=dist/server.mjs --external:pg --packages=external",
     "check": "tsc",
     "start": "NODE_ENV=production node dist/server.mjs"
