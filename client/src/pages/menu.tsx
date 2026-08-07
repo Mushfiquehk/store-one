@@ -56,45 +56,41 @@ export default function MenuPage({ isTab = false }: { isTab?: boolean }) {
     return products.filter(p => p.type === filterType);
   }, [products, filterType]);
 
-  type FlatRow = { product: Product; variant: typeof variants[0]; tags: string[] };
+  type ProductGroup = { product: Product; variants: typeof variants; tags: string[] };
 
-  const sortedRows = useMemo(() => {
-    const rows: FlatRow[] = [];
-    filteredProducts.forEach(p => {
-      const pvariants = variants.filter(v => v.productId === p.id);
-      const tags = p.attributes?.tags || [];
-      pvariants.forEach(v => {
-        rows.push({ product: p, variant: v, tags });
-      });
-    });
+  const productGroups = useMemo(() => {
+    const groups: ProductGroup[] = filteredProducts.map(p => ({
+      product: p,
+      variants: variants.filter(v => v.productId === p.id).sort((a, b) => a.name.localeCompare(b.name)),
+      tags: p.attributes?.tags || [],
+    }));
 
-    rows.sort((a, b) => {
+    groups.sort((a, b) => {
       let cmp = 0;
       switch (sortKey) {
-        case "name": {
-          const nameA = `${a.product.name} ${a.variant.name}`.toLowerCase();
-          const nameB = `${b.product.name} ${b.variant.name}`.toLowerCase();
-          cmp = nameA.localeCompare(nameB);
+        case "name":
+          cmp = a.product.name.toLowerCase().localeCompare(b.product.name.toLowerCase());
           break;
-        }
         case "type":
           cmp = a.product.type.localeCompare(b.product.type);
           break;
         case "sku":
-          cmp = (a.variant.sku || "").localeCompare(b.variant.sku || "");
+          cmp = (a.variants[0]?.sku || "").localeCompare(b.variants[0]?.sku || "");
           break;
         case "tags":
-          cmp = (a.tags.join(",")).localeCompare(b.tags.join(","));
+          cmp = a.tags.join(",").localeCompare(b.tags.join(","));
           break;
         case "price":
-          cmp = a.variant.basePrice - b.variant.basePrice;
+          cmp = (a.variants[0]?.basePrice ?? 0) - (b.variants[0]?.basePrice ?? 0);
           break;
       }
       return sortDir === "asc" ? cmp : -cmp;
     });
 
-    return rows;
+    return groups;
   }, [filteredProducts, variants, sortKey, sortDir]);
+
+  const variantCount = productGroups.reduce((n, g) => n + g.variants.length, 0);
 
   const tagStats = useMemo(() => {
     const map: Record<string, string[]> = {};
@@ -155,7 +151,7 @@ export default function MenuPage({ isTab = false }: { isTab?: boolean }) {
         <CardContent>
           <div className="mt-2 grid gap-4">
             <div className="flex justify-between items-center px-1">
-              <p className="text-sm text-muted-foreground">{products.length} product(s), {variants.length} variant(s)</p>
+              <p className="text-sm text-muted-foreground">{products.length} product(s), {variantCount} variant(s)</p>
               <div className="flex items-center gap-2">
                 <Button
                   variant={showTagManager ? "default" : "outline"}
@@ -203,7 +199,7 @@ export default function MenuPage({ isTab = false }: { isTab?: boolean }) {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {sortedRows.length === 0 ? (
+                  {productGroups.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={5} className="text-center py-12 text-muted-foreground">
                         <div className="flex flex-col items-center gap-2">
@@ -213,41 +209,53 @@ export default function MenuPage({ isTab = false }: { isTab?: boolean }) {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    sortedRows.map(({ product: p, variant: v, tags }) => {
+                    productGroups.flatMap(({ product: p, variants: pvariants, tags }) => {
                       const selected = p.id === selectedProductId;
-                      const pvariants = variants.filter(vr => vr.productId === p.id);
                       const showVariant = pvariants.length > 1;
 
-                      return (
-                        <TableRow
-                          key={v.id}
-                          className={selected ? "bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors" : "cursor-pointer hover:bg-muted/50 transition-colors"}
-                          onClick={() => {
-                            setSelectedProductId(p.id);
-                            openEditor(p);
-                          }}
-                          data-testid={`row-menu-${v.id}`}
-                        >
-                          <TableCell className="font-medium" data-testid={`text-menu-row-name-${v.id}`}>
-                            <span className="text-primary hover:underline">
-                              {p.name}{showVariant ? ` (${v.name})` : ""}
-                            </span>
-                            {p.isComposite && (
-                              <Badge variant="outline" className="ml-2 text-[10px]">Prepared</Badge>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-muted-foreground">{p.type}</TableCell>
-                          <TableCell className="text-muted-foreground font-mono text-xs">{v.sku || "-"}</TableCell>
-                          <TableCell>
-                            {tags.map(t => (
-                              <span key={t} className="inline-block mr-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs">{t}</span>
-                            ))}
-                          </TableCell>
-                          <TableCell className="text-right" data-testid={`text-menu-row-price-${v.id}`}>
-                            {formatMoney(v.basePrice)}
-                          </TableCell>
-                        </TableRow>
-                      );
+                      return pvariants.map((v, i) => {
+                        const isFirst = i === 0;
+                        return (
+                          <TableRow
+                            key={v.id}
+                            className={[
+                              selected ? "bg-primary/5" : "",
+                              "cursor-pointer hover:bg-muted/50 transition-colors",
+                              isFirst ? "border-t-2 border-t-border" : "border-t-0",
+                            ].join(" ")}
+                            onClick={() => {
+                              setSelectedProductId(p.id);
+                              openEditor(p);
+                            }}
+                            data-testid={`row-menu-${v.id}`}
+                          >
+                            <TableCell className="font-medium" data-testid={`text-menu-row-name-${v.id}`}>
+                              {isFirst ? (
+                                <>
+                                  <span className="text-primary hover:underline">
+                                    {p.name}{showVariant ? ` (${v.name})` : ""}
+                                  </span>
+                                  {p.isComposite && (
+                                    <Badge variant="outline" className="ml-2 text-[10px]">Prepared</Badge>
+                                  )}
+                                </>
+                              ) : (
+                                <span className="pl-4 text-muted-foreground">↳ {v.name}</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-muted-foreground">{isFirst ? p.type : ""}</TableCell>
+                            <TableCell className="text-muted-foreground font-mono text-xs">{v.sku || "-"}</TableCell>
+                            <TableCell>
+                              {isFirst && tags.map(t => (
+                                <span key={t} className="inline-block mr-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs">{t}</span>
+                              ))}
+                            </TableCell>
+                            <TableCell className="text-right" data-testid={`text-menu-row-price-${v.id}`}>
+                              {formatMoney(v.basePrice)}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      });
                     })
                   )}
                 </TableBody>
