@@ -80,9 +80,11 @@ export default function MenuPage({ isTab = false }: { isTab?: boolean }) {
         case "tags":
           cmp = a.tags.join(",").localeCompare(b.tags.join(","));
           break;
-        case "price":
-          cmp = (a.variants[0]?.basePrice ?? 0) - (b.variants[0]?.basePrice ?? 0);
+        case "price": {
+          const minPrice = (g: ProductGroup) => g.variants.length ? Math.min(...g.variants.map(v => v.basePrice)) : 0;
+          cmp = minPrice(a) - minPrice(b);
           break;
+        }
       }
       return sortDir === "asc" ? cmp : -cmp;
     });
@@ -209,53 +211,52 @@ export default function MenuPage({ isTab = false }: { isTab?: boolean }) {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    productGroups.flatMap(({ product: p, variants: pvariants, tags }) => {
+                    productGroups.map(({ product: p, variants: pvariants, tags }) => {
                       const selected = p.id === selectedProductId;
-                      const showVariant = pvariants.length > 1;
+                      const base = pvariants.reduce((min, v) => (!min || v.basePrice < min.basePrice ? v : min), pvariants[0]);
+                      const hasMoreVariants = pvariants.length > 1;
 
-                      return pvariants.map((v, i) => {
-                        const isFirst = i === 0;
-                        return (
-                          <TableRow
-                            key={v.id}
-                            className={[
-                              selected ? "bg-primary/5" : "",
-                              "cursor-pointer hover:bg-muted/50 transition-colors",
-                              isFirst ? "border-t-2 border-t-border" : "border-t-0",
-                            ].join(" ")}
-                            onClick={() => {
-                              setSelectedProductId(p.id);
-                              openEditor(p);
-                            }}
-                            data-testid={`row-menu-${v.id}`}
-                          >
-                            <TableCell className="font-medium" data-testid={`text-menu-row-name-${v.id}`}>
-                              {isFirst ? (
-                                <>
-                                  <span className="text-primary hover:underline">
-                                    {p.name}{showVariant ? ` (${v.name})` : ""}
+                      return (
+                        <TableRow
+                          key={p.id}
+                          className={selected ? "bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors" : "cursor-pointer hover:bg-muted/50 transition-colors"}
+                          onClick={() => {
+                            setSelectedProductId(p.id);
+                            openEditor(p);
+                          }}
+                          data-testid={`row-menu-${p.id}`}
+                        >
+                          <TableCell className="font-medium" data-testid={`text-menu-row-name-${p.id}`}>
+                            <span className="text-primary hover:underline">{p.name}</span>
+                            {p.isComposite && (
+                              <Badge variant="outline" className="ml-2 text-[10px]">Prepared</Badge>
+                            )}
+                            {hasMoreVariants && (
+                              <span className="ml-2 inline-flex gap-1 align-middle" data-testid={`variant-pills-${p.id}`}>
+                                {pvariants.map(v => (
+                                  <span
+                                    key={v.id}
+                                    className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-muted px-1 text-[10px] font-medium text-muted-foreground"
+                                    title={v.name}
+                                  >
+                                    {v.name}
                                   </span>
-                                  {p.isComposite && (
-                                    <Badge variant="outline" className="ml-2 text-[10px]">Prepared</Badge>
-                                  )}
-                                </>
-                              ) : (
-                                <span className="pl-4 text-muted-foreground">↳ {v.name}</span>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-muted-foreground">{isFirst ? p.type : ""}</TableCell>
-                            <TableCell className="text-muted-foreground font-mono text-xs">{v.sku || "-"}</TableCell>
-                            <TableCell>
-                              {isFirst && tags.map(t => (
-                                <span key={t} className="inline-block mr-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs">{t}</span>
-                              ))}
-                            </TableCell>
-                            <TableCell className="text-right" data-testid={`text-menu-row-price-${v.id}`}>
-                              {formatMoney(v.basePrice)}
-                            </TableCell>
-                          </TableRow>
-                        );
-                      });
+                                ))}
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">{p.type}</TableCell>
+                          <TableCell className="text-muted-foreground font-mono text-xs">{base?.sku || "-"}</TableCell>
+                          <TableCell>
+                            {tags.map(t => (
+                              <span key={t} className="inline-block mr-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs">{t}</span>
+                            ))}
+                          </TableCell>
+                          <TableCell className="text-right" data-testid={`text-menu-row-price-${p.id}`}>
+                            {base ? formatMoney(base.basePrice) : "-"}
+                          </TableCell>
+                        </TableRow>
+                      );
                     })
                   )}
                 </TableBody>
