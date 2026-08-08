@@ -231,6 +231,19 @@ export default function MenuPage({ isTab = false }: { isTab?: boolean }) {
                             {p.isComposite && (
                               <Badge variant="outline" className="ml-2 text-[10px]">Prepared</Badge>
                             )}
+                            {hasMoreVariants && (
+                              <span className="ml-2 inline-flex gap-1 align-middle" data-testid={`variant-pills-${p.id}`}>
+                                {pvariants.map(v => (
+                                  <span
+                                    key={v.id}
+                                    className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-muted px-1 text-[10px] font-medium text-muted-foreground"
+                                    title={v.name}
+                                  >
+                                    {v.name}
+                                  </span>
+                                ))}
+                              </span>
+                            )}
                           </TableCell>
                           <TableCell className="text-muted-foreground">{p.type}</TableCell>
                           <TableCell className="text-muted-foreground font-mono text-xs">{base?.sku || "-"}</TableCell>
@@ -240,7 +253,7 @@ export default function MenuPage({ isTab = false }: { isTab?: boolean }) {
                             ))}
                           </TableCell>
                           <TableCell className="text-right" data-testid={`text-menu-row-price-${p.id}`}>
-                            {base ? `${formatMoney(base.basePrice)}${hasMoreVariants ? "+" : ""}` : "-"}
+                            {base ? formatMoney(base.basePrice) : "-"}
                           </TableCell>
                         </TableRow>
                       );
