@@ -87,8 +87,10 @@ half-built than not started (Feature 3 T3 in particular).
 
 ## Feature 7 — Stop the server accepting data it silently throws away
 
-**Status:** in progress — T1 done (sales/employees/time-punches now 501 instead of fake success),
-T2–T4 unstarted
+**Status:** in progress — T1 and T2 done (sales persist for real; employees/time-punches remain
+501), T3–T4 unstarted. T2 also had to add the missing `admin_sales` table to `initDb` in
+`server/index.ts` — the bootstrap never created it, so every sales write failed on a fresh
+database. Verified end to end by `scripts/check-sales-persistence.sh`.
 **Vision pillar:** #1 — "the best foundation". A POS that discards sales is not a foundation.
 **Added:** 2026-08-09
 
