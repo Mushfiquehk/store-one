@@ -19,19 +19,19 @@ its section. They are ordered by what they cost if left alone.
 | **7** | `POST /api/admin/sales` returns 200 with the sale echoed back and persists nothing | `server/routes.ts:622-632` — `createSale(d) { return d; }`, shadowing a working `storage.ts:860` | Sales silently lost; caller cannot tell success from discard |
 | **9** | Backup omits 6 of 16 tables while the UI calls it a "full snapshot" | `settings.tsx:256` lists ten tables; `db.ts:194-199` defines combos, invoices and more | Restore loses every combo and supplier invoice |
 | **9** | Restore clears tables it may not repopulate, with no confirmation | `settings.tsx:316-340` — unconditional `.clear()`, then `bulkPut` only `if (snapshot.X?.length)` | A partial snapshot or mistyped store code wipes the device |
-| **11** | `lastPurchasePrice` stores price per *purchased* unit; recipes consume *stocking* units | `storage.ts:910`; seed data implies $4.50/oz milk, $12/oz espresso beans | Every cost and margin wrong by orders of magnitude |
+| ~~**11**~~ | ~~`lastPurchasePrice` stores price per *purchased* unit; recipes consume *stocking* units~~ **Fixed** — `shared/units.ts` | ~~`storage.ts:910`~~ | — |
 | **8** | Sync compares Drizzle rows to Dexie records via `JSON.stringify`, so they never match | `storage.ts:~270` vs `sync.ts:97` — differing key order and field set | Every menu record re-pushed to every client on every sync, forever |
 | **8** | Conflict resolution reads `adminUpdatedAt` but never compares it | `storage.ts:215+` | Newer POS edits silently discarded |
 | **5** | Combos are ignored by the live order path | `bom-engine.ts` is imported only by `routes.ts:16` for test orders; `/api/orders/simulate` prices inline with a hardcoded 8% tax | Combos charge full price; three different tax rates in the codebase |
 
-**Suggested first session**, highest value per unit of risk — all small, all independently shippable:
+~~**Suggested first session**~~ — **done.** Features 7, 9 and 11 have all landed, which clears the
+three defects that cost the most: silently discarded sales, a backup that could wipe a device, and
+costs wrong by orders of magnitude.
 
-1. **Feature 7 T1** — convert the fake-success stubs to 501s. Few lines, obviously correct, stops
-   silent data loss immediately. Nothing else in this plan should be built on a server that reports
-   success for writes it discarded.
-2. **Feature 9 T1–T3** — complete backups, non-destructive restore, confirmation prompt.
-3. **Feature 11 T1–T2** — the unit conversion, defaulting to `1` so nothing changes until an
-   operator supplies a real factor.
+**Next**, in this order: **Feature 13** (real reports — it blocks both 10 and 14, and two of its
+three tabs are `Math.random()` today), then **Feature 10** (margins, now that 11 has made its
+inputs true), then **Feature 8** (sync convergence). **Feature 4 (auth) still has the deadline** —
+nothing authenticates, and there is a Dockerfile.
 
 The remaining seven features are genuine enhancements and can wait: **1** (menu blueprint), **2**
 (agent bridge), **3** (locations), **4** (auth), **6** (setup status), **10** (margins), **12**
@@ -131,11 +131,8 @@ half-built than not started (Feature 3 T3 in particular).
 
 ## Feature 14 — Labour: the second-biggest number, and nobody can even type a wage
 
-**Status:** in progress — T1 done (`purchaseUnit` / `unitsPerPurchase` columns, default 1
-everywhere), T2–T4 unstarted. Note for T2/T3: the client-side `InventoryItem`
-(`client/src/lib/db.ts`) declares `unitsPerPurchase` **optional** because rows written before the
-Dexie v10 upgrade genuinely lack it — read it as `?? 1`, do not assume it is present. The
-server-side type and column are non-null.
+**Status:** planned. (The note that stood here described Feature 11 T1, not this feature — it has
+moved to Feature 11, which is now done.)
 **Vision pillar:** #1 — "the best foundation". Feature 10 is the growth feature; this is the feature
 that makes Feature 10's numbers true.
 **Blocks:** Feature 10 (do this first, or ship a margin report that is confidently wrong)
@@ -464,7 +461,29 @@ inventory comes back, and the day's totals are correct without anything having b
 
 ## Feature 11 — Purchase units vs stocking units: the bug that makes every cost wrong
 
-**Status:** planned
+**Status:** done — T1–T4 complete. `shared/units.ts` (the one conversion, tested), both copies
+of the receive path, the pack-size question in `admin-invoice-intake.tsx` and the inventory
+editor, corrected seed data in both copies, and `server/seed-data.test.ts` as the plausibility
+check.
+
+Three things differed from the plan as written:
+
+- **Quantity had the same bug as price, and the plan only named price.** With a factor set,
+  receiving one gallon added `1` to an on-hand count measured in ounces. `stockUnitsReceived`
+  sits beside `costPerStockUnit` and both receive paths call it. Fixing the price alone would
+  have left a sibling of this exact bug, newly reachable *because* the factor now exists.
+- **T4's plausibility flag went into a test, not a report.** Feature 10 does not exist yet, so
+  there is no margin report to flag anything in. `server/seed-data.test.ts` asserts no demo item
+  costs more in ingredients than it sells for and that food cost stays under 60%; all three of
+  its checks fail against the pre-correction data. **Feature 10 T3 still owes the operator-facing
+  version of that flag**, with the link to the item.
+- **The factor is written on invoice save, not per keystroke**, via a new
+  `updateInventoryItemAsync` on the store. It must land before `createInvoiceWithLineItems`
+  runs, because the receive path reads the factor off the item to convert the price it stores —
+  the existing fire-and-forget `updateInventoryItem` would have raced it.
+
+Seed prices are written as their derivation (`450 / 128` for milk by the gallon) so the number
+and its reasoning cannot drift apart.
 **Vision pillar:** #1 — Feature 10 is unusable without this
 **Blocks:** Feature 10 (margins computed on today's data are off by orders of magnitude)
 **Added:** 2026-08-09
