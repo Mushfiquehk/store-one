@@ -554,7 +554,10 @@ apply it on approval — without the operator seeing a single ID, endpoint, or J
 
 ## Feature 1 — Menu Blueprint: one declarative call to build an entire menu
 
-**Status:** in progress — T1–T3 done (`shared/menu-blueprint.ts`, `POST /api/admin/menu/apply`), T4 (docs) unstarted
+**Status:** done — T1–T4 complete. `shared/menu-blueprint.ts`, `POST /api/admin/menu/apply` on
+both servers, documented in `docs/api-reference.md`. Caveat: applying is not transactional (see
+the Errors note in that doc) — a mid-flight failure leaves the menu partly updated, recoverable by
+re-applying the same blueprint.
 **Vision pillar:** #2 — AI Agent first POS
 **Added:** 2026-08-09
 

@@ -67,6 +67,10 @@ const twoProducts = {
 const apply = (store: ApiAdminStorage, body: unknown) =>
   createApiHandlers(store).handle({ method: "POST", path: "/api/admin/menu/apply", params: {}, body });
 
+/** Success bodies use the documented { data: ... } envelope; errors use { error, details }. */
+const payload = (res: { data: unknown }) => (res.data as any).data;
+const details = (res: { data: unknown }) => (res.data as any).details;
+
 const counts = (rows: Record<string, unknown[]>) =>
   Object.fromEntries(Object.entries(rows).map(([table, list]) => [table, list.length]));
 
@@ -75,8 +79,8 @@ test("a dry run writes nothing", async () => {
   const res = await apply(store, { ...twoProducts, dryRun: true });
 
   assert.equal(res.status, 200);
-  assert.equal((res.data as any).applied, false);
-  assert.ok((res.data as any).changes.length > 0);
+  assert.equal(payload(res).applied, false);
+  assert.ok(payload(res).changes.length > 0);
   assert.deepEqual(counts(rows), {
     products: 0, variants: 0, modifierGroups: 0, modifiers: 0, productModifierGroups: 0,
   });
@@ -88,7 +92,7 @@ test("applying a two-product blueprint twice is idempotent", async () => {
 
   const first = await apply(store, twoProducts);
   assert.equal(first.status, 200);
-  assert.equal((first.data as any).applied, true);
+  assert.equal(payload(first).applied, true);
   assert.deepEqual(counts(rows), {
     products: 2, variants: 3, modifierGroups: 1, modifiers: 1, productModifierGroups: 1,
   });
@@ -96,7 +100,7 @@ test("applying a two-product blueprint twice is idempotent", async () => {
 
   const second = await apply(store, twoProducts);
   assert.equal(second.status, 200);
-  const moved = (second.data as any).changes.filter((c: any) => c.op !== "noop");
+  const moved = payload(second).changes.filter((c: any) => c.op !== "noop");
   assert.deepEqual(moved, [], `second apply was not a noop: ${JSON.stringify(moved)}`);
   assert.deepEqual(counts(rows), afterFirst, "second apply changed row counts");
 });
@@ -109,7 +113,7 @@ test("an edited price updates in place rather than creating a row", async () => 
   raised.products[0].variants[1].basePrice = 600;
   const res = await apply(store, raised);
 
-  assert.equal((res.data as any).changes.filter((c: any) => c.op === "update").length, 1);
+  assert.equal(payload(res).changes.filter((c: any) => c.op === "update").length, 1);
   assert.equal(rows.variants.length, 3);
   assert.equal(rows.variants.find((v) => v.name === "Large").basePrice, 600);
 });
@@ -130,7 +134,7 @@ test("an invalid blueprint is rejected with every error and writes nothing", asy
   const res = await apply(store, { products: [{ name: "  ", variants: [{ name: "Small", basePrice: -1 }] }] });
 
   assert.equal(res.status, 400);
-  assert.ok((res.data as any).errors.length >= 2);
+  assert.ok(details(res).length >= 2);
   assert.equal(rows.products.length, 0);
 });
 
@@ -139,7 +143,7 @@ test("an unknown modifier group reference is rejected before any write", async (
   const res = await apply(store, { products: [{ name: "Latte", modifierGroups: ["Nitro"] }] });
 
   assert.equal(res.status, 400);
-  assert.match((res.data as any).errors[0].message, /unknown modifier group/);
+  assert.match(details(res)[0].message, /unknown modifier group/);
   assert.deepEqual(counts(rows), {
     products: 0, variants: 0, modifierGroups: 0, modifiers: 0, productModifierGroups: 0,
   });

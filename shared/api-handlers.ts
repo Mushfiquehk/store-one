@@ -451,9 +451,11 @@ export function createApiHandlers(store: ApiAdminStorage) {
     pattern: "/api/admin/menu/apply",
     handler: async (req) => {
       try {
+        // ApiResponse.data is the HTTP body, so the documented { data: ... } envelope is
+        // written out explicitly here — see docs/api-reference.md > Conventions.
         const parseResult = parseMenuBlueprint(req.body);
         if (!parseResult.ok) {
-          return { status: 400, data: { error: "Invalid blueprint", errors: parseResult.errors } };
+          return { status: 400, data: { error: "Invalid blueprint", details: parseResult.errors } };
         }
         const blueprint = parseResult.blueprint;
 
@@ -469,16 +471,16 @@ export function createApiHandlers(store: ApiAdminStorage) {
 
         // Validate everything before writing anything: one round trip, all the errors.
         if (plan.errors.length > 0) {
-          return { status: 400, data: { error: "Invalid blueprint", errors: plan.errors } };
+          return { status: 400, data: { error: "Invalid blueprint", details: plan.errors } };
         }
 
         // Same plan either way — the preview cannot drift from what applying does.
         if (blueprint.dryRun) {
-          return { status: 200, data: { applied: false, changes: plan.changes, errors: [] } };
+          return { status: 200, data: { data: { applied: false, changes: plan.changes, errors: [] } } };
         }
 
         await applyMenuPlan(store, plan, existing);
-        return { status: 200, data: { applied: true, changes: plan.changes, errors: [] } };
+        return { status: 200, data: { data: { applied: true, changes: plan.changes, errors: [] } } };
       } catch {
         return { status: 500, data: { error: "Failed to apply menu blueprint" } };
       }
