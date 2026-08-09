@@ -5,6 +5,141 @@ Newest feature at the top. Tasks are sized so a single AI coding agent can finis
 
 ---
 
+## Feature 4 — Location API tokens: the prerequisite the other three keep deferring
+
+**Status:** planned
+**Vision pillar:** prerequisite for both — nothing above ships publicly without it
+**Blocks:** Features 1, 2, and 3 (all three end with "…but there is no auth yet")
+**Added:** 2026-08-09
+
+### The finding
+
+There is no authentication anywhere on the server. `server/index.ts` is, in full:
+
+```ts
+app.use(express.json({ limit: "50mb" }));
+app.use(router);
+```
+
+No middleware between the request and every admin route. A grep across `server/` for
+`authorization`, `Bearer`, `session`, `cookie`, `jwt`, or `token` returns only seed-data rows
+containing the word "cookie". The server binds `0.0.0.0` (`server/index.ts:268`).
+
+The one thing that looks like auth is not. `client/src/components/pin-protection.tsx` defaults to
+`requiredPin = "1234"`, compares in the browser, prints *"Default PIN: 1234"* on the dialog, and
+carries the comment `// in real app, would validate against user`. It is a UI speed bump on a
+trusted device, not access control, and it guards nothing on the server.
+
+This has stopped being theoretical. The repo now has a `Dockerfile` and a `docker-compose.yml`
+publishing `5000:5000` — the app is being packaged to deploy. The moment it lands on a public host,
+every menu, sale, invoice, and employee record is world-readable and world-writable.
+
+And each of the three features above ends with the same caveat:
+
+- Feature 1 — an unauthenticated `menu/apply` lets anyone rewrite a live menu.
+- Feature 2 — explicitly deferred auth and said to plan it as its own feature.
+- Feature 3 — delivers isolation but not authorization; `X-Store-Location` is self-asserted, so
+  anyone can name any location.
+
+A plan that keeps deferring its own blocker is not a plan. This is that feature.
+
+### The feature
+
+**One static API token per location**, sent as `Authorization: Bearer <token>`, verified in exactly
+one middleware ahead of the router.
+
+The scope is deliberately, aggressively small. What this is *not*: no user accounts, no sessions, no
+cookies, no OAuth, no password reset, no roles or permissions, no refresh tokens. Those are a
+product. This is the lock on the door, and the door is currently open.
+
+**The design point that pays for the whole feature:** the token *identifies the location*. Feature 3
+T2 resolves tenancy from a self-asserted `X-Store-Location` header — a trust boundary with nothing
+behind it. Once tokens exist, `locationId` comes from the verified token instead, and that header is
+deleted. Feature 4 does not add a security check on top of Feature 3; it removes Feature 3's weakest
+part. **Feature 3 T2 should be treated as superseded by this feature's T3.**
+
+### Deliberate choices
+
+- **`node:crypto`, no new dependency.** `scrypt` for hashing and `timingSafeEqual` for comparison
+  are both in the standard library. Do not add `bcrypt` (a native build) or a JWT library — nothing
+  here needs a stateless self-describing token, and a random 32-byte string in a table is simpler
+  to reason about and trivially revocable.
+- **Store hashes, never the token.** The plaintext token is shown exactly once, at mint time. A
+  database leak should not hand over live credentials.
+- **The local server is exempt.** `client/src/lib/local-server.ts` binds `127.0.0.1` and serves the
+  device's own IndexedDB to the app running on that device. Requiring a token there adds a secret to
+  manage on every tablet and protects nothing that the device's own lock screen does not.
+- **Fail closed.** No token, unknown token, or malformed header → 401. In particular there must be
+  no "if no tokens are configured, allow everything" bootstrap path — that branch is exactly the one
+  that survives into production.
+
+### Tasks
+
+Each is completable by an AI agent in about 15 minutes.
+
+**T1 — Token storage and minting** (~15 min)
+- Add an `apiTokens` table to `server/schema.ts`: `id`, `locationId` (text), `tokenHash` (text),
+  `salt` (text), `label` (text, so an operator can tell "tablet" from "agent"), `createdAt`,
+  `lastUsedAt` (nullable), `revokedAt` (nullable). Generate the migration with `drizzle-kit`.
+- Add a small script under `scripts/` that mints a token for a location: generate 32 random bytes
+  via `crypto.randomBytes`, hex-encode, hash with `crypto.scrypt` and a per-token salt, insert the
+  hash, and print the plaintext once with a clear "this will not be shown again" notice.
+- Check: mint two tokens, assert the plaintext appears nowhere in the table, and that the stored
+  hash verifies against the right plaintext and not the other one.
+
+**T2 — The middleware** (~15 min)
+- Add `server/auth.ts` exporting one Express middleware, and register it in `server/index.ts`
+  **between** `express.json()` and `app.use(router)`. One registration point, one thing to audit.
+- Parse `Authorization: Bearer <token>`, look up by hash, reject revoked tokens, and compare with
+  `crypto.timingSafeEqual` — never `===`. Attach `{ locationId, tokenId }` to the request.
+- Allowlist only what must be public: the static file serving and SPA catch-all in the
+  `!isDev` block, plus a health endpoint if one is added. **Every `/api/*` route requires a token.**
+  Write the allowlist as an explicit list of public paths, not as a list of protected prefixes — the
+  default for a new route must be "protected", so that adding a route cannot accidentally add a hole.
+- Update `lastUsedAt` on success, but do not block the response on that write.
+- Check: assertions for no header → 401, garbage header → 401, valid token → passes with the right
+  `locationId`, and revoked token → 401. Confirm a wrong-but-same-length token is rejected.
+
+**T3 — Derive the location from the token; delete `X-Store-Location`** (~15 min)
+- Set `ApiRequest.locationId` in `handleViaSharedHandlers` (`server/routes.ts:639`) from the
+  authenticated token rather than the header. Remove the header parsing and its validation regex
+  added in Feature 3 T2 — with tokens in place it is dead code, and a leftover header path that
+  still works is a bypass of the thing you just built.
+- The local server keeps passing the constant `'default'`; no change there.
+- Check: a request bearing location A's token cannot read location B's products **even when it
+  sends `X-Store-Location: B`**. That assertion is the point of the task — it fails loudly if the
+  old path was left in.
+
+**T4 — Docs, rotation, and the deploy warning** (~15 min)
+- Document token minting, rotation, and revocation in `docs/agent-setup.md` (created in Feature 2
+  T4) and `docs/local-setup.md`. Rotation is: mint the new token, move clients over, set
+  `revokedAt` on the old one — no downtime, which is the reason for a token *table* rather than an
+  env var.
+- Update `docker-compose.yml`: it currently ships `POSTGRES_PASSWORD: postgres` and publishes
+  `5432:5432` to the host. Fine for local development, dangerous as a deploy template. Add a comment
+  saying so, and stop publishing the database port by default — the app container reaches the
+  database over the compose network without it.
+- Check: a fresh `docker compose up` followed by an unauthenticated `curl` of `/api/admin/products`
+  returns 401, and the same call with a minted token returns data.
+
+### Non-goals
+
+Per-token scopes (read-only vs read-write), rate limiting, audit logging of which token changed
+what, and anything to do with employee identity. Employee PINs and API tokens answer different
+questions — *which staff member is at the till* versus *which machine may call the API* — and
+merging them produces a system that does neither well.
+
+The hardcoded `1234` in `pin-protection.tsx` is a separate known issue. It is not made better or
+worse by this feature and should be tracked on its own; note that fixing it means validating
+against `adminEmployees.pin` server-side, which is its own small feature.
+
+### Definition of done
+
+The server refuses every `/api/*` request without a valid token, the token determines which
+location's data the caller sees, and an operator can rotate a compromised token without downtime.
+
+---
+
 ## Feature 3 — Locations: make a second store possible at all
 
 **Status:** planned
@@ -127,9 +262,13 @@ reporting, and user↔location permissions are all out of scope. This feature ad
 those are the things worth building once it exists, and none of them are expressible today.
 
 Note that **authentication is still absent** — `X-Store-Location` is self-asserted, so this feature
-delivers isolation, not authorization. Anyone who can reach the server can name any location. That
-is a real limit and it is exactly why the auth feature below the fold still needs to be planned and
-built before anything is exposed publicly.
+delivers isolation, not authorization. Anyone who can reach the server can name any location.
+
+**Feature 4 resolves this and supersedes T2.** Once location API tokens exist, `locationId` is
+derived from the verified token and the `X-Store-Location` header is deleted outright. If Feature 4
+is being built first or alongside, skip T2's header parsing entirely and take the location from the
+token — T2 exists only so that Feature 3 can land independently, and its header path is meant to be
+removed, not kept as a fallback.
 
 ### Definition of done
 
