@@ -486,6 +486,18 @@ export const dexieAdminStorage: ApiAdminStorage = {
     return notDeleted(await db.timePunches.toArray());
   },
 
+  async listSettings() {
+    return db.settings.toArray();
+  },
+  async getSetting(key: string) {
+    return (await db.settings.get(key)) ?? null;
+  },
+  async setSetting(key: string, value: unknown) {
+    const row = { key, value, updatedAt: Date.now() };
+    await db.settings.put(row);
+    return row;
+  },
+
   async getAllData() {
     return {
       products: notDeleted(await db.products.toArray()),

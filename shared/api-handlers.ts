@@ -82,8 +82,22 @@ export interface ApiAdminStorage {
 
   listTimePunches(): Promise<unknown[]>;
 
+  listSettings(): Promise<StoreSetting[]>;
+  getSetting(key: string): Promise<StoreSetting | null>;
+  setSetting(key: string, value: unknown): Promise<StoreSetting>;
+
   getAllData(): Promise<Record<string, unknown[]>>;
 }
+
+export interface StoreSetting {
+  key: string;
+  value: unknown;
+  updatedAt: number;
+}
+
+// Settings keys become a primary key straight off a request path. Mixed case is
+// allowed because the keys already in use are camelCase (hoursOfOperation, emailConfig).
+const SETTING_KEY_RE = /^[A-Za-z0-9._-]{1,64}$/;
 
 interface CrudConfig {
   entity: string;
@@ -443,6 +457,53 @@ export function createApiHandlers(store: ApiAdminStorage) {
     handler: async () => {
       try { return { status: 200, data: await store.listTimePunches() }; }
       catch { return { status: 500, data: { error: "Failed to list time punches" } }; }
+    },
+  });
+
+  // Settings were Express-only; they live here so the local server serves them too.
+  // Response shapes are the ones client/src/pages/settings.tsx already consumes.
+  routes.push({
+    method: "GET",
+    pattern: "/api/settings",
+    handler: async () => {
+      try {
+        const rows = await store.listSettings();
+        return { status: 200, data: { settings: Object.fromEntries(rows.map(r => [r.key, r.value])) } };
+      } catch { return { status: 500, data: { error: "Failed to load settings" } }; }
+    },
+  });
+
+  routes.push({
+    method: "GET",
+    pattern: "/api/settings/:key",
+    handler: async (req) => {
+      if (!SETTING_KEY_RE.test(req.params.key)) {
+        return { status: 400, data: { error: "Invalid setting key" } };
+      }
+      try {
+        const r = await store.getSetting(req.params.key);
+        // A missing setting is null rather than a 404 — callers read `.value` and
+        // fall back to a default, which is the existing behaviour.
+        return { status: 200, data: { value: r ? r.value : null, updatedAt: r ? r.updatedAt : null } };
+      } catch { return { status: 500, data: { error: "Failed to load setting" } }; }
+    },
+  });
+
+  routes.push({
+    method: "PUT",
+    pattern: "/api/settings/:key",
+    handler: async (req) => {
+      if (!SETTING_KEY_RE.test(req.params.key)) {
+        return { status: 400, data: { error: "Invalid setting key" } };
+      }
+      const body = req.body as Record<string, unknown> | undefined;
+      if (!body || body.value === undefined) {
+        return { status: 400, data: { error: "value is required" } };
+      }
+      try {
+        const r = await store.setSetting(req.params.key, body.value);
+        return { status: 200, data: { success: true, updatedAt: r.updatedAt } };
+      } catch { return { status: 500, data: { error: "Failed to save setting" } }; }
     },
   });
 

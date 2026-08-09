@@ -7,6 +7,7 @@ import {
   adminSales, scheduleShifts, storeSettings,
 } from "./schema";
 import type { Client, Backup, SyncRecord } from "./schema";
+import type { StoreSetting } from "../shared/api-handlers";
 import { eq, desc, sql, and, gt, inArray, isNull, count } from "drizzle-orm";
 
 export interface ListOptions {
@@ -1080,28 +1081,20 @@ export const adminStorage: IAdminStorage = {
 };
 
 export const settingsStorage = {
-  async get(key: string): Promise<unknown | null> {
+  async get(key: string): Promise<StoreSetting | null> {
     const [row] = await db.select().from(storeSettings).where(eq(storeSettings.key, key)).limit(1);
-    return row ? row.value : null;
+    return row || null;
   },
 
-  async set(key: string, value: unknown): Promise<void> {
+  async set(key: string, value: unknown): Promise<StoreSetting> {
     const now = Date.now();
-    const [existing] = await db.select().from(storeSettings).where(eq(storeSettings.key, key)).limit(1);
-    if (existing) {
-      await db.update(storeSettings).set({ value, updatedAt: now }).where(eq(storeSettings.key, key));
-    } else {
-      await db.insert(storeSettings).values({ key, value, updatedAt: now });
-    }
+    const [row] = await db.insert(storeSettings).values({ key, value, updatedAt: now })
+      .onConflictDoUpdate({ target: storeSettings.key, set: { value, updatedAt: now } }).returning();
+    return row;
   },
 
-  async getAll(): Promise<Record<string, unknown>> {
-    const rows = await db.select().from(storeSettings);
-    const result: Record<string, unknown> = {};
-    for (const row of rows) {
-      result[row.key] = row.value;
-    }
-    return result;
+  async list(): Promise<StoreSetting[]> {
+    return db.select().from(storeSettings);
   },
 };
 
