@@ -3,6 +3,42 @@
 Living document. Each entry is a feature that moves the product toward [VISION.md](VISION.md).
 Newest feature at the top. Tasks are sized so a single AI coding agent can finish one in ~15 minutes.
 
+**Planning is complete at twelve features.** Further planning has lower value than implementing what
+is here. The triage below is the entry point.
+
+---
+
+## Triage: what is broken versus what is missing
+
+Five of these twelve are **defects in shipped code**, not enhancements. They were found by reading
+the code while planning features, and each is independently verifiable at the file and line cited in
+its section. They are ordered by what they cost if left alone.
+
+| # | Defect | Evidence | Cost if ignored |
+|---|---|---|---|
+| **7** | `POST /api/admin/sales` returns 200 with the sale echoed back and persists nothing | `server/routes.ts:622-632` — `createSale(d) { return d; }`, shadowing a working `storage.ts:860` | Sales silently lost; caller cannot tell success from discard |
+| **9** | Backup omits 6 of 16 tables while the UI calls it a "full snapshot" | `settings.tsx:256` lists ten tables; `db.ts:194-199` defines combos, invoices and more | Restore loses every combo and supplier invoice |
+| **9** | Restore clears tables it may not repopulate, with no confirmation | `settings.tsx:316-340` — unconditional `.clear()`, then `bulkPut` only `if (snapshot.X?.length)` | A partial snapshot or mistyped store code wipes the device |
+| **11** | `lastPurchasePrice` stores price per *purchased* unit; recipes consume *stocking* units | `storage.ts:910`; seed data implies $4.50/oz milk, $12/oz espresso beans | Every cost and margin wrong by orders of magnitude |
+| **8** | Sync compares Drizzle rows to Dexie records via `JSON.stringify`, so they never match | `storage.ts:~270` vs `sync.ts:97` — differing key order and field set | Every menu record re-pushed to every client on every sync, forever |
+| **8** | Conflict resolution reads `adminUpdatedAt` but never compares it | `storage.ts:215+` | Newer POS edits silently discarded |
+| **5** | Combos are ignored by the live order path | `bom-engine.ts` is imported only by `routes.ts:16` for test orders; `/api/orders/simulate` prices inline with a hardcoded 8% tax | Combos charge full price; three different tax rates in the codebase |
+
+**Suggested first session**, highest value per unit of risk — all small, all independently shippable:
+
+1. **Feature 7 T1** — convert the fake-success stubs to 501s. Few lines, obviously correct, stops
+   silent data loss immediately. Nothing else in this plan should be built on a server that reports
+   success for writes it discarded.
+2. **Feature 9 T1–T3** — complete backups, non-destructive restore, confirmation prompt.
+3. **Feature 11 T1–T2** — the unit conversion, defaulting to `1` so nothing changes until an
+   operator supplies a real factor.
+
+The remaining seven features are genuine enhancements and can wait: **1** (menu blueprint), **2**
+(agent bridge), **3** (locations), **4** (auth), **6** (setup status), **10** (margins), **12**
+(voids and refunds). Of those, **4 (auth) is the one with a deadline** — there is no authentication
+of any kind, and the repo now has a Dockerfile and compose file, so it must land before this is
+deployed anywhere public.
+
 ---
 
 ## How to implement this plan
