@@ -563,6 +563,18 @@ router.get("/api/admin/all-data", async (_req: Request, res: Response) => {
   try { res.json({ data: await adminStorage.getAllAdminData() }); } catch (err) { res.status(500).json({ error: "Failed to get all admin data" }); }
 });
 
+// Sales have a working implementation in storage.ts writing to the adminSales table; the adapter
+// below simply never called it. Employees have no table and no storage method at all.
+const SALES_NOT_WIRED =
+  "Sales are not served by the Express server yet. Nothing was saved. The sales table and its " +
+  "storage methods exist but the server's storage adapter is not connected to them; until it is, " +
+  "post sales to the local Capacitor server (http://127.0.0.1:8080), which persists them in IndexedDB.";
+
+const EMPLOYEES_NOT_ON_SERVER =
+  "Employees are not available on the Express server. Nothing was saved. There is no employees " +
+  "table server-side — employees are managed by the local Capacitor server (http://127.0.0.1:8080) " +
+  "in IndexedDB.";
+
 const serverAdminAdapter: ApiAdminStorage = {
   listProducts: () => adminStorage.listProducts(),
   getProduct: (id) => adminStorage.getProduct(id),
@@ -619,17 +631,21 @@ const serverAdminAdapter: ApiAdminStorage = {
 
   createInvoiceWithLineItems: (inv, lis) => adminStorage.createInvoiceWithLineItems(inv, lis),
 
-  async listSales() { return []; },
-  async getSale() { return null; },
-  async createSale(d) { return d; },
-  async updateSale() { return null; },
+  // These threw away what they were handed and reported success: createSale(d) { return d; }
+  // echoed the sale back with a 200 and persisted nothing, so a caller could not tell "saved"
+  // from "discarded". They throw now. The routes below answer 501 before reaching them; these
+  // throws are the backstop for any future route wired through the shared handlers.
+  async listSales() { throw new Error(SALES_NOT_WIRED); },
+  async getSale() { throw new Error(SALES_NOT_WIRED); },
+  async createSale() { throw new Error(SALES_NOT_WIRED); },
+  async updateSale() { throw new Error(SALES_NOT_WIRED); },
 
-  async listEmployees() { return []; },
-  async getEmployee() { return null; },
-  async createEmployee(d) { return d; },
-  async updateEmployee() { return null; },
+  async listEmployees() { throw new Error(EMPLOYEES_NOT_ON_SERVER); },
+  async getEmployee() { throw new Error(EMPLOYEES_NOT_ON_SERVER); },
+  async createEmployee() { throw new Error(EMPLOYEES_NOT_ON_SERVER); },
+  async updateEmployee() { throw new Error(EMPLOYEES_NOT_ON_SERVER); },
 
-  async listTimePunches() { return []; },
+  async listTimePunches() { throw new Error(EMPLOYEES_NOT_ON_SERVER); },
 
   getAllData: () => adminStorage.getAllAdminData(),
 };
@@ -648,17 +664,24 @@ async function handleViaSharedHandlers(req: Request, res: Response): Promise<boo
   return true;
 }
 
-router.get("/api/admin/sales", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
-router.get("/api/admin/sales/:id", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
-router.post("/api/admin/sales", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
-router.put("/api/admin/sales/:id", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
+// 501 rather than a fake 200. These previously reached adapter stubs that returned [] for reads
+// and echoed the payload back for writes, so a discarded sale was indistinguishable from a saved
+// one. Feature 7 T2 connects sales to the storage that already exists and restores these routes.
+const notImplemented = (message: string) => async (_req: Request, res: Response) => {
+  res.status(501).json({ error: message });
+};
 
-router.get("/api/admin/employees", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
-router.get("/api/admin/employees/:id", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
-router.post("/api/admin/employees", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
-router.put("/api/admin/employees/:id", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
+router.get("/api/admin/sales", notImplemented(SALES_NOT_WIRED));
+router.get("/api/admin/sales/:id", notImplemented(SALES_NOT_WIRED));
+router.post("/api/admin/sales", notImplemented(SALES_NOT_WIRED));
+router.put("/api/admin/sales/:id", notImplemented(SALES_NOT_WIRED));
 
-router.get("/api/admin/time-punches", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
+router.get("/api/admin/employees", notImplemented(EMPLOYEES_NOT_ON_SERVER));
+router.get("/api/admin/employees/:id", notImplemented(EMPLOYEES_NOT_ON_SERVER));
+router.post("/api/admin/employees", notImplemented(EMPLOYEES_NOT_ON_SERVER));
+router.put("/api/admin/employees/:id", notImplemented(EMPLOYEES_NOT_ON_SERVER));
+
+router.get("/api/admin/time-punches", notImplemented(EMPLOYEES_NOT_ON_SERVER));
 
 router.get("/api/local/status", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
 

@@ -87,7 +87,8 @@ half-built than not started (Feature 3 T3 in particular).
 
 ## Feature 7 — Stop the server accepting data it silently throws away
 
-**Status:** planned
+**Status:** in progress — T1 done (sales/employees/time-punches now 501 instead of fake success),
+T2–T4 unstarted
 **Vision pillar:** #1 — "the best foundation". A POS that discards sales is not a foundation.
 **Added:** 2026-08-09
 
