@@ -52,7 +52,9 @@ there. Either land features serially, or expect to resolve that file on every me
 | `server/storage.ts` | 3 (~40 methods) |
 | `server/routes.ts` | 3, 4, 6 (moves the demo-clear handler out), 7 (the adapter stubs) |
 | `server/bom-engine.ts` | 5 |
-| `client/src/pages/onboarding.tsx` | 6 — the only feature touching the client |
+| `client/src/pages/onboarding.tsx` | 6 |
+| `client/src/lib/sync.ts` | 8 |
+| `server/storage.ts` (sync engine) | 8 — a different region from Feature 3's ~40 CRUD methods |
 | New files, no conflict | `shared/menu-blueprint.ts` (1), `shared/mcp.ts` (2), `server/auth.ts` (4), `shared/pricing.ts` (5) |
 
 Features 1 and 5 are the safest pair to run concurrently: both touch `api-handlers.ts`, but in
@@ -82,6 +84,126 @@ All four tasks complete, every `Check:` passing, `npm run check` (tsc) clean, an
 stated "Definition of done" demonstrably true. A feature with three of four tasks done is not
 partially shipped — it is unshipped, and several of these leave the system in a worse state
 half-built than not started (Feature 3 T3 in particular).
+
+---
+
+## Feature 8 — Sync that converges, and a conflict policy that is written down
+
+**Status:** planned
+**Vision pillar:** #1 — "the best foundation". Sales records are the business's books.
+**Added:** 2026-08-09
+
+### How sync works today
+
+Clients push changed rows per category to `POST /api/sync/:category`; the server stores them as JSON
+blobs in `syncRecords`, keyed `(clientId, tableName, recordId)`, and returns `serverChanges` for the
+client to apply. `processSyncChanges` (`server/storage.ts:215`) is the whole conflict engine.
+
+For the menu tables it builds an `adminLookups` map — `products`, `variants`, `modifierGroups`,
+`modifiers`, `productModifierGroups` — and for each incoming change looks up the corresponding
+`admin_*` row. That design intent is sound: the admin console owns the menu, POS devices consume it.
+
+Two problems with the implementation.
+
+### Problem 1 — the comparison can essentially never be equal
+
+```ts
+const posDataJson  = JSON.stringify(change.data);
+const adminDataJson = JSON.stringify(adminData);
+const dataMatches = posDataJson === adminDataJson && change.deletedAt === adminDeletedAt;
+```
+
+`JSON.stringify` is sensitive to key order and to the exact set of keys. The two sides are built by
+entirely different machinery:
+
+- `adminData` is a Drizzle row — every column, in schema-definition order.
+- `change.data` is `data: record` straight out of Dexie (`client/src/lib/sync.ts:97`) — whatever
+  shape the client wrote, in its own key order.
+
+So they differ on key order, and separately on field set: `adminProducts` carries a `createdAt`
+column the client record need not have, and Feature 3 is about to add `locationId` to all ten tables,
+widening the gap further.
+
+When `dataMatches` is false the server overwrites the sync record with the admin version and pushes
+it back to the client. If the comparison never returns true, **every menu record is pushed to every
+client on every sync, forever.** Sync does not converge; it just moves the same rows back and forth.
+
+### Problem 2 — "admin wins" is unconditional, and undocumented
+
+`adminUpdatedAt` is read out of the row and written into `syncRecords`, but it is **never compared
+to `change.updatedAt`**. Whenever the two sides differ, admin wins regardless of which edit is newer.
+
+For menu data that may well be the intended policy — but it is nowhere stated, and it means a newer
+POS-side edit is discarded silently. A conflict policy that lives only in the shape of an `if`
+statement is one that gets reversed by accident during the next refactor.
+
+### The feature
+
+Make sync converge, and write the policy down where it can be checked.
+
+### Tasks
+
+**T1 — Confirm the mismatch, then fix the comparison** (~15 min)
+- **Confirm before fixing.** Add temporary logging of `posDataJson` and `adminDataJson` on a
+  mismatch and run one sync against seeded data. The reasoning above predicts they differ on key
+  order and field set; verify that is what is actually happening rather than trusting the analysis.
+  If they match, the real cause is elsewhere and the rest of this task is wrong.
+- Replace the string comparison with a value comparison over an **explicit field list per table** —
+  the fields sync is actually responsible for. Not a deep-equal over whatever keys happen to be
+  present: an explicit projection also stops server-only columns (`locationId`, `createdAt`) from
+  ever counting as a difference.
+- Normalise before comparing: treat `undefined` and `null` as equal, and compare numbers as numbers.
+  Dexie and Postgres disagree about empty values often enough that this is where the next
+  false-mismatch will come from.
+- Check: two semantically identical records with different key insertion order and one extra
+  server-only field compare as equal.
+
+**T2 — Make the conflict policy explicit** (~15 min)
+- Write the policy as a named function — `resolveConflict(pos, admin)` returning which side wins and
+  why — rather than leaving it implicit in control flow. One place to read, one place to change.
+- Keep admin-wins for the menu tables if that is the intent, but make it a stated rule with a
+  comment explaining *why* (the admin console is the source of truth for the menu; POS devices
+  consume it). For tables with no admin counterpart, last-write-wins on `updatedAt` is the fallback
+  that is already implied — state it.
+- Fix the timestamp fallback at `client/src/lib/sync.ts:99`:
+  `updatedAt: (record.updatedAt as number) || Date.now()`. A record with no `updatedAt` is stamped
+  *now*, which makes the oldest data in the system look like the newest — precisely backwards for
+  last-write-wins.
+- Check: an admin-owned table resolves to admin even when the POS record is newer; a non-admin table
+  resolves to whichever side has the greater `updatedAt`.
+
+**T3 — The convergence test** (~15 min)
+- The load-bearing check for this whole feature: seed data, sync, then **sync again with no changes
+  in between and assert the second round pushes zero and pulls zero.** That single assertion is what
+  proves the system reaches a fixed point, and it is exactly what fails today.
+- Then: change one field on the client, sync, and assert exactly one record moves — not the whole
+  table.
+- Add a third case for the delete path, since `deletedAt` participates in the comparison and
+  soft-deletes are the easiest thing to get wrong when reworking equality.
+
+**T4 — Resolve the two-writer question for sales** (~15 min, deferred here from Feature 7)
+- Sales reach the server two ways: `bom-engine.ts:447` inserts into `adminSales` directly for test
+  orders, and POS sales flow through `syncRecords` as JSON blobs under the `sales` sync group
+  (`shared/schema.ts:34`). After Feature 7 T2 wires `createSale` through, there is a third.
+- Note that `sales` has **no entry in `adminLookups`**, so sync treats it as a plain blob table while
+  `adminSales` is separately a real table with real rows. Determine what actually happens today when
+  the same sale arrives by both paths, and write the answer down.
+- Decide one owner for sales rows and route the others through it. Do not add reconciliation logic
+  between two writers — that is a second system to keep correct.
+- **This task is an investigation first.** If it turns out to need more than a 15-minute change,
+  the deliverable is a written finding and a follow-up feature entry in this file, not a rushed fix
+  to the path that carries the business's revenue records.
+
+### Non-goals
+
+Real-time or push-based sync, multi-device conflict UI, and per-field merge. The `backups` table and
+`POST /api/backup` also exist with no restore path exercised anywhere in this plan — worth its own
+feature, since a backup nobody has restored from is not a backup.
+
+### Definition of done
+
+Two consecutive syncs with no intervening edits move zero records, the conflict policy is a named
+function with a stated rule, and sales have exactly one writer.
 
 ---
 
