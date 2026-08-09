@@ -87,6 +87,7 @@ export default function SchedulePage() {
   const [loading, setLoading] = useState(false);
   const [selectedShiftId, setSelectedShiftId] = useState<string | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
+  const [ghost, setGhost] = useState<{ employeeId: string; name: string; x: number; y: number } | null>(null);
   const [publishing, setPublishing] = useState(false);
   const gridRef = useRef<HTMLDivElement>(null);
 
@@ -245,14 +246,13 @@ export default function SchedulePage() {
     }
   }, [shifts, employees, weekStart, toast]);
 
-  const handleDrop = useCallback((e: React.DragEvent, dayOfWeek: number) => {
-    e.preventDefault();
-    const employeeId = e.dataTransfer.getData("employeeId");
-    if (!employeeId) return;
+  // ponytail: pointer events instead of HTML5 drag-and-drop — dataTransfer never fires on touch (iPad POS)
+  const dropEmployee = useCallback((employeeId: string, clientX: number, clientY: number) => {
+    const col = document.elementFromPoint(clientX, clientY)?.closest("[data-day]") as HTMLElement | null;
+    if (!col) return;
 
-    const rect = e.currentTarget.getBoundingClientRect();
-    const y = e.clientY - rect.top;
-    const rawMinutes = START_HOUR * 60 + pxToMinutes(y);
+    const rect = col.getBoundingClientRect();
+    const rawMinutes = START_HOUR * 60 + pxToMinutes(clientY - rect.top);
     const startMinutes = snapToGrid(Math.max(START_HOUR * 60, Math.min(rawMinutes, END_HOUR * 60 - 60)));
     const endMinutes = Math.min(startMinutes + 4 * 60, END_HOUR * 60);
 
@@ -260,18 +260,30 @@ export default function SchedulePage() {
       id: uid(),
       employeeId,
       weekStart,
-      dayOfWeek,
+      dayOfWeek: Number(col.dataset.day),
       startMinutes,
       endMinutes,
     });
   }, [weekStart, createShift, START_HOUR, END_HOUR]);
 
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "copy";
-  }, []);
+  useEffect(() => {
+    if (!ghost) return;
+    const move = (e: PointerEvent) => setGhost(g => g && { ...g, x: e.clientX, y: e.clientY });
+    const up = (e: PointerEvent) => {
+      dropEmployee(ghost.employeeId, e.clientX, e.clientY);
+      setGhost(null);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+  }, [ghost, dropEmployee]);
 
-  const handleShiftMouseDown = useCallback((e: React.MouseEvent, shiftId: string, mode: DragMode) => {
+  const handleShiftMouseDown = useCallback((e: React.PointerEvent, shiftId: string, mode: DragMode) => {
     e.stopPropagation();
     e.preventDefault();
     const shift = shifts.find(s => s.id === shiftId);
@@ -291,7 +303,7 @@ export default function SchedulePage() {
   useEffect(() => {
     if (!dragState) return;
 
-    const handleMouseMove = (e: MouseEvent) => {
+    const handleMouseMove = (e: PointerEvent) => {
       const deltaY = e.clientY - dragState.startY;
       const deltaMinutes = pxToMinutes(deltaY);
 
@@ -327,11 +339,13 @@ export default function SchedulePage() {
       setDragState(null);
     };
 
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
+    window.addEventListener("pointermove", handleMouseMove);
+    window.addEventListener("pointerup", handleMouseUp);
+    window.addEventListener("pointercancel", handleMouseUp);
     return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
+      window.removeEventListener("pointermove", handleMouseMove);
+      window.removeEventListener("pointerup", handleMouseUp);
+      window.removeEventListener("pointercancel", handleMouseUp);
     };
   }, [dragState, shifts, updateShift, START_HOUR, END_HOUR]);
 
@@ -423,11 +437,11 @@ export default function SchedulePage() {
               {employees.map(emp => (
                 <div
                   key={emp.id}
-                  draggable
-                  onDragStart={(e) => {
-                    e.dataTransfer.setData("employeeId", emp.id);
-                    e.dataTransfer.effectAllowed = "copy";
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    setGhost({ employeeId: emp.id, name: emp.name, x: e.clientX, y: e.clientY });
                   }}
+                  style={{ touchAction: "none" }}
                   className={`flex items-center gap-2 p-2 rounded-lg cursor-grab active:cursor-grabbing border transition-colors hover:bg-accent ${employeeColorMap[emp.id]?.split(" ").slice(0, 1).join(" ").replace("/80", "/10")} border-transparent hover:border-border`}
                   data-testid={`drag-employee-${emp.id}`}
                 >
@@ -474,8 +488,7 @@ export default function SchedulePage() {
                     key={dayIdx}
                     className="relative border-l"
                     style={{ height: TOTAL_HOURS * HOUR_HEIGHT }}
-                    onDrop={(e) => handleDrop(e, dayIdx)}
-                    onDragOver={handleDragOver}
+                    data-day={dayIdx}
                     onClick={(e) => {
                       if ((e.target as HTMLElement).closest("[data-shift]")) return;
                       setSelectedShiftId(null);
@@ -505,7 +518,7 @@ export default function SchedulePage() {
                             data-shift
                             data-testid={`shift-block-${shift.id}`}
                             className={`absolute left-1 right-1 rounded-lg border-2 transition-shadow cursor-pointer overflow-hidden ${colorClass} ${isSelected ? "ring-2 ring-primary ring-offset-1 shadow-lg" : "shadow-sm hover:shadow-md"}`}
-                            style={{ top, height, minHeight: 20, zIndex: isSelected ? 20 : 10 }}
+                            style={{ top, height, minHeight: 20, zIndex: isSelected ? 20 : 10, touchAction: "none" }}
                             onClick={(e) => {
                               e.stopPropagation();
                               setSelectedShiftId(shift.id);
@@ -513,13 +526,13 @@ export default function SchedulePage() {
                           >
                             <div
                               className="absolute top-0 left-0 right-0 h-2 cursor-ns-resize hover:bg-white/30 rounded-t-lg"
-                              onMouseDown={(e) => handleShiftMouseDown(e, shift.id, "resize-top")}
+                              onPointerDown={(e) => handleShiftMouseDown(e, shift.id, "resize-top")}
                               data-testid={`resize-top-${shift.id}`}
                             />
 
                             <div
                               className="flex-1 px-1.5 py-1 overflow-hidden"
-                              onMouseDown={(e) => handleShiftMouseDown(e, shift.id, "move")}
+                              onPointerDown={(e) => handleShiftMouseDown(e, shift.id, "move")}
                               style={{ cursor: dragState?.shiftId === shift.id ? "grabbing" : "grab" }}
                             >
                               <div className="text-xs font-semibold truncate leading-tight">
@@ -539,7 +552,7 @@ export default function SchedulePage() {
 
                             <div
                               className="absolute bottom-0 left-0 right-0 h-2 cursor-ns-resize hover:bg-white/30 rounded-b-lg"
-                              onMouseDown={(e) => handleShiftMouseDown(e, shift.id, "resize-bottom")}
+                              onPointerDown={(e) => handleShiftMouseDown(e, shift.id, "resize-bottom")}
                               data-testid={`resize-bottom-${shift.id}`}
                             />
                           </div>
@@ -552,6 +565,16 @@ export default function SchedulePage() {
           </Card>
         </div>
       </div>
+
+      {ghost && (
+        <div
+          className="fixed z-50 pointer-events-none px-2 py-1 rounded-lg border-2 shadow-lg text-xs font-semibold bg-primary text-primary-foreground"
+          style={{ left: ghost.x + 8, top: ghost.y + 8 }}
+          data-testid="drag-ghost"
+        >
+          {ghost.name}
+        </div>
+      )}
     </AppShell>
   );
 }
