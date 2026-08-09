@@ -3,8 +3,12 @@
 Living document. Each entry is a feature that moves the product toward [VISION.md](VISION.md).
 Newest feature at the top. Tasks are sized so a single AI coding agent can finish one in ~15 minutes.
 
-**Planning is complete at twelve features.** Further planning has lower value than implementing what
-is here. The triage below is the entry point.
+**Planning is done; implementing is not.** Fifteen features are written up below, several of them
+defects in shipped code. Further planning has lower value than implementing what is here. The triage
+below is the entry point — **pick one task, not one feature**: every `T*` is sized for a single agent
+in about 15 minutes, states the files it touches, and ends in a `Check:` that must pass before the
+task counts as done. Update the feature's **Status** line when you finish one, so the next agent can
+see what is left.
 
 ---
 
@@ -22,6 +26,8 @@ its section. They are ordered by what they cost if left alone.
 | **11** | `lastPurchasePrice` stores price per *purchased* unit; recipes consume *stocking* units | `storage.ts:910`; seed data implies $4.50/oz milk, $12/oz espresso beans | Every cost and margin wrong by orders of magnitude |
 | **8** | Sync compares Drizzle rows to Dexie records via `JSON.stringify`, so they never match | `storage.ts:~270` vs `sync.ts:97` — differing key order and field set | Every menu record re-pushed to every client on every sync, forever |
 | **8** | Conflict resolution reads `adminUpdatedAt` but never compares it | `storage.ts:215+` | Newer POS edits silently discarded |
+| **15** | Recipe depletion is implemented twice — `pos.tsx:373-436` duplicates `bom-engine.ts:203-293`, and only the POS copy runs on real sales | the two already differ at `pos.tsx:367` vs `bom-engine.ts:224` | Pillar #4's accuracy claim rests on a copy nothing tests |
+| **15** | Stock adjustments clamp at zero and record nothing | `local-storage.ts:257`, `dexie-admin-storage.ts:266`; no ledger table in `db.ts:194-211` | Over-sales vanish; no answer to "where did it go" |
 | **5** | Combos are ignored by the live order path | `bom-engine.ts` is imported only by `routes.ts:16` for test orders; `/api/orders/simulate` prices inline with a hardcoded 8% tax | Combos charge full price; three different tax rates in the codebase |
 
 **Suggested first session**, highest value per unit of risk — all small, all independently shippable:
@@ -87,7 +93,9 @@ there. Either land features serially, or expect to resolve that file on every me
 | `server/schema.ts` | 3 (locationId on ten tables), 4 (apiTokens table), 11 (two columns on `inventoryItems`) |
 | `server/storage.ts` | 3 (~40 methods), 11 (the invoice-receive path) |
 | `server/routes.ts` | 3, 4, 6 (moves the demo-clear handler out), 7 (the adapter stubs) |
-| `server/bom-engine.ts` | 5 |
+| `server/bom-engine.ts` | 5 (pricing, `:295-335`), 15 (depletion, `:203-293`) — different regions |
+| `client/src/pages/pos.tsx` | 15 (deletes the duplicated depletion walk) |
+| `client/src/lib/db.ts` | 9 (backup list), 11 (two columns), 12 (reversal fields), 15 (ledger table) |
 | `client/src/lib/local-storage.ts` | 11 (two copies of the same receive path) |
 | `client/src/components/product-wizard.tsx` | 11 (deletes the duplicated cost arithmetic) |
 | `shared/pricing.ts` | 5 creates it, 10 and 11 both add costing functions — **11 first** |
@@ -126,6 +134,160 @@ All four tasks complete, every `Check:` passing, `npm run check` (tsc) clean, an
 stated "Definition of done" demonstrably true. A feature with three of four tasks done is not
 partially shipped — it is unshipped, and several of these leave the system in a worse state
 half-built than not started (Feature 3 T3 in particular).
+
+---
+
+## Feature 15 — Depletion that leaves a record: one engine, one ledger
+
+**Status:** planned
+**Vision pillar:** #4 — *"the depletion of the amount of recipe ingredients of the items are the most
+accurate in the industry. This is imperative to accurate expense calculations and forecasts in COGS."*
+This is the pillar the plan has never touched.
+**Blocks:** Feature 12 T2 (its reversal negates the server's deduction map, which today is not the
+code that did the deducting) and Feature 10 (COGS from recipes is only as true as depletion is)
+**Added:** 2026-08-09
+
+### The finding
+
+Depletion works. It is also **implemented twice, reconciled never, and recorded nowhere.**
+
+**1. Two copies of the same traversal.** `computeInventoryDeductions`
+(`server/bom-engine.ts:203-293`) and `handleRecordSale` (`client/src/pages/pos.tsx:373-436`, with
+`resolveSubRecipe` at `:354`) are the same algorithm written out twice — same depth-5 recursion
+guard, same `ancestors` cycle check, same `sfm[variant.id] ?? sfm[variant.name] ?? 1` scale lookup,
+same `overrideModifierGroupId` skip, same modifier `quantityPerUse` fallback. The server copy is a
+pure function returning a `Map`; the POS copy calls `adjustInventory` as it walks.
+
+They have already drifted. In the sub-recipe walk the POS copy writes only
+`else if (subEntry.inventoryItemId)` (`pos.tsx:367`) while the server copy has a bare `else`
+(`bom-engine.ts:224`) — so a BOM row with neither a `sourceProductId` nor an `inventoryItemId`
+produces a phantom deduction keyed by an empty string on the server and nothing on the tablet. That
+is the drift found by reading; the point of this feature is that there is no mechanism to find the
+next one, because **only the POS copy runs on real sales** (`bom-engine.ts` has exactly one
+importer, `server/routes.ts:16`, for test orders).
+
+**2. The deduction is not atomic with the sale, and happens first.** `handleRecordSale` fires N
+independent `adjustInventory` calls — `store.tsx:201` is fire-and-forget, returning `void` on an
+un-awaited promise — and only then calls `addSale` (`pos.tsx:446`). There is no transaction. An app
+closed, a tab crashed, or a failed write mid-loop leaves stock partly deducted for a sale that may
+not exist, and nothing afterwards can tell which lines were applied.
+
+**3. The overdraw is silently clamped away.** Both adjusters do
+`Math.max(0, item.currentQuantity + delta)` (`client/src/lib/local-storage.ts:257`,
+`client/src/lib/dexie-admin-storage.ts:266`). Sell ten lattes against four ounces of milk and the
+item reads `0` — not `-36`. The shortfall is not flagged, not logged, not recoverable. That clamp
+destroys precisely the signal pillar #4 is about: how far the recipe's prediction sits from reality.
+
+**4. Nothing records *why* a quantity changed.** The Dexie schema (`client/src/lib/db.ts:194-211`)
+has seventeen tables and none of them is a ledger. Invoices raise stock
+(`createInvoiceWithLineItems`), sales lower it, an operator edits it by hand in
+`client/src/pages/inventory.tsx` — and afterwards `currentQuantity` is a single number with no
+history. An operator asking "where did forty ounces of milk go on Tuesday" has no way to be
+answered, and neither does an agent.
+
+**5. There is no way to record waste.** `grep -rin "waste\|spoilage\|spillage"` across `client/src`,
+`server` and `shared` returns only CSS `shrink-0`. A dropped tray, a spoiled case, a comped drink —
+every one of them silently becomes "the recipes must be wrong", because that is the only bucket the
+system has.
+
+Taken together: the number this product claims to be best-in-industry at is computed by a duplicated
+function, written non-atomically, clamped at zero, and never explained.
+
+### The shape
+
+One engine, one append-only ledger, and an honest variance number. Not an inventory subsystem —
+`currentQuantity` stays exactly where it is and stays the source of truth for what is on hand. The
+ledger explains it; it does not replace it.
+
+```
+ponytail: the ledger is append-only rows, and currentQuantity stays a
+materialised column. No event sourcing, no rebuild-from-log, no reconciliation
+job. If the two ever disagree, the count in T4 is what fixes it. Rebuild-from-log
+is the upgrade if and when the ledger is trusted more than the column.
+```
+
+### Tasks
+
+**T1 — One depletion engine, called by both paths** (~15 min)
+- Move `computeInventoryDeductions` (`server/bom-engine.ts:203-293`) into a new `shared/depletion.ts`
+  verbatim — it is already pure and already takes preloaded data, so this is a cut and a paste plus
+  an import. It must import nothing from `server/`.
+- Delete the copy in `pos.tsx`: `handleRecordSale` calls the shared function to get the
+  `Map<inventoryItemId, delta>` and then applies it, instead of walking the BOM itself.
+  `resolveSubRecipe` (`pos.tsx:354`) goes with it.
+- Take the server copy's bare `else` as the bug and keep the POS copy's `inventoryItemId` guard —
+  a BOM row pointing at nothing must deduct from nothing, not from `""`.
+- **Not to be confused with Feature 5 T1**, which extracts `allocateComboDiscounts` and the line
+  pricing (`bom-engine.ts:295-335`) into `shared/pricing.ts`. Different region of the same file,
+  different module. Either order works; whichever lands second rebases trivially.
+- Check: for a seeded large mocha with an oat-milk modifier, the map returned by the shared function
+  equals — key for key, number for number — the deltas the current `pos.tsx` would have applied.
+  Write that as a fixture assertion, because it is the only proof the two copies were equivalent
+  before one of them was deleted.
+
+**T2 — The ledger, written in the same transaction as the sale** (~15 min)
+- Add an `inventoryLedger` table to `client/src/lib/db.ts` (new Dexie version, following the v9/v10
+  upgrades already there) and to `shared/schema.ts`: `id`, `inventoryItemId`, `delta`,
+  `quantityAfter`, `reason` (`SALE` | `VOID` | `RECEIVE` | `WASTE` | `COUNT` | `MANUAL`),
+  `refType`/`refId` (the sale, invoice or count that caused it), `note`, `employeeId`, `createdAt`.
+  Add it to `BACKUP_TABLES` — it is derived from `db.tables` since Feature 9 T1, so this is free, but
+  confirm it rather than assuming.
+- Wrap sale recording in one Dexie `rw` transaction: write the sale, apply every delta, append one
+  ledger row per delta. Either all of it lands or none of it does. Today the sale is written *after*
+  the stock moves; inside a transaction that ordering stops mattering, which is the point.
+- Route the two existing stock writers through it too: `createInvoiceWithLineItems` logs `RECEIVE`,
+  the inventory page's manual edit logs `MANUAL`. A ledger with a hole in it is worse than none,
+  because the hole looks like theft.
+- Check: recording a two-line sale writes exactly one sale row and one ledger row per distinct
+  inventory item, and forcing a mid-transaction failure leaves the sale absent **and** stock
+  untouched.
+
+**T3 — Let stock go negative, and say so** (~15 min)
+- Remove the `Math.max(0, …)` clamp from both adjusters (`local-storage.ts:257`,
+  `dexie-admin-storage.ts:266`). A negative `currentQuantity` is information: the recipe says you used
+  more than you had, so either the count is stale or the recipe is wrong. Clamping deletes the
+  question.
+- Both copies must change together — server and tablet disagreeing about what "out of stock" means
+  is the same class of bug as Feature 11 T2's two invoice paths.
+- Surface it where stock already is: `client/src/pages/inventory.tsx:37` already computes a low-stock
+  count off `lowStockThreshold`; negative items are a distinct, louder state and must not be folded
+  into "low".
+- **Do not block a sale on insufficient stock.** A till that refuses to sell a coffee because the
+  system thinks the beans ran out is a till the staff will work around, and then the data is worse.
+  Record the truth, do not enforce it.
+- Check: selling more than is on hand leaves a negative quantity and a ledger row whose
+  `quantityAfter` matches it; the inventory page shows the item as over-drawn rather than as zero.
+
+**T4 — Waste, a physical count, and the variance between them** (~15 min)
+- Add a waste entry on the inventory page: item, quantity, a **required** reason from a short fixed
+  list (spoiled, dropped, comped, prep loss), optional note. It writes a `WASTE` ledger row and
+  adjusts stock through the same path as everything else. Required, because an optional reason field
+  is an empty one — the same finding as Feature 12 T2.
+- Add a physical count: the operator types what is actually on the shelf, and the difference between
+  that and `currentQuantity` is written as one `COUNT` row. **The count is the truth and the variance
+  is the finding** — do not silently overwrite the quantity without recording what the gap was.
+- Show, per item over a window: opening, received, sold (theoretical), wasted, counted, and the
+  unexplained remainder. That last column is the number pillar #4 is actually claiming to be best at,
+  and it is unavailable today at any price.
+- Check: an item received 100, sold 40 by recipe, wasted 5 and counted at 50 reports an unexplained
+  variance of 5 — not 0, and not an error.
+
+### Non-goals
+
+Par levels, reorder points, and purchase-order generation (that is the inventory add-on in pillar #3
+and its own feature); yield and waste *factors* on recipes, which Features 10 and 11 both defer and
+which this feature makes measurable rather than replaces; multi-location stock transfers (needs
+Feature 3); lot tracking, expiry dates and FIFO/weighted-average valuation; and rebuilding
+`currentQuantity` from the ledger. Also explicitly out: **blocking sales on stock levels**, and any
+automatic "your recipe is wrong" correction — surfacing the variance is the feature, acting on it is
+the operator's call until pillar #6 exists.
+
+### Definition of done
+
+Both servers deplete through one function, every change to a quantity has a row saying what caused
+it, an over-sale shows as negative rather than zero, and an operator can see for any item what the
+recipes predicted, what was thrown away, what was actually counted, and how much is still
+unexplained.
 
 ---
 
