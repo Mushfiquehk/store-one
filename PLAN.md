@@ -3,6 +3,42 @@
 Living document. Each entry is a feature that moves the product toward [VISION.md](VISION.md).
 Newest feature at the top. Tasks are sized so a single AI coding agent can finish one in ~15 minutes.
 
+**Planning is complete at twelve features.** Further planning has lower value than implementing what
+is here. The triage below is the entry point.
+
+---
+
+## Triage: what is broken versus what is missing
+
+Five of these twelve are **defects in shipped code**, not enhancements. They were found by reading
+the code while planning features, and each is independently verifiable at the file and line cited in
+its section. They are ordered by what they cost if left alone.
+
+| # | Defect | Evidence | Cost if ignored |
+|---|---|---|---|
+| **7** | `POST /api/admin/sales` returns 200 with the sale echoed back and persists nothing | `server/routes.ts:622-632` — `createSale(d) { return d; }`, shadowing a working `storage.ts:860` | Sales silently lost; caller cannot tell success from discard |
+| **9** | Backup omits 6 of 16 tables while the UI calls it a "full snapshot" | `settings.tsx:256` lists ten tables; `db.ts:194-199` defines combos, invoices and more | Restore loses every combo and supplier invoice |
+| **9** | Restore clears tables it may not repopulate, with no confirmation | `settings.tsx:316-340` — unconditional `.clear()`, then `bulkPut` only `if (snapshot.X?.length)` | A partial snapshot or mistyped store code wipes the device |
+| **11** | `lastPurchasePrice` stores price per *purchased* unit; recipes consume *stocking* units | `storage.ts:910`; seed data implies $4.50/oz milk, $12/oz espresso beans | Every cost and margin wrong by orders of magnitude |
+| **8** | Sync compares Drizzle rows to Dexie records via `JSON.stringify`, so they never match | `storage.ts:~270` vs `sync.ts:97` — differing key order and field set | Every menu record re-pushed to every client on every sync, forever |
+| **8** | Conflict resolution reads `adminUpdatedAt` but never compares it | `storage.ts:215+` | Newer POS edits silently discarded |
+| **5** | Combos are ignored by the live order path | `bom-engine.ts` is imported only by `routes.ts:16` for test orders; `/api/orders/simulate` prices inline with a hardcoded 8% tax | Combos charge full price; three different tax rates in the codebase |
+
+**Suggested first session**, highest value per unit of risk — all small, all independently shippable:
+
+1. **Feature 7 T1** — convert the fake-success stubs to 501s. Few lines, obviously correct, stops
+   silent data loss immediately. Nothing else in this plan should be built on a server that reports
+   success for writes it discarded.
+2. **Feature 9 T1–T3** — complete backups, non-destructive restore, confirmation prompt.
+3. **Feature 11 T1–T2** — the unit conversion, defaulting to `1` so nothing changes until an
+   operator supplies a real factor.
+
+The remaining seven features are genuine enhancements and can wait: **1** (menu blueprint), **2**
+(agent bridge), **3** (locations), **4** (auth), **6** (setup status), **10** (margins), **12**
+(voids and refunds). Of those, **4 (auth) is the one with a deadline** — there is no authentication
+of any kind, and the repo now has a Dockerfile and compose file, so it must land before this is
+deployed anywhere public.
+
 ---
 
 ## How to implement this plan
@@ -55,6 +91,9 @@ there. Either land features serially, or expect to resolve that file on every me
 | `client/src/lib/local-storage.ts` | 11 (two copies of the same receive path) |
 | `client/src/components/product-wizard.tsx` | 11 (deletes the duplicated cost arithmetic) |
 | `shared/pricing.ts` | 5 creates it, 10 and 11 both add costing functions — **11 first** |
+| `client/src/pages/reports.tsx` | 10 (adds a margins table), 13 (replaces two fake tabs), 14 (adds labour) — **13 first** |
+| `client/src/pages/employees.tsx` | 14 (adds the pay-rate field) |
+| `shared/api-handlers.ts` (reports) | 12 moves the two report handler bodies into `shared/reports.ts` |
 | `client/src/pages/onboarding.tsx` | 6 |
 | `client/src/lib/sync.ts` | 8 |
 | `server/storage.ts` (sync engine) | 8 — a different region from Feature 3's ~40 CRUD methods |
@@ -90,7 +129,7 @@ half-built than not started (Feature 3 T3 in particular).
 
 ---
 
-## Feature 11 — One unit per number: stop costing a $2 espresso at $6
+## Feature 14 — Labour: the second-biggest number, and nobody can even type a wage
 
 **Status:** in progress — T1 done (`purchaseUnit` / `unitsPerPurchase` columns, default 1
 everywhere), T2–T4 unstarted. Note for T2/T3: the client-side `InventoryItem`
@@ -104,128 +143,442 @@ that makes Feature 10's numbers true.
 
 ### The finding
 
-Feature 10 names this hazard in its closing section and defers it: *"Nothing enforces that a BOM
-quantity is in the same unit as the item's purchase price… a 1000× costing error that looks entirely
-plausible on screen."* That deferral is not safe, for two reasons found while planning this.
+Labour is the second-largest line in a restaurant's P&L, usually within a few points of COGS. The
+codebase has employees, pay rates, time punches and a full drag-and-drop schedule — and computes
+nothing from any of it.
 
-**1. The wrong number is already on screen today.** Feature 10 states that "nothing in the codebase
-computes cost, margin, or profit" and that a grep returns only CSS `margin`. That is not correct.
-`renderProfitability()` at `client/src/components/product-wizard.tsx:1601-1760` already computes
-`quantity × lastPurchasePrice` per BOM line, sums it, and renders a coloured margin percentage to the
-operator — the exact formula Feature 10 T1 proposes to write. **Feature 10 T1 must reuse or replace
-that code, not become a second implementation of it.**
+**1. `payRate` is multiplied by nothing, anywhere.** Grep it across `client/`, `server/` and
+`shared/`: it is declared (`shared/schema.ts:147`), seeded (`server/seed-data.ts:255-258` at 2200,
+1600, 1550 and 1400), stored, and round-tripped through both storage layers. It is never an operand.
 
-**2. On the shipped seed data it produces nonsense.** Trace one item:
+**2. There is no way to enter one.** The employee dialog in `client/src/pages/employees.tsx` renders
+exactly four fields — Name (`:189`), Role (`:193`), Email (`:203`), Access PIN (`:215`). There is no
+pay-rate input. `payRate` is set to a hardcoded `1500` when the dialog opens for a new employee
+(`:55`) and otherwise carried through untouched, so **every employee an operator creates in the app
+is silently $15.00/hour**, and nothing on screen ever says so. A labour report built today would
+report confident numbers about a wage nobody chose.
 
-| Fact | Value | Source |
-|---|---|---|
-| Espresso Beans, unit of measure | `oz` | `server/seed-data.ts:35` |
-| Espresso Beans, `lastPurchasePrice` | `1200` ($12 — a per-*bag* price) | `server/seed-data.ts:35` |
-| Espresso Shot Single, BOM quantity | `0.5` (oz) | `server/seed-data.ts:208` |
-| Espresso Shot Single, sells for | `200` ($2.00) | `server/seed-data.ts:99` |
+**3. Nothing closes an open punch.** Clocking in writes `{ timeIn: Date.now() }` with no `timeOut`
+(`client/src/components/app-shell.tsx:76-81`); clocking out sets it (`:73`). `activePunch` is found
+by `!tp.timeOut` (`:60`). A closing shift where someone forgets to clock out leaves a punch open
+forever — and the naive `now - timeIn` is then 60 unpaid-looking hours by Monday. Any hours
+calculation has to decide what an open punch means *before* it can produce a number.
 
-The wizard costs that shot at `0.5 × 1200` = **$6.00 against a $2.00 sale, and renders −200% margin
-in red** on the demo data every new operator sees first. The arithmetic is fine. The two numbers are
-simply in different units, and nothing in the system knows that.
+**4. The data is split across the client/server line.** Employees and time punches are **client-only
+by Feature 7 T4's deliberate decision** — the server answers 501 (`server/routes.ts:643, 648`).
+Schedule shifts are the opposite: real server routes at `server/routes.ts:1125-1159`, fetched over
+HTTP by `client/src/pages/schedule.tsx:139`. Actual hours and scheduled hours therefore live on
+opposite sides of that line, and this feature must not quietly relocate either one.
 
-**The root cause is one line, copied three times.** Receiving an invoice does:
+### The shape
 
-```ts
-lastPurchasePrice: lineItem.unitPriceCents,          // price of one PURCHASED unit (a bag)
-currentQuantity: existing.currentQuantity + lineItem.quantity,   // added to STOCK units (oz)
-```
-
-at `server/storage.ts:926-928`, `client/src/lib/local-storage.ts:443-447`, and again at
-`client/src/lib/local-storage.ts:485-489`. Buy 2 bags at $12 and stock goes up by **2**, not by 640
-oz, while the price becomes $12 *per oz*. `unitOfMeasure` (`server/schema.ts:87`) cannot help: it is
-free text typed into a bare `<Input>` (`client/src/pages/inventory.tsx:218`), defaults to `"each"`,
-is displayed in six places, and is read by **zero** calculations.
-
-### The feature
-
-An inventory item is bought in one unit and consumed in another. Say so, with one number.
-
-`inventoryItems` gains `purchaseUnit: text` (a label — "bag", "case", "gallon") and
-`unitsPerPurchase: double, default 1` — how many stocking units come in one purchase unit. Receiving
-then converts both sides:
-
-```ts
-currentQuantity += lineItem.quantity * unitsPerPurchase       // 2 bags → +1280 oz
-lastPurchasePrice = lineItem.unitPriceCents / unitsPerPurchase // $12/bag → 1.875¢/oz
-```
-
-`lastPurchasePrice` becomes, by definition, **cost per stocking unit** — the unit BOM quantities are
-already in. Every existing cost consumer becomes correct without changing its arithmetic, including
-the wizard.
-
-**Deliberately not a units library.** No gram↔ounce table, no dimensional analysis, no unit registry
-to keep current. One operator-supplied number per item, defaulting to 1 — which is exactly today's
-behaviour, so nothing changes until someone fills it in. A real case of tomatoes is not a clean 10kg
-anyway; the operator is the only one who knows what is actually in the box, and this is the knob
-where they say so.
+Actual labour cost is one multiply — `hours × payRate` — over data that already exists. What this
+feature is really about is the three honesty problems around it: a wage nobody set, a punch nobody
+closed, and a percentage whose denominator is currently `Math.random()`.
 
 ### Tasks
 
-**T1 — Two columns and a default that changes nothing** (~15 min)
-- Add `purchaseUnit: text("purchase_unit")` and
-  `unitsPerPurchase: doublePrecision("units_per_purchase").notNull().default(1)` to
-  `adminInventoryItems` (`server/schema.ts:87`), the `InventoryItem` type (`shared/schema.ts:100`),
-  the Dexie table (`client/src/lib/db.ts:68`), and both storage create/update paths
-  (`server/storage.ts:685`, `client/src/lib/dexie-admin-storage.ts:241`).
-- Default `1` everywhere, including the sync-import row builder at `server/storage.ts:999`, which
-  constructs items field-by-field and will otherwise write `undefined` into a `NOT NULL` column the
-  first time a pre-upgrade device syncs.
-- Check: `npm run check` clean, existing rows read back with `unitsPerPurchase === 1`, and a sync
-  import of a record lacking the field produces `1` rather than failing or nulling.
+**T1 — A wage an operator can actually set** (~15 min)
+- Add a pay-rate field to the employee dialog (`client/src/pages/employees.tsx:189-220`), beside the
+  existing four. Label it with its unit — **per hour** — and edit in dollars while storing cents, the
+  way the rest of the app treats money.
+- Delete the hardcoded `1500` default at `:55`. A new employee should start empty and be **required**
+  to have a rate before saving, or be explicitly marked unpaid; inventing a plausible wage is exactly
+  the "flattering lie" failure Feature 10 and Feature 11 both got caught by.
+- Existing rows keep whatever they have. Do not backfill 1500 onto them — a wrong wage that looks
+  deliberate is worse than a blank one.
+- Check: create an employee, set $18.50, reload, and confirm `payRate === 1850`. Then confirm an
+  employee saved before this change still reads back unchanged.
 
-**T2 — Convert once, in one place** (~15 min)
-- Write `applyPurchase(item, lineItem)` returning `{ currentQuantity, lastPurchasePrice }` and use it
-  at all **three** call sites (`server/storage.ts:926`, `client/src/lib/local-storage.ts:443` and
-  `:485`). Three copies of this arithmetic is how it drifted; do not leave two of them.
-- Guard `unitsPerPurchase <= 0` — it is a divisor arriving from operator input, and a zero there
-  turns a cost into `Infinity`, which will render as a margin.
-- The "item does not exist yet" branches (`local-storage.ts:449`, `:491`) invent an item with
-  `unitOfMeasure: "each"`. Keep `unitsPerPurchase: 1` there and leave `purchaseUnit` null — an
-  invented item has no known pack size, and guessing one is worse than leaving it for the operator.
-- Check: an item at 1 oz on hand, `unitsPerPurchase: 640`, receiving 2 units at $12 ends at 1281 oz
-  with `lastPurchasePrice` of 1.875 — assert both numbers, since getting quantity right and price
-  wrong is the failure this task exists to prevent.
+**T2 — Hours, with an explicit answer for the punch nobody closed** (~15 min)
+- Add `shared/labor.ts` with `hoursWorked(punches, { since, until })` and
+  `laborCostCents(punches, employees, window)`, pure over the types in `shared/schema.ts:154-161`.
+- Clamp every punch to the window so a shift spanning midnight is split across days rather than
+  counted twice or dropped.
+- **Open punches:** a punch with no `timeOut` whose `timeIn` is within the current shift counts to
+  `now` and is reported as *in progress*. One older than a configurable cutoff (default 16 hours) is
+  **not** silently billed — it is returned in an `unclosedPunches` list for the operator to fix,
+  exactly as Feature 10 returns `unknownIngredients` rather than costing them at zero. Return
+  `{ costCents, hours, inProgress, unclosedPunches }`, never a bare number.
+- Employees with no `payRate` yield hours but unknown cost, and must appear in the unknown list
+  rather than contributing zero.
+- Check: a punch open for 40 hours does not add 40 hours to the total and does appear in
+  `unclosedPunches`; a punch crossing midnight splits correctly across two days.
 
-**T3 — One costing function, and delete the duplicate** (~15 min)
-- Put `costPerStockUnit(item)` and `costOfBom(entries, items)` in `shared/pricing.ts` (Feature 5 T1),
-  returning `{ costCents, unknownIngredients, unitOfMeasure }` — never a bare number, matching what
-  Feature 10 T1 specifies so that task becomes a re-export rather than a rewrite.
-- Point `renderProfitability()` (`product-wizard.tsx:1601`) at it and delete the inline arithmetic at
-  `:1717` and `:1636`. This is the task that actually fixes the −200% espresso, and it is a deletion.
-- Leave null `lastPurchasePrice` as unknown, not zero — the wizard already does this correctly at
-  `:1628` and `:1708`, and that behaviour must survive the refactor.
-- Check: with seed data, the Espresso Shot Single reports a positive margin. Assert the cost is
-  under 200 cents; today it is 600.
+**T3 — Labour on the reports page, as cost and as a percentage** (~15 min)
+- Add labour to `client/src/pages/reports.tsx`: cost for the selected window and **labour as a
+  percentage of revenue**, which is the form operators actually manage against. `employees` is
+  already destructured there (`reports.tsx:105`) and currently unused; `timePunches` comes off the
+  same `useStore()` (`client/src/lib/store.tsx:251-252`).
+- **This is why Feature 13 comes first.** Labour percent divides by revenue, and until Feature 13
+  lands that denominator is `generateMockSalesData()`. Shipping this against the current page
+  produces a labour percentage that changes on every render.
+- Any window containing an unclosed punch must say so next to the number rather than quietly
+  under-reporting it.
+- Check: with seeded punches the labour percentage equals `laborCostCents / revenueCents` for the
+  same window, and two consecutive loads agree.
 
-**T4 — Make the unit visible where the number is typed** (~15 min)
-- Fix the seed data so the demo is coherent: give the purchased items a `purchaseUnit` and
-  `unitsPerPurchase` matching the per-pack prices already there (`server/seed-data.ts:35-51` and its
-  copy at `client/src/lib/seed-data.ts:22`). Both files, or the two demo datasets disagree.
-- Show the stocking unit beside every quantity input that feeds a calculation — the BOM quantity
-  fields in `product-wizard.tsx` and `product-editor.tsx` already have the item in scope
-  (`product-wizard.tsx:1231`, `product-editor.tsx:589` render it). Add `purchaseUnit` and
-  `unitsPerPurchase` to the inventory edit form (`client/src/pages/inventory.tsx:218`) so there is
-  somewhere to set them at all.
-- Check: seeding fresh produces no negative margins in the wizard, and an operator can set "1 bag =
-  640 oz" and see the cost per oz update.
+**T4 — Scheduled versus actual** (~15 min)
+- The schedule already holds intent: `scheduleShifts` (`server/schema.ts:157`) with `weekStart`,
+  `dayOfWeek`, `startMinutes`, `endMinutes`. Scheduled hours are `(endMinutes - startMinutes) / 60`
+  summed per employee per week, and scheduled cost is that times `payRate`.
+- Show scheduled versus actual for the week, per employee, with the variance. "You rostered 38 hours
+  and paid 44" is the single most actionable labour number a small operator gets, and it is the one
+  an agent should be able to read before it is trusted to touch a schedule (pillar #2).
+- Shifts come from the server (`GET /api/schedule/shifts?weekStart=`) while punches are local —
+  fetch the week rather than assuming a local table, and degrade to actual-only if that call fails.
+  Do **not** "fix" the split by moving punches server-side; that reverses Feature 7 T4 and is its own
+  feature.
+- Check: a week with a rostered shift and no matching punch shows the full shift as variance rather
+  than being omitted, and the page still renders actual hours when the shifts request fails.
 
 ### Non-goals
 
-Unit conversion between measurement systems, a canonical unit vocabulary (`unitOfMeasure` stays free
-text — constraining it is a separate argument worth having later), yield and waste factors, per-lot
-or weighted-average costing, and repricing history. `lastPurchasePrice` remains exactly what its name
-says: the last one. Moving to weighted-average cost is a real improvement and a different feature.
+Payroll runs, tax withholding, overtime rules (they are jurisdictional and belong nowhere near a
+first pass), break tracking, tips and tip-outs, salaried staff, labour cost attributed per menu item
+— Feature 10 already lists that as a non-goal and it stays one — and moving employees or punches to
+the server. **Prime cost** (Feature 10's COGS percentage plus this feature's labour percentage) is
+the obvious next step and deliberately not bundled here: it is one addition once both numbers are
+trustworthy, and worthless before then.
 
 ### Definition of done
 
-No screen in the product shows a margin derived from two numbers in different units. The demo data
-costs an espresso shot at less than it sells for, one function computes ingredient cost for the whole
-codebase, and an operator can state their pack size in the one place it belongs.
+An operator can set a wage, see what they actually paid in labour for a period, see it as a
+percentage of real revenue, and see where the week's hours diverged from the roster — with forgotten
+clock-outs surfaced as something to fix rather than folded silently into the total.
+
+---
+
+## Feature 13 — Reports that show what actually happened
+
+**Status:** planned
+**Vision pillar:** #1 — "the best foundation". An operator cannot grow on numbers that were invented.
+**Blocks:** Feature 10 (its T3 adds a margins table "alongside the existing reports", and its T2
+joins against product-mix volumes — both of those neighbours are currently random)
+**Added:** 2026-08-09
+
+### The finding
+
+**The Reports page does not report. It generates random numbers.**
+
+`client/src/pages/reports.tsx` calls no API at all — grep it for `useQuery`, `fetch`, or `/api/` and
+there are zero hits. Two of its three tabs are fabricated:
+
+| Tab | What it shows | Reality |
+|---|---|---|
+| Sales | revenue chart, plus **Total Sales / Transactions / Avg Check** KPI cards | `generateMockSalesData()` at `reports.tsx:38-62` — `Math.random()` in all three granularities. The KPIs at `:115-123` are sums of that random series. |
+| Product Mix | per-product quantity and revenue, sorted by revenue | `reports.tsx:125-138` — real product *names*, but `quantity` and `revenue` are `Math.floor(Math.random() * 100) + 20`. |
+| Inventory | on-hand and low-stock | **Real.** Reads `inventory` from the store (`reports.tsx:105`). |
+
+Line 105 destructures `sales` and `employees` from `useStore()` and then never uses either. The real
+sales are sitting in scope, unread, while the chart above them is dice.
+
+**The real computations already exist and are ignored.** `shared/api-handlers.ts` implements
+`/api/reports/sales-summary` (`:684`) and `/api/reports/product-mix` (`:712`); the latter already
+walks `sale.linesJson` and accumulates true per-variant quantity and revenue — precisely the numbers
+the page is faking twenty lines of `Math.random()` to approximate. Nothing is missing but the wiring.
+
+**Why this outranks the remaining feature backlog.** A demo that invents its numbers is a demo
+problem. This is shipped in the operator-facing Reports page with no "sample data" label anywhere,
+and Feature 10 is about to build the margin report — the number that decides whether there is a
+second location — *next to it*, and to join against its volumes. A correct margin on a random volume
+is a wrong answer with a credible face.
+
+### The gap the endpoints do not cover
+
+`sales-summary` returns four scalars over **all sales, ever**. It has no date window and no time
+bucketing, so it cannot answer what the page's hourly/daily/monthly selector asks. That is the one
+piece of genuinely new logic here; everything else in this feature is deletion and wiring.
+
+### Tasks
+
+**T1 — One computation, shared by the page and the endpoint** (~15 min)
+- Create `shared/reports.ts` with two pure functions over `Sale[]`:
+  `salesSeries(sales, { granularity, since, until })` → `{ label, revenueCents, transactions }[]`,
+  and `productMix(sales)` → the existing per-variant shape.
+- Move the bodies of the two handlers (`api-handlers.ts:685-709`, `:715-746`) into them and have the
+  handlers call them. `productMix` is a straight lift — do not rewrite it, and keep its
+  `sale.linesJson` guard and its revenue-descending sort.
+- Bucket by `sale.createdAt` in **local time**, since "hourly" means the operator's trading day, not
+  UTC. Say so in a comment; it is the kind of thing that silently shifts a whole chart by hours.
+- Check: `productMix` over a hand-built two-sale fixture returns the expected quantity and revenue,
+  and `salesSeries` over sales spanning a day boundary puts each in the right bucket.
+
+**T2 — Point the sales tab at real sales, and delete the generator** (~15 min)
+- Replace `generateMockSalesData` (`reports.tsx:38-62`, and the `:113` call) with `salesSeries` over
+  the `sales` already destructured at `:105`. Delete the function — leaving it behind means it gets
+  used again.
+- The KPI totals at `:115-123` then follow from real data with no change to their arithmetic.
+  `avgCheck` already guards divide-by-zero; keep that.
+- Check: with seeded demo sales the chart totals equal the sum of `sales[].totalCents` for the
+  window, and the page renders identical numbers on two consecutive loads. Today it does not — it is
+  different dice every render, which is also the fastest way to demonstrate the bug.
+
+**T3 — Point product mix at real lines, and delete the other generator** (~15 min)
+- Replace `reports.tsx:125-138` with `productMix(sales)`. It returns per-*variant* rows while the tab
+  currently shows per-*product*; aggregate by `productId` in the page rather than adding a second
+  function, and keep the existing `showIngredientProducts` filter working against the real rows.
+- Drop the `.slice(0, 8)` or make it an explicit "top 8 by revenue" label. Silently truncating a
+  report is the same class of dishonesty as inventing it — the operator cannot tell the list ended.
+- Check: a product sold twice shows quantity 2 and revenue equal to its two line totals; a product
+  never sold does not appear at all rather than appearing with a random quantity.
+
+**T4 — An empty store must look empty** (~15 min)
+- A new operator has no sales. The chart must say "No sales yet" rather than drawing a flat line at
+  zero, and the KPI cards must show `—` rather than `$0.00` — the whole point of Feature 6 is that
+  day one is a real state, and a zeroed report is indistinguishable from a business that sold nothing
+  all week.
+- Add `shared/reports.test.ts` covering the empty case and the fixture from T1, and assert
+  `Math.random` appears nowhere in `reports.tsx`. That last check is one line and it is what stops
+  this regressing the next time someone needs a chart to look good in a screenshot.
+- Check: `npm test` passes with an empty sales array, and the page with no sales shows the empty
+  state rather than zeros.
+
+### Non-goals
+
+Date-range pickers beyond the existing granularity selector, comparison periods ("vs last week"),
+export, charting the inventory tab (it is already honest), and the labour/payroll side of the P&L —
+`employees.payRate` (`shared/schema.ts:147`) is stored, seeded, and edited but multiplied by nothing
+anywhere in the codebase, and `timePunches` are client-only by Feature 7 T4's deliberate decision.
+**Labour cost is Feature 14**, which depends on this one for its denominator; with Feature 10's
+margins it is what makes prime cost reachable.
+
+### Definition of done
+
+Every number on the Reports page traces to a row in the database. `Math.random()` does not appear in
+`client/src/pages/reports.tsx`. Two consecutive loads of the page show the same figures, and a store
+with no sales says so instead of reporting zeros.
+
+---
+
+## Feature 12 — Voids and refunds: a till has to be able to take a mistake back
+
+**Status:** planned
+**Vision pillar:** #1 — "setup **and operate**". Operating a till means correcting it.
+**Added:** 2026-08-09
+
+### The finding
+
+There is no way to void a sale or issue a refund. Searching `server/`, `shared/`, `pos.tsx`, and
+`order-receipts.tsx` for refund, void, comp, or cancel returns nothing but TypeScript `Promise<void>`
+signatures.
+
+`adminSales.status` (`server/schema.ts:138`) defaults to `"completed"` and is written with that
+literal in all three places a sale is created — `client/src/pages/pos.tsx:453`,
+`shared/api-handlers.ts:464`, and `server/bom-engine.ts:440`. It is read once, as a filter in
+`order-receipts.tsx:142`. **No other status value exists in the codebase.** The field is a constant.
+
+This is not an edge case. A cashier rings the wrong item, a customer sends a dish back, a card is
+charged twice — every one of these happens in a restaurant's first week, and today the only recourse
+in this system is `deletedAt`, the soft-delete used by the generic CRUD layer.
+
+**Soft-deleting a sale would be the wrong fix**, and it is the fix this codebase makes easy. Sales
+are financial records. Removing one from the list silently changes historical revenue: yesterday's
+totals, already reported and possibly already filed, quietly become different numbers. Accounting
+does not delete; it posts a reversing entry. `deleteSale` does not currently exist, and it should
+stay that way.
+
+### The feature
+
+A void or refund **appends a reversing record**; the original sale is never modified or removed.
+
+- **Void** — the original was never really a sale (wrong entry, immediate correction). Full reversal.
+- **Refund** — the sale happened and money goes back. Full reversal, but it remains a real
+  transaction that occurred, and it must be visible as such.
+
+Both produce a new sale row with negative amounts, `status` of `"void"` or `"refund"`, and a
+`reversesSaleId` pointing at the original. Revenue for any period is then simply the sum of
+everything — reversals net themselves out, and no report needs to learn about special cases.
+
+### Non-negotiables
+
+- **Never mutate or soft-delete a completed sale.** The original row is immutable after close.
+- **Inventory must be returned.** A voided latte puts the milk back. `computeInventoryDeductions`
+  (`server/bom-engine.ts:203`) already produces the deduction map — apply it negated. Do not write a
+  second traversal; the same rule as Features 10 and 11.
+- **Every reversal records who and why.** Voids are the single most common till-theft vector in food
+  service, and an unattributed void is indistinguishable from a cashier pocketing cash. Employee
+  attribution and a reason are the whole audit value of this feature, not paperwork on top of it.
+
+### Tasks
+
+**T1 — Schema and status vocabulary** (~15 min)
+- Add to `adminSales` (and the Dexie schema in `client/src/lib/db.ts`): `reversesSaleId` (text,
+  nullable), `voidReason` (text, nullable), `voidedByEmployeeId` (text, nullable).
+- Define the status values in one exported constant — `"completed" | "void" | "refund"` — rather
+  than as string literals in the three places sales are created. Replace those literals with it.
+- Do **not** add a `deleteSale` method anywhere, and add a comment on the sales table saying why:
+  reversals are append-only.
+- Check: existing sales read back as `"completed"` with null reversal fields, and the type refuses
+  an unknown status.
+
+**T2 — The reversal endpoint** (~15 min)
+- `POST /api/admin/sales/:id/reverse` taking `{ type: "void" | "refund", reason, employeeId }`, in
+  `shared/api-handlers.ts` so both servers expose it.
+- Create a new sale row: amounts negated, `linesJson` copied from the original with negated
+  quantities, `reversesSaleId` set, status set, reason and employee recorded.
+- Return inventory by applying the negated deduction map from `computeInventoryDeductions`.
+- **Reject a second reversal of the same sale.** Query for an existing row with
+  `reversesSaleId = :id` first and 409 if present. A double-tap on a slow tablet must not refund
+  twice — this is the check the whole endpoint lives or dies on.
+- Require a non-empty reason. An optional audit field is an empty audit field.
+- Check: reversing produces exactly one new row, the original is byte-identical afterwards,
+  inventory returns to its pre-sale level, and a second reversal attempt 409s.
+
+**T3 — Do it from the till** (~15 min)
+- Add void/refund to the recent-sales view the POS already renders (`order-receipts.tsx` filters
+  sales at line 142). Reason and employee are required inputs, not optional prompts.
+- Show reversed sales struck through with their reversal linked, rather than hiding them. An
+  operator asking "where did that $40 order go" needs to see the answer, and a disappeared sale is
+  how a theft looks from the outside.
+- Gate behind the existing `pin-protection.tsx` component. Note it currently validates a hardcoded
+  `1234` client-side (see Feature 4) — this task should use it as-is and **not** invent a second
+  auth mechanism; it gets real when that PIN does.
+- Check: voiding from the till shows the reversal immediately and the day's total drops by exactly
+  the voided amount.
+
+**T4 — Make every report agree** (~15 min)
+- `sales-summary` and `product-mix` (`shared/api-handlers.ts:504, 534`) currently sum all sales.
+  With negative reversal rows they net out automatically — **verify that rather than assuming it**,
+  particularly `product-mix`, which aggregates quantities and must not count a voided item as sold.
+- Feature 10's margin report must exclude reversed sales from volume weighting, or a heavily-voided
+  item looks like a strong seller.
+- Add `void_sale` to the Feature 2 MCP tool table — but describe it as requiring explicit operator
+  confirmation. An agent that can silently reverse transactions is a liability, and this is the one
+  tool in the plan that moves money.
+- Check: a day with one sale and one void reports zero revenue and zero units sold, not one of each.
+
+### Non-goals
+
+Partial and line-level refunds (this cut reverses whole sales only), payment-processor integration
+to actually return funds to a card, cash-drawer reconciliation, tip adjustment, and reopening a
+closed sale for editing. **Partial refunds are the obvious next step** and the schema above supports
+them — `linesJson` on the reversal is already a subset-capable structure.
+
+### Definition of done
+
+A cashier can void a mis-rung order with a reason attached, the original sale is still in the record,
+inventory comes back, and the day's totals are correct without anything having been deleted.
+
+---
+
+## Feature 11 — Purchase units vs stocking units: the bug that makes every cost wrong
+
+**Status:** planned
+**Vision pillar:** #1 — Feature 10 is unusable without this
+**Blocks:** Feature 10 (margins computed on today's data are off by orders of magnitude)
+**Added:** 2026-08-09
+
+### The finding
+
+Feature 10 named a unit hazard and left it for later. Checking how `lastPurchasePrice` is maintained
+showed it is not a hazard — it is a live, structural error, and the demo data demonstrates it.
+
+The good news first: the invoice→cost link works. `createInvoiceWithLineItems`
+(`server/storage.ts:910`, mirrored at `client/src/lib/local-storage.ts:444-497`) writes
+`lastPurchasePrice: lineItem.unitPriceCents` when an invoice is recorded. Costs do get maintained.
+
+The problem is **what unit that number is in**. `unitPriceCents` is the price per unit *as
+purchased* — a case, a gallon, a sack. `inventoryItems.unitOfMeasure` is the unit the item is
+*stocked and consumed* in, and `billOfMaterials.quantityDeducted` is expressed in that stocking
+unit. Nothing converts between them. The invoice's per-case price is written straight into the field
+that costing multiplies by a per-ounce recipe quantity.
+
+The seeded demo data shows exactly what this produces:
+
+| Item | `unitOfMeasure` | `lastPurchasePrice` | What the number really is | Implied |
+|---|---|---|---|---|
+| Whole Milk | `oz` | `450` | $4.50 per gallon | **$4.50 per ounce** |
+| Espresso Beans | `oz` | `1200` | $12.00 per bag | **$12.00 per ounce** |
+| Matcha Powder | `tsp` | `2500` | $25.00 per tin | **$25.00 per teaspoon** |
+| All-Purpose Flour | `oz` | `300` | $3.00 per bag | **$3.00 per ounce** |
+
+A 12 oz latte would cost `12 × $4.50 = $54` in milk alone. The chocolate chip cookie
+(`server/seed-data.ts:230`) deducts 2 oz of flour, costing $6.00 of flour in a $2.75 cookie.
+
+So Feature 10 built on today's data would not be slightly off — it would report that essentially the
+entire menu loses money, and it would be *believable enough to act on*. That is worse than no margin
+report, and it is why this feature blocks that one.
+
+### The fix, and what not to build
+
+Two fields on the inventory item and one division:
+
+- `purchaseUnit` — free text label, e.g. `"gallon"`, `"case of 24"`. Display only.
+- `stockUnitsPerPurchaseUnit` — a number. "One gallon is 128 oz" → `128`.
+
+```
+costPerStockUnit = unitPriceCents / stockUnitsPerPurchaseUnit
+```
+
+**Do not build a unit-conversion system.** No `convert-units` dependency, no ounce/gram/litre
+conversion graph, no unit ontology. The operator knows their own pack sizes; one number they type
+once per item beats a library that has to guess whether "oz" means weight or volume — a distinction
+that genuinely matters for flour versus milk and that no generic converter can resolve.
+
+```
+ponytail: one conversion factor per item, entered by the operator. No unit
+algebra, no dimension checking. If suppliers start changing pack sizes often
+enough that this drifts, the upgrade is a factor per invoice line, not a
+units library.
+```
+
+### Tasks
+
+**T1 — Add the fields, defaulting to no-op** (~15 min)
+- Add `purchaseUnit: text` (nullable) and `stockUnitsPerPurchaseUnit: doublePrecision NOT NULL
+  DEFAULT 1` to `adminInventoryItems` in `server/schema.ts` and to the Dexie schema in
+  `client/src/lib/db.ts`. Generate the migration with `drizzle-kit`.
+- **A default of `1` makes existing behaviour bit-identical** — dividing by one changes nothing. The
+  data stays as wrong as it is today until an operator supplies a real factor, and nothing breaks on
+  the way there. Never default this to `0`; a division by zero here would take out costing entirely.
+- Check: migration applies to a seeded database, every existing row reads back `1`, and current cost
+  arithmetic is unchanged.
+
+**T2 — Store cost per stocking unit** (~15 min)
+- In both copies of `createInvoiceWithLineItems` (`server/storage.ts:882`,
+  `client/src/lib/local-storage.ts`), write
+  `lastPurchasePrice = unitPriceCents / stockUnitsPerPurchaseUnit` instead of the raw unit price.
+  These two implementations must stay in step — a divergence here means the server and the tablet
+  disagree about what every item costs.
+- Guard the divisor: treat null, zero, or negative as `1` and record that the conversion was skipped.
+  Silently producing `Infinity` into a money field is the failure mode to design out.
+- Add a comment on the `lastPurchasePrice` field in both schemas stating its unit is **cents per
+  stocking unit**. The absence of that sentence is the root cause of this entire feature.
+- Check: an invoice line for one gallon at $4.50 against an item stocked in `oz` with a factor of
+  128 stores `≈3.5` cents per ounce, not `450`.
+
+**T3 — Ask for the factor where the operator already is** (~15 min)
+- Surface both fields in the inventory editor and in `admin-invoice-intake.tsx`, phrased as a
+  question rather than a schema field: *"You bought 1 gallon. How many oz is that?"* The operator is
+  looking at the physical case when recording the invoice — that is the moment they can answer.
+- Show the derived per-stocking-unit cost immediately after entry so an implausible number is
+  visible while it is still cheap to fix.
+- Do not block invoice recording on it. An operator entering invoices at 11pm must be able to finish;
+  an unset factor means the cost stays unconverted and the item is flagged, exactly like Feature 10's
+  unknown-cost rows.
+- Check: entering a factor updates the displayed per-unit cost live, and leaving it blank still
+  records the invoice.
+
+**T4 — Fix the demo data, and flag implausible costs** (~15 min)
+- Correct `server/seed-data.ts` and `client/src/lib/seed-data.ts` (the two copies) so the demo
+  catalogue carries honest per-stocking-unit costs and realistic factors. The demo data currently
+  encodes the bug, so anyone building Feature 10 against it would conclude their maths was broken.
+- Add a plausibility flag to Feature 10's margin report: an item whose ingredient cost exceeds its
+  selling price is either genuinely underpriced or has a bad conversion factor. Say both, and link to
+  the item. This is a signal, not a hard error — some loss-leaders are real.
+- Check: after correction, the demo latte's milk cost is cents rather than dollars, and the seeded
+  menu reports plausible margins end to end.
+
+### Non-goals
+
+Yield and waste factors (Feature 10 already defers these), per-invoice pack sizes, unit conversion
+between measurement systems, and any automatic inference of pack size from supplier descriptions.
+
+### Definition of done
+
+`lastPurchasePrice` means cents per stocking unit everywhere, it is documented as such in both
+schemas, and the demo menu produces margins a restaurant operator would recognise as real.
 
 ---
 
@@ -317,6 +670,8 @@ margin report that quietly treats missing data as free is worse than no report.
   zero. Negative margins are the entire point of the report.
 
 **T3 — Show it** (~15 min)
+- **Land Feature 13 first.** Two of the three tabs this table would sit beside are `Math.random()`
+  today, and T2's product-mix join reads volumes that the page fabricates.
 - Add a margins table to `client/src/pages/reports.tsx` alongside the existing reports, worst first,
   with unknown-cost rows visibly flagged rather than sorted as if their margin were 100%.
 - Give unknown-cost rows a direct link to the inventory item that needs a price. The report's job is
@@ -343,13 +698,12 @@ location" scoring. That last one is tempting and should be resisted until the ma
 been trusted by a real operator for a few months — a readiness score built on unvalidated cost data
 is a confident wrong answer about someone's livelihood.
 
-### A unit hazard worth naming
+### The unit hazard — now Feature 11, and it blocks this feature
 
-`inventoryItems.unitOfMeasure` is free text and `billOfMaterials.quantityDeducted` is a bare number.
-Nothing enforces that a BOM quantity is in the same unit as the item's purchase price. Grams against
-a per-kilo price is a 1000× costing error that looks entirely plausible on screen. This feature does
-not fix it, but T1 should surface the item's `unitOfMeasure` in its output so the mismatch is at
-least visible, and it is worth its own feature.
+`lastPurchasePrice` currently holds the price per *purchased* unit while `quantityDeducted` is in
+*stocking* units, with no conversion. Margins computed on today's data are wrong by orders of
+magnitude — see Feature 11, which must land first. T1 should still surface the item's
+`unitOfMeasure` in its output so any residual mismatch stays visible.
 
 ### Definition of done
 
