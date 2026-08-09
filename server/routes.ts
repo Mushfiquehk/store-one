@@ -662,6 +662,10 @@ router.get("/api/admin/time-punches", async (req: Request, res: Response) => { a
 
 router.get("/api/local/status", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
 
+// The local server forwards every path to the shared handlers; Express registers them
+// one by one, so a shared route is unreachable here until it is listed.
+router.post("/api/admin/menu/apply", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
+
 router.post("/api/orders/simulate", async (req: Request, res: Response) => {
   res.status(501).json({
     error: "Order simulation is only available on the local Capacitor server (http://127.0.0.1:8080). " +
