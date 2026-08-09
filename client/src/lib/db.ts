@@ -68,7 +68,18 @@ export interface InventoryItem {
   unitOfMeasure: string;
   currentQuantity: number;
   lowStockThreshold: number | null;
+  /** Cost of one *stocking* unit — the unit BOM quantities are in. */
   lastPurchasePrice: number | null;
+  /** Label for the unit the item is bought in ("bag", "case"). Null when unknown. */
+  purchaseUnit?: string | null;
+  /**
+   * How many stocking units come in one purchase unit. 1 means bought and stocked the same way.
+   *
+   * Optional here but NOT NULL server-side: a row written before the v10 upgrade genuinely does
+   * not have the field yet, and rows can also arrive from a device that predates it. Read it as
+   * `?? 1` rather than assuming it is present.
+   */
+  unitsPerPurchase?: number;
   updatedAt: number;
   deletedAt: number | null;
 }
@@ -424,6 +435,15 @@ class PosDatabase extends Dexie {
 
     this.version(9).stores({
       settings: "key, updatedAt",
+    });
+
+    // Feature 11: items bought by the pack. Existing rows are bought and stocked in the same
+    // unit until an operator says otherwise, which is exactly unitsPerPurchase = 1.
+    this.version(10).stores({}).upgrade(async tx => {
+      await tx.table("inventoryItems").toCollection().modify(item => {
+        if (item.unitsPerPurchase === undefined) item.unitsPerPurchase = 1;
+        if (item.purchaseUnit === undefined) item.purchaseUnit = null;
+      });
     });
   }
 }
