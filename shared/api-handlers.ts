@@ -1,3 +1,6 @@
+import { parseMenuBlueprint, planMenuApply, type ExistingMenu, type FieldDiff, type MenuPlan } from "./menu-blueprint";
+import type { Modifier, ModifierGroup, Product, ProductModifierGroup, Variant } from "./schema";
+
 export interface ApiRequest {
   method: string;
   path: string;
@@ -184,6 +187,81 @@ function generateOrderId(): string {
   return `order_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** Same shape the client components use, so blueprint-created rows are indistinguishable. */
+function uid(prefix: string): string {
+  return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`;
+}
+
+/** `{ basePrice: { from, to } }` -> `{ basePrice: to }`, ready for an update call. */
+function updatePayload(fields: FieldDiff | undefined): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(fields ?? {}).map(([field, { to }]) => [field, to]));
+}
+
+/**
+ * Execute a plan. Creates mint ids here rather than in the planner, which is pure — so
+ * this walks the changes in planner order (groups, modifiers, products, variants, links)
+ * and resolves each parent by name from what it has already created or found.
+ */
+async function applyMenuPlan(store: ApiAdminStorage, plan: MenuPlan, existing: ExistingMenu): Promise<void> {
+  const key = (name: string) => name.trim().toLowerCase();
+  const groupIds = new Map(existing.modifierGroups.filter(g => g.deletedAt == null).map(g => [key(g.name), g.id]));
+  const productIds = new Map(existing.products.filter(p => p.deletedAt == null).map(p => [key(p.name), p.id]));
+
+  for (const change of plan.changes) {
+    if (change.op === "noop") continue;
+    const values = change.values ?? {};
+
+    switch (change.entity) {
+      case "modifierGroup": {
+        if (change.op === "create") {
+          const id = uid("mg");
+          await store.createModifierGroup({ id, name: change.name, ...values });
+          groupIds.set(key(change.name), id);
+        } else {
+          await store.updateModifierGroup(change.id!, updatePayload(change.fields));
+        }
+        break;
+      }
+      case "modifier": {
+        if (change.op === "create") {
+          const modifierGroupId = groupIds.get(key(change.parent!));
+          if (!modifierGroupId) continue;
+          await store.createModifier({ id: uid("mod"), modifierGroupId, name: change.name, ...values });
+        } else {
+          await store.updateModifier(change.id!, updatePayload(change.fields));
+        }
+        break;
+      }
+      case "product": {
+        if (change.op === "create") {
+          const id = uid("prod");
+          await store.createProduct({ id, name: change.name, ...values });
+          productIds.set(key(change.name), id);
+        } else {
+          await store.updateProduct(change.id!, updatePayload(change.fields));
+        }
+        break;
+      }
+      case "variant": {
+        if (change.op === "create") {
+          const productId = productIds.get(key(change.parent!));
+          if (!productId) continue;
+          await store.createVariant({ id: uid("var"), productId, name: change.name, ...values });
+        } else {
+          await store.updateVariant(change.id!, updatePayload(change.fields));
+        }
+        break;
+      }
+      case "productModifierGroups": {
+        const productId = productIds.get(key(change.name));
+        const ids = (change.groupNames ?? []).map(name => groupIds.get(key(name))).filter((id): id is string => id != null);
+        if (productId && ids.length > 0) await store.setProductModifierGroups(productId, ids);
+        break;
+      }
+    }
+  }
+}
+
 export function createApiHandlers(store: ApiAdminStorage) {
   const routes: Array<{ method: string; pattern: string; handler: (req: ApiRequest) => Promise<ApiResponse> }> = [];
 
@@ -365,6 +443,45 @@ export function createApiHandlers(store: ApiAdminStorage) {
     handler: async () => {
       try { return { status: 200, data: await store.listTimePunches() }; }
       catch { return { status: 500, data: { error: "Failed to list time punches" } }; }
+    },
+  });
+
+  routes.push({
+    method: "POST",
+    pattern: "/api/admin/menu/apply",
+    handler: async (req) => {
+      try {
+        const parseResult = parseMenuBlueprint(req.body);
+        if (!parseResult.ok) {
+          return { status: 400, data: { error: "Invalid blueprint", errors: parseResult.errors } };
+        }
+        const blueprint = parseResult.blueprint;
+
+        const existing: ExistingMenu = {
+          products: (await store.listProducts()) as Product[],
+          variants: (await store.listVariants()) as Variant[],
+          modifierGroups: (await store.listModifierGroups()) as ModifierGroup[],
+          modifiers: (await store.listModifiers()) as Modifier[],
+          productModifierGroups: (await store.listProductModifierGroups()) as ProductModifierGroup[],
+        };
+
+        const plan = planMenuApply(blueprint, existing);
+
+        // Validate everything before writing anything: one round trip, all the errors.
+        if (plan.errors.length > 0) {
+          return { status: 400, data: { error: "Invalid blueprint", errors: plan.errors } };
+        }
+
+        // Same plan either way — the preview cannot drift from what applying does.
+        if (blueprint.dryRun) {
+          return { status: 200, data: { applied: false, changes: plan.changes, errors: [] } };
+        }
+
+        await applyMenuPlan(store, plan, existing);
+        return { status: 200, data: { applied: true, changes: plan.changes, errors: [] } };
+      } catch {
+        return { status: 500, data: { error: "Failed to apply menu blueprint" } };
+      }
     },
   });
 
