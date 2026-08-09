@@ -5,6 +5,126 @@ Newest feature at the top. Tasks are sized so a single AI coding agent can finis
 
 ---
 
+## Feature 5 — Discounts, and the one pricing engine they need to live in
+
+**Status:** planned
+**Vision pillar:** #2 — VISION names discounts and promotions explicitly as agent-managed tasks
+**Added:** 2026-08-09
+
+### The finding
+
+VISION.md says the agent should handle "creating products, combos, discounts, promotions etc."
+Products and combos exist. **Discounts and promotions do not exist as entities at all.** The only
+occurrences of the word in the schema are `discountValueCents` and `discountPercent` at
+`shared/schema.ts:186-187` — both fields *on the combo record*, not a discount of their own. There
+is no way to take 10% off an order, comp an item, or run a happy-hour price.
+
+Investigating where a discount would plug in surfaced something bigger: **there are two pricing
+implementations, and the good one is not the one serving orders.**
+
+| | `server/bom-engine.ts` | `/api/orders/simulate` (`shared/api-handlers.ts:373`) |
+|---|---|---|
+| Reached by | `server/routes.ts` only, for the test-orders API | the actual POS order path |
+| Combos | full support — three strategies, proportional allocation across lines | **none** |
+| Tax | `taxRatePct` parameter, default `0` | **hardcoded `const taxRate = 0.08`** (line 451) |
+| Inventory deduction | yes | no |
+
+`grep -rn "bom-engine"` returns exactly one importer: `server/routes.ts:16`. The engine that knows
+how to price a combo is not on the path that prices real orders.
+
+Two things follow:
+
+1. **Combos are already broken in the live path.** An operator creates a combo in the UI; the order
+   path never looks at it and charges full price. That is a present-tense pricing bug, not a gap.
+2. **A third tax rate.** `0.08` in `api-handlers.ts`, `0.0825` in `server/seed-data.ts:297`, and a
+   `0` default in `bom-engine.ts`. A POS whose tax rate is a constant in three files is not
+   deployable in any jurisdiction that did not happen to pick 8%.
+
+Adding discounts to either engine alone would deepen the split. So this feature does the merge
+first, and gets discounts almost for free afterward.
+
+### The seam
+
+`bom-engine.ts` cannot simply move to `shared/` — line 1 is `import { db } from "./db"`, so it is
+bound to Postgres and would break the browser bundle the local server ships in.
+
+But the split is clean: the **pricing math is already pure**. `allocateComboDiscounts`
+(`bom-engine.ts:~295-335`) operates on plain arrays and returns a number; it touches no database.
+Only the *loading* of products, variants, and modifiers is db-coupled.
+
+So the seam is: pure pricing core → `shared/pricing.ts`; db loading stays in `server/bom-engine.ts`
+and calls into it. Both servers then price identically, which is the same shape as every other
+feature in this plan — one implementation in `shared/`, two hosts.
+
+### Tasks
+
+**T1 — Extract the pure pricing core** (~15 min)
+- Create `shared/pricing.ts` and move the pure functions from `server/bom-engine.ts`:
+  `allocateComboDiscounts` and the line-pricing math that builds `originalPriceCents` /
+  `finalPriceCents` / `lineTotalCents`. Take already-loaded products, variants, and modifiers as
+  **arguments** — the new module must import nothing from `server/`.
+- `server/bom-engine.ts` keeps its db queries and calls the extracted functions. Its behaviour must
+  not change at all in this task.
+- Verify the new module imports neither `./db` nor `drizzle-orm`. If it needs either, the seam was
+  cut in the wrong place — stop and re-cut rather than adding a shim.
+- Check: run the existing test-orders flow (`docs/test-orders-api.md`) before and after and assert
+  identical totals. This task is a pure refactor; any number that moves is a bug.
+
+**T2 — Put the real order path on the shared core** (~15 min)
+- Rewrite the `/api/orders/simulate` handler to call `shared/pricing.ts` instead of its own inline
+  loop, passing the combos it now must load.
+- **Combos start working in the live path as a result.** Treat that as the headline of this task,
+  and confirm it explicitly rather than assuming it.
+- Kill the hardcoded `taxRate = 0.08`. Read the rate from a store setting, defaulting to `0` — the
+  same default `bom-engine` already uses. Zero is the honest default: a wrong tax rate silently
+  charges customers incorrectly, while a zero one is obviously unconfigured. Per-location tax rates
+  compose with Feature 3 once locations exist.
+- Check: an order containing a combo now returns the combo price rather than the sum of its parts,
+  and a store with no configured rate returns `taxCents: 0` rather than 8%.
+
+**T3 — The discount entity** (~15 min)
+- Add a `discounts` table and type: `id`, `name`, `scope` (`ORDER` | `ITEM`), `strategy`
+  (`PERCENT` | `FIXED`), `percent`, `valueCents`, `active`, plus the standard `updatedAt` /
+  `deletedAt`. Register it in the `crudEntities` array in `shared/api-handlers.ts` — each entry
+  there is a single line and generates full CRUD, so do not hand-write routes.
+- Apply discounts in `shared/pricing.ts`, **reusing `allocateComboDiscounts`' proportional
+  allocation** rather than writing a second allocator. An order-level discount is the same problem
+  the combo code already solves: spread a reduction across lines proportional to their share.
+- Order of operations must be explicit and documented in the module: combo pricing → item
+  discounts → order discounts → tax. Tax applies to the discounted subtotal. Getting this order
+  wrong is the kind of bug that is invisible in testing and shows up in an audit.
+- Clamp like the combo code does: a discount can never exceed the line or order total, and never
+  produce a negative price. `allocateComboDiscounts` already does
+  `Math.max(0, Math.min(discount, originalTotal))` — match it.
+- Check: 10% off a $10 order is $9.00; a $50 fixed discount on a $10 order is $10.00 off and not
+  a negative total; rounding across three unevenly-priced lines still sums exactly to the order
+  total, with no stray cent.
+
+**T4 — Expose discounts to the agent** (~15 min)
+- Extend the Feature 1 menu blueprint with a `discounts` array so `menu/apply` can create and update
+  them by name, and include them in the Feature 2 T1 blueprint export. The round-trip invariant
+  still has to hold: export → apply is all `noop`.
+- Add `apply_discount` to the Feature 2 MCP tool table so an agent can run "20% off pastries after
+  4pm" as an actual operation.
+- Document the order of operations from T3 in `docs/api-reference.md`. An agent applying discounts
+  needs to know whether tax comes before or after, and so does the operator's accountant.
+
+### Non-goals
+
+Time-windowed promotions (happy hour), customer-specific or coupon-code discounts, loyalty, and
+stacking rules between multiple discounts are all out of scope. **Stacking in particular:** this cut
+applies at most one order-level discount, and that limit should be enforced rather than left
+undefined. Promotions are the natural next feature once a discount entity exists — a promotion is
+largely a discount plus a schedule.
+
+### Known issue surfaced, not fixed here
+
+`server/seed-data.ts:297` hardcodes `TAX_RATE = 0.0825` for generated demo sales. Once T2 makes the
+rate configurable, the seed should use the same setting so demo data matches what the store would
+actually charge. Small, and separate from this feature.
+
+---
+
 ## Feature 4 — Location API tokens: the prerequisite the other three keep deferring
 
 **Status:** planned
