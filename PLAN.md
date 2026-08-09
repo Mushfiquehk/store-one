@@ -36,7 +36,12 @@ Feature 5 (pricing + discounts) — independent, can go first or last
 4. **Feature 2 — Agent Bridge.** Needs Feature 1 (for `apply_menu`) and Feature 3 (or it hands an
    agent write access to every store's menu).
 5. **Feature 5 — Discounts.** Touches only the pricing path; independent of the other four.
-6. **Feature 6 — Day One setup status.** Independent of 3, 4 and 5. Its T4 needs Feature 2's MCP
+6. **Feature 8 — CYO toppings.** Needs Feature 7 T3 (the `storeSettings` door) for its pricing knob,
+   and **conflicts with Feature 5 in `server/bom-engine.ts`** — Feature 5 T1 extracts the pricing half
+   of that file into `shared/pricing.ts`, while Feature 8 edits both the pricing and the deduction
+   halves. Land Feature 5 first and write Feature 8's T1 price change against `shared/pricing.ts`, or
+   land Feature 8 first and let Feature 5's extraction carry it. Do not run them concurrently.
+7. **Feature 6 — Day One setup status.** Independent of 3, 4 and 5. Its T4 needs Feature 2's MCP
    tool table, and it asks Feature 1 T2 for a one-line change (ignore `demo_`-prefixed rows when
    matching by name) — make that change while building Feature 1, not afterwards.
 
@@ -47,13 +52,15 @@ there. Either land features serially, or expect to resolve that file on every me
 
 | File | Features that modify it |
 |---|---|
-| `shared/api-handlers.ts` | 1, 2, 3, 4, 5, 6 — every feature |
-| `server/schema.ts` | 3 (locationId on ten tables), 4 (apiTokens table) |
+| `shared/api-handlers.ts` | 1, 2, 3, 4, 5, 6, 8 — every feature |
+| `server/schema.ts` | 3 (locationId on ten tables), 4 (apiTokens table), 8 (one column on `productModifierGroups`) |
+| `shared/schema.ts` | 8 (placement on `SaleLine`, the count-matrix type) |
 | `server/storage.ts` | 3 (~40 methods) |
-| `server/routes.ts` | 3, 4, 6 (moves the demo-clear handler out), 7 (the adapter stubs) |
-| `server/bom-engine.ts` | 5 |
+| `server/routes.ts` | 3, 4, 6 (moves the demo-clear handler out), 7 (the adapter stubs), 8 (widens the scale-factors route) |
+| `server/bom-engine.ts` | 5, 8 — **the sharpest conflict in this plan**; see the build order |
+| `shared/menu-blueprint.ts` | 1 creates it, 8 extends it |
 | `client/src/pages/onboarding.tsx` | 6 — the only feature touching the client |
-| New files, no conflict | `shared/menu-blueprint.ts` (1), `shared/mcp.ts` (2), `server/auth.ts` (4), `shared/pricing.ts` (5) |
+| New files, no conflict | `shared/mcp.ts` (2), `server/auth.ts` (4), `shared/pricing.ts` (5) |
 
 Features 1 and 5 are the safest pair to run concurrently: both touch `api-handlers.ts`, but in
 different regions (a new route versus the `/api/orders/simulate` body).
@@ -82,6 +89,163 @@ All four tasks complete, every `Check:` passing, `npm run check` (tsc) clean, an
 stated "Definition of done" demonstrably true. A feature with three of four tasks done is not
 partially shipped — it is unshipped, and several of these leave the system in a worse state
 half-built than not started (Feature 3 T3 in particular).
+
+---
+
+## Feature 8 — CYO: half-and-half, and toppings that thin out as you add them
+
+**Status:** planned
+**Vision pillar:** #4 — "flexible enough to allow creating a 1/2 & 1/2 CYO Pizza with unlimited
+toppings. The topping amounts in the recipe will be dynamically calculated based on the total topping
+amounts, using a matrix setup by the operator."
+**Added:** 2026-08-09
+
+### The finding
+
+Most of pillar #4 is already built, and the plan should say so before anyone rebuilds it.
+`server/bom-engine.ts:203` already resolves sub-recipes five levels deep with cycle detection,
+already deducts per-modifier inventory (`bom-engine.ts:270-292`), and already scales BOM quantities
+through a matrix (`bom-engine.ts:257-261`). "Unlimited toppings" needs no work at all — a modifier
+group with `maxSelections` set high already does it.
+
+Two things are genuinely missing, and they are the two the vision statement names explicitly.
+
+**1. There is no such thing as half a pizza.** Grep the repo for `placement`, `half`, `portion`:
+nothing outside a seed-data ingredient called "Whole Milk". `SaleLine.modifiers`
+(`shared/schema.ts:16-21`) carries `modifierId`, `name`, `qty`, `unitPrice` — there is nowhere to
+record that the pepperoni went on the left. A 1/2 & 1/2 pizza is currently orderable only by
+deducting a full portion of both toppings, which overstates COGS on every split order.
+
+**2. Both existing matrices key on size, never on topping count.** `ScaleFactorMatrix`
+(`shared/schema.ts:8`) is `Record<string, number>` looked up by variant id or variant name
+(`bom-engine.ts:259`). `ModifierScaleFactors` (`shared/schema.ts:6`) is
+`modifierId → variantKey → price`. Neither can express the rule the vision actually describes: *one
+topping is 4oz, but four toppings are 2oz each.* Today a 4-topping pizza deducts 4 × 4oz = 16oz of
+topping, which is not what the kitchen puts on it and not what the operator paid for.
+
+### The feature
+
+One new matrix, one new field on a modifier selection.
+
+**Placement.** A modifier selection gains `placement: "WHOLE" | "LEFT" | "RIGHT"` (default `WHOLE`).
+It resolves to a fraction — `WHOLE` = 1, `LEFT`/`RIGHT` = 0.5 — that multiplies both what is deducted
+and (through one operator knob) what is charged. Halves are the whole of 1/2 & 1/2; thirds and
+quadrants are a non-goal.
+
+**The count matrix.** `productModifierGroups` gains `countScaleMatrix`, shaped
+`variantKey → countKey → multiplier`:
+
+```jsonc
+{
+  "Large":  { "1": 1.0, "2": 0.8, "3": 0.65, "5": 0.5 },
+  "*":      { "1": 1.0, "2": 0.85, "4": 0.7 }   // fallback for sizes not listed
+}
+```
+
+Read it as: on a Large, each topping is deducted at 65% of its base BOM quantity once three toppings
+are on the pizza. The lookup takes the **largest declared count key ≤ N**, so `"5"` means "5 or
+more" without anyone inventing a `"5+"` syntax; N below the smallest key clamps to the smallest.
+An absent matrix means multiplier 1 and today's behaviour, unchanged.
+
+It lives on `productModifierGroups` and not on the BOM entry because that is the operator's actual
+mental model — "on a Large pizza, the topping matrix is…" — and it is one lookup for every topping
+in the group rather than one per ingredient.
+
+### Reuse, do not rebuild
+
+- `productModifierGroups` already carries a per-product-per-group jsonb matrix (`server/schema.ts:66`)
+  with a storage method, an interface entry (`shared/api-handlers.ts:44`), a route
+  (`server/routes.ts:502`) and blueprint plumbing (`server/routes.ts:806`). This feature adds a second
+  column beside it and widens that same path — it does not add an endpoint.
+- The deduction loops at `bom-engine.ts:252-292` already thread a multiplier through sub-recipes.
+  Both new factors are multipliers. Nothing about the recursion changes.
+- The pricing knob belongs in `storeSettings`, whose door **Feature 7 T3** opens. Use the key
+  `toppings.halfChargeFactor`. Do not add a table.
+
+### Tasks
+
+**T1 — Placement: half a topping, deducted and charged** (~15 min)
+- Add `placement?: "WHOLE" | "LEFT" | "RIGHT"` to `LineItemInput["modifiers"]`
+  (`server/bom-engine.ts:8-12`) and to `SaleLine["modifiers"]` (`shared/schema.ts:16-21`) so the split
+  survives into sales history and receipts. Absent means `WHOLE`; reject any other string in
+  `validateLineItems` rather than silently treating it as whole — a typo'd placement that quietly
+  bills a full topping is exactly the silent-wrongness Feature 7 exists to stamp out.
+- One helper, `placementFactor(p)` → 1 or 0.5, used in the modifier deduction loop
+  (`bom-engine.ts:270-292`) on both the BOM branch and the `quantityPerUse` fallback branch. Both
+  branches, or a split order deducts correctly only for toppings that happen to have a BOM row.
+- Charging: multiply the modifier price in `getModifierPrice` (`bom-engine.ts:85`) by
+  `placementFactor × toppings.halfChargeFactor`, read from `storeSettings` with **default 1.0** —
+  most shops charge full price for a topping on half. This is the knob, not the policy; the default
+  must not be silently 0.5.
+- Check: the same topping ordered `LEFT` deducts exactly half what it deducts `WHOLE`, and with the
+  default factor costs exactly the same. Assert both in one test.
+
+**T2 — Give the count matrix a column and a door** (~15 min)
+- Add `countScaleMatrix: jsonb("count_scale_matrix")` to `adminProductModifierGroups`
+  (`server/schema.ts:66`, beside `scaleFactors`), and
+  `CountScaleMatrix = Record<string, Record<string, number>>` to `shared/schema.ts:8` alongside the
+  two existing matrix types.
+- Widen the **existing** setter rather than adding one: `setScaleFactorsSchema`
+  (`server/routes.ts:252`) takes an optional `countScaleMatrix`, and
+  `setProductModifierGroupScaleFactors` (`shared/api-handlers.ts:44`) takes it as a second optional
+  argument. Omitted must mean "leave it alone", not "null it" — the two matrices are set from
+  different screens and must not clobber each other.
+- Validate on write: every count key parses as a positive integer, every multiplier is a finite
+  number in `[0, 10]`. This is operator-authored jsonb arriving from a request and it multiplies
+  inventory; a `"abc"` key or a negative multiplier must not reach T3's lookup.
+- Check: set only `countScaleMatrix` on a group that already has `scaleFactors`, read both back, and
+  confirm `scaleFactors` is untouched. Then restart and confirm both persist.
+
+**T3 — Resolve the matrix in the deduction engine** (~15 min)
+- In `computeInventoryDeductions` (`bom-engine.ts:203`), per line and per modifier group, compute the
+  topping load `N = Σ (sel.qty × placementFactor(sel.placement))` over that line's selections in the
+  group — a topping on half contributes 0.5 to the load, which is the entire point of the number.
+- Look up `matrix[variant.id] ?? matrix[variant.name] ?? matrix["*"]`, then within it the value at
+  the largest declared numeric key ≤ N, clamping to the smallest key when N is below it. Missing at
+  any step → multiplier 1.
+- **Where it collides with the size matrix:** a MODIFIER BOM entry may already carry its own
+  `scaleFactorMatrix`, also keyed by variant. `countScaleMatrix` is keyed by variant too, so applying
+  both double-counts size. When the group has a `countScaleMatrix`, it wins and the entry's
+  `scaleFactorMatrix` is skipped for that entry. Put that rule in a comment at the branch — it is the
+  kind of decision that gets silently reversed six months later.
+- Final quantity for a modifier deduction is `base × countMultiplier × placementFactor × sel.qty ×
+  line.qty`. Variant BOM entries (`bom-engine.ts:252-268`) are untouched: dough and sauce do not thin
+  out because you added a topping.
+- Check: with `{"Large": {"1": 1.0, "4": 0.5}}` and a 4oz base, one topping deducts 4oz and four
+  toppings deduct 2oz **each** (8oz total, not 16oz). Then confirm one of those four on `LEFT` makes
+  the load 3.5 and deducts half of whatever the 3.5 tier resolves to.
+
+**T4 — Let an agent declare the matrix** (~15 min)
+- A matrix an operator can only reach through a form is invisible to pillar #2. Add optional
+  `countScaleMatrix` to the product↔modifier-group link in `shared/menu-blueprint.ts`, validated with
+  the same rules as T2 (extract that validator once in T2 and import it here — do not write the
+  bounds check twice), and thread it through apply beside the existing `pmg.scaleFactors` call at
+  `server/routes.ts:806`.
+- Apply must stay idempotent — that invariant is asserted in `shared/menu-blueprint.test.ts:126` and
+  this feature must not be what breaks it.
+- Check: apply a blueprint declaring a CYO pizza with a topping matrix twice; the second apply
+  reports no changes and the matrix is byte-identical.
+
+### Non-goals
+
+**COGS and profitability (pillar #5) are the next feature, not this one.** This feature makes the
+*quantity* deducted correct; nothing here records what that quantity cost. `lastPurchasePrice` exists
+on `adminInventoryItems` (`server/schema.ts:90`) and is currently read by exactly one line of
+`server/routes.ts:1059` — no sale, anywhere, stores a cost. Until a sale snapshots the cost of what
+it consumed, profitability over a period cannot be computed after the fact at any accuracy. Plan that
+next; do not smuggle a `costCents` column into T2.
+
+Also out: thirds and quadrants (`LEFT`/`RIGHT` only), per-topping price tiers by count (the count
+matrix moves quantity, not price), unit-of-measure conversion, and any client UI for building a
+split pizza — this feature makes the model and the engine capable, and the POS screen follows once
+they are.
+
+### Definition of done
+
+A 1/2 & 1/2 pizza with four toppings on one side deducts, from inventory, exactly what a kitchen
+would put on it: each topping at its matrix multiplier for the load on that side, halved for being on
+one side only. The matrix is declarable in a single blueprint call by an agent. With no matrix and no
+placement set, every existing order deducts exactly what it deducted before this feature.
 
 ---
 
