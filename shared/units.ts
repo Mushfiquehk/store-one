@@ -25,6 +25,23 @@ export function costPerStockUnit(
 }
 
 /**
+ * Stocking units received, from a quantity counted in purchase units.
+ *
+ * The other half of the same conversion: an invoice line says "1" and means one gallon,
+ * while stock is counted in ounces. Same guard as above — an unset factor receives the
+ * quantity as typed, which is exactly today's behaviour.
+ */
+export function stockUnitsReceived(
+  quantity: number,
+  unitsPerPurchase: number | null | undefined,
+): number {
+  if (!unitsPerPurchase || unitsPerPurchase <= 0 || !Number.isFinite(unitsPerPurchase)) {
+    return quantity;
+  }
+  return quantity * unitsPerPurchase;
+}
+
+/**
  * Money at stocking-unit scale. A cent is a coarse unit here — milk at $4.50 a gallon is
  * 3.5c an ounce — so this keeps up to four decimal places rather than rounding a real
  * cost to $0.04 and losing the difference between 3.5c and 4c across ten thousand ounces.

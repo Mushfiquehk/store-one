@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { costPerStockUnit } from "@shared/units";
+import { costPerStockUnit, stockUnitsReceived } from "@shared/units";
 import type {
   Product,
   Variant,
@@ -444,7 +444,8 @@ export const storage = {
           await db.inventoryItems.update(existingItem.id, {
             // The invoice quotes a price per purchase unit; lastPurchasePrice is per stocking unit.
             lastPurchasePrice: costPerStockUnit(lineItem.unitPriceCents, existingItem.unitsPerPurchase),
-            currentQuantity: existingItem.currentQuantity + lineItem.quantity,
+            // One gallon received is 128 oz on hand, not 1.
+            currentQuantity: existingItem.currentQuantity + stockUnitsReceived(lineItem.quantity, existingItem.unitsPerPurchase),
             updatedAt: now,
           });
         } else {
@@ -491,7 +492,8 @@ export const storage = {
         await db.inventoryItems.update(existingItem.id, {
           // The invoice quotes a price per purchase unit; lastPurchasePrice is per stocking unit.
           lastPurchasePrice: costPerStockUnit(lineItem.unitPriceCents, existingItem.unitsPerPurchase),
-          currentQuantity: existingItem.currentQuantity + lineItem.quantity,
+          // One gallon received is 128 oz on hand, not 1.
+          currentQuantity: existingItem.currentQuantity + stockUnitsReceived(lineItem.quantity, existingItem.unitsPerPurchase),
           updatedAt: now,
         });
       } else {

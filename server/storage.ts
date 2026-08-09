@@ -931,7 +931,9 @@ export const adminStorage: IAdminStorage = {
         await db.update(adminInventoryItems).set({
           // The invoice quotes a price per purchase unit; lastPurchasePrice is per stocking unit.
           lastPurchasePrice: costPerStockUnit(lineItem.unitPriceCents, existing[0].unitsPerPurchase),
-          currentQuantity: existing[0].currentQuantity + lineItem.quantity,
+          // The line is quoted in purchase units, and stock is counted in stocking units:
+          // one gallon received is 128 oz on hand, not 1.
+          currentQuantity: existing[0].currentQuantity + stockUnitsReceived(lineItem.quantity, existing[0].unitsPerPurchase),
           updatedAt: now,
         }).where(eq(adminInventoryItems.id, lineItem.inventoryItemId));
       }
