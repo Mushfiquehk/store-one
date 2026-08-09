@@ -429,3 +429,14 @@ class PosDatabase extends Dexie {
 }
 
 export const db = new PosDatabase();
+
+/**
+ * Every table backup and restore operate on.
+ *
+ * Derived from the Dexie schema rather than written out by hand. The bug this
+ * replaces was three hand-maintained copies of this list that had drifted to ten
+ * entries while the schema had sixteen — combos, product groups and invoices were
+ * silently missing from every backup. A derived list cannot drift: add a table to
+ * the schema and it is backed up.
+ */
+export const BACKUP_TABLES: string[] = db.tables.map(t => t.name);

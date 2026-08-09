@@ -212,7 +212,17 @@ anything the system cannot cost honestly labelled as unknown rather than flatter
 
 ## Feature 9 — A backup that contains everything, and a restore that cannot wipe you
 
-**Status:** planned
+**Status:** done — T1–T4 complete. `shared/backup.ts` (pure restore planning, tested),
+`client/src/lib/backup.ts` (snapshot + auto-backup timer), rewritten backup/restore in
+`client/src/pages/settings.tsx`.
+
+One deviation from T1 as written: rather than a hand-written `BACKUP_TABLES` array plus an assertion
+that it covers the schema, the list is **derived** — `db.tables.map(t => t.name)`. The bug being
+fixed was three hand-maintained copies of one list drifting apart; a fourth copy with a test guarding
+it is still a copy. A derived list cannot drift, so a table added to the schema is backed up with no
+further action and there is nothing for an assertion to catch. Verified that Dexie populates
+`db.tables` before `open()` and accumulates it across `version()` calls, which is what makes this
+safe at module scope.
 **Vision pillar:** #1 — "the best foundation". This is the one that loses a business its records.
 **Added:** 2026-08-09
 
@@ -313,9 +323,10 @@ One list, derived once, used by both paths — then make restore non-destructive
 
 ### Correction to Feature 8
 
-Feature 8's non-goals state that no restore path is exercised anywhere. That is wrong — restore
-exists in `settings.tsx` and does write the snapshot back into Dexie. The real problems are the
-three above, not the absence of a restore.
+~~Feature 8's non-goals state that no restore path is exercised anywhere.~~ **Resolved** — Feature 8's
+non-goals now read "Backup and restore are handled by Feature 9", which is correct. Restore does
+exist in `settings.tsx` and does write snapshots back into Dexie; the real problems were the three
+above, not the absence of a restore.
 
 ### Non-goals
 
