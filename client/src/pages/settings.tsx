@@ -1,4 +1,5 @@
 import { motion } from "framer-motion";
+import { formatDistanceToNow } from "date-fns";
 import AppShell from "@/components/app-shell";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -16,7 +17,16 @@ import {
 } from "lucide-react";
 import InteractiveSyncUI from "@/components/interactive-sync";
 import { useToast } from "@/hooks/use-toast";
-import { db } from "@/lib/db";
+import { db, BACKUP_TABLES } from "@/lib/db";
+import {
+  runBackup, getLastBackupAt, getAutoBackupEnabled, setAutoBackupEnabled,
+  getAutoBackupInterval, setAutoBackupIntervalMinutes, startAutoBackup, stopAutoBackup,
+} from "@/lib/backup";
+import { planRestore, describeRestore, type RestorePlan } from "@shared/backup";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   syncCategory, syncAll, getLastSyncedAt, getAutoSyncEnabled,
   setAutoSyncEnabled, getAutoSyncInterval, setAutoSyncIntervalMinutes,
@@ -31,6 +41,13 @@ interface CategoryState {
   message: string;
   lastSynced: number;
 }
+
+type PendingRestore = {
+  snapshot: unknown;
+  createdAt: number;
+  plan: RestorePlan;
+  counts: Record<string, number>;
+};
 
 const CATEGORY_CONFIG: { key: SyncCategory; label: string; icon: typeof Package; description: string }[] = [
   { key: "menu", label: "Menu Items", icon: Package, description: "Products, variants, modifier groups, and modifiers" },
@@ -74,6 +91,10 @@ export default function SettingsPage() {
   const [backupStatus, setBackupStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [restoreStatus, setRestoreStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [statusMessage, setStatusMessage] = useState("");
+  const [pendingRestore, setPendingRestore] = useState<PendingRestore | null>(null);
+  const [lastBackupAt, setLastBackupAt] = useState(getLastBackupAt());
+  const [autoBackup, setAutoBackup] = useState(getAutoBackupEnabled());
+  const [backupInterval, setBackupInterval] = useState(getAutoBackupInterval());
 
   const [hours, setHours] = useState<HoursOfOperation>(DEFAULT_HOURS);
   const [hoursSaving, setHoursSaving] = useState(false);
@@ -243,6 +264,15 @@ export default function SettingsPage() {
     return () => stopAutoSync();
   }, [autoSync, clientCode]);
 
+  useEffect(() => {
+    if (autoBackup && clientCode.trim()) {
+      startAutoBackup(clientCode.trim(), uploaded => {
+        if (uploaded) setLastBackupAt(getLastBackupAt());
+      });
+    }
+    return () => stopAutoBackup();
+  }, [autoBackup, backupInterval, clientCode]);
+
   const handleBackup = async () => {
     if (!clientCode.trim()) {
       setBackupStatus("error");
@@ -254,33 +284,9 @@ export default function SettingsPage() {
     setStatusMessage("Collecting local data...");
 
     try {
-      const snapshot = {
-        products: await db.products.toArray(),
-        variants: await db.variants.toArray(),
-        modifierGroups: await db.modifierGroups.toArray(),
-        productModifierGroups: await db.productModifierGroups.toArray(),
-        modifiers: await db.modifiers.toArray(),
-        inventoryItems: await db.inventoryItems.toArray(),
-        billOfMaterials: await db.billOfMaterials.toArray(),
-        employees: await db.employees.toArray(),
-        timePunches: await db.timePunches.toArray(),
-        sales: await db.sales.toArray(),
-      };
-
       setStatusMessage("Uploading backup...");
-
-      const res = await fetch("/api/backup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ clientCode: clientCode.trim(), snapshot }),
-      });
-
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || "Backup failed");
-      }
-
-      const result = await res.json();
+      const result = await runBackup(clientCode.trim());
+      setLastBackupAt(result.createdAt);
       setBackupStatus("success");
       setStatusMessage(`Backup created at ${new Date(result.createdAt).toLocaleString()}`);
     } catch (err) {
@@ -307,40 +313,48 @@ export default function SettingsPage() {
         throw new Error(err.error || "Restore failed");
       }
 
-      const { snapshot } = await res.json();
-      setStatusMessage("Restoring data to local database...");
+      const { snapshot, createdAt } = await res.json();
 
-      await db.transaction("rw",
-        [db.products, db.variants, db.modifierGroups, db.productModifierGroups,
-         db.modifiers, db.inventoryItems, db.billOfMaterials, db.employees,
-         db.timePunches, db.sales],
-        async () => {
-          await db.products.clear();
-          await db.variants.clear();
-          await db.modifierGroups.clear();
-          await db.productModifierGroups.clear();
-          await db.modifiers.clear();
-          await db.inventoryItems.clear();
-          await db.billOfMaterials.clear();
-          await db.employees.clear();
-          await db.timePunches.clear();
-          await db.sales.clear();
+      // Decide what this snapshot may destroy before opening a transaction.
+      const plan = planRestore(snapshot, BACKUP_TABLES);
+      if (plan.errors.length) throw new Error(plan.errors.join(" "));
 
-          if (snapshot.products?.length) await db.products.bulkPut(snapshot.products);
-          if (snapshot.variants?.length) await db.variants.bulkPut(snapshot.variants);
-          if (snapshot.modifierGroups?.length) await db.modifierGroups.bulkPut(snapshot.modifierGroups);
-          if (snapshot.productModifierGroups?.length) await db.productModifierGroups.bulkPut(snapshot.productModifierGroups);
-          if (snapshot.modifiers?.length) await db.modifiers.bulkPut(snapshot.modifiers);
-          if (snapshot.inventoryItems?.length) await db.inventoryItems.bulkPut(snapshot.inventoryItems);
-          if (snapshot.billOfMaterials?.length) await db.billOfMaterials.bulkPut(snapshot.billOfMaterials);
-          if (snapshot.employees?.length) await db.employees.bulkPut(snapshot.employees);
-          if (snapshot.timePunches?.length) await db.timePunches.bulkPut(snapshot.timePunches);
-          if (snapshot.sales?.length) await db.sales.bulkPut(snapshot.sales);
-        }
+      const counts = Object.fromEntries(
+        await Promise.all(plan.restore.map(async t => [t, await db.table(t).count()] as const)),
       );
 
+      setRestoreStatus("idle");
+      setStatusMessage("");
+      setPendingRestore({ snapshot, createdAt, plan, counts });
+    } catch (err) {
+      setRestoreStatus("error");
+      setStatusMessage(err instanceof Error ? err.message : "Restore failed");
+    }
+  };
+
+  const confirmRestore = async () => {
+    if (!pendingRestore) return;
+    const { snapshot, plan } = pendingRestore;
+    setPendingRestore(null);
+    setRestoreStatus("loading");
+    setStatusMessage("Restoring data to local database...");
+
+    try {
+      // Only tables the snapshot carries a key for are in plan.restore, so a partial
+      // snapshot leaves everything else untouched instead of clearing it.
+      await db.transaction("rw", plan.restore.map(t => db.table(t)), async () => {
+        for (const name of plan.restore) {
+          const rows = (snapshot as Record<string, unknown[]>)[name];
+          await db.table(name).clear();
+          if (rows.length) await db.table(name).bulkPut(rows);
+        }
+      });
+
       setRestoreStatus("success");
-      setStatusMessage("Data restored successfully! Reload the page to see updated data.");
+      setStatusMessage("Data restored. Reloading…");
+      // A reload is required for correctness after replacing the database, so do it
+      // rather than asking — stale state after a destructive operation is a trap.
+      setTimeout(() => window.location.reload(), 800);
     } catch (err) {
       setRestoreStatus("error");
       setStatusMessage(err instanceof Error ? err.message : "Restore failed");
@@ -353,6 +367,12 @@ export default function SettingsPage() {
     if (status === "error") return <XCircle className="h-4 w-4 text-destructive" />;
     return null;
   };
+
+  // A backup that last ran three weeks ago should read as wrong at a glance, which a
+  // bare timestamp does not. date-fns is already a dependency.
+  const lastBackupLabel = lastBackupAt
+    ? `${formatDistanceToNow(lastBackupAt, { addSuffix: true })} (${new Date(lastBackupAt).toLocaleString()})`
+    : "Never";
 
   const formatLastSynced = (timestamp: number) => {
     if (!timestamp) return "Never";
@@ -737,7 +757,9 @@ export default function SettingsPage() {
                 </div>
                 <div>
                   <CardTitle className="font-serif">Full Backup & Restore</CardTitle>
-                  <CardDescription>Full snapshot backup of all local data, or restore from a previous backup.</CardDescription>
+                  <CardDescription>
+                    Snapshot of all {BACKUP_TABLES.length} local tables, or restore from a previous backup.
+                  </CardDescription>
                 </div>
               </div>
             </CardHeader>
@@ -772,6 +794,52 @@ export default function SettingsPage() {
                 </Button>
               </div>
 
+              <div className="text-sm text-muted-foreground" data-testid="text-last-backup">
+                Last backup: {lastBackupLabel}
+              </div>
+
+              <Separator />
+
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label className="text-base flex items-center gap-2">
+                      <Timer className="h-4 w-4" />
+                      Auto Backup
+                    </Label>
+                    <p className="text-sm text-muted-foreground">
+                      Back up on a schedule, skipping the upload when nothing has changed.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={autoBackup}
+                    onCheckedChange={(enabled) => { setAutoBackup(enabled); setAutoBackupEnabled(enabled); }}
+                    data-testid="switch-auto-backup"
+                  />
+                </div>
+
+                {autoBackup && (
+                  <div className="flex items-center gap-3 pl-6">
+                    <Label htmlFor="backup-interval" className="text-sm whitespace-nowrap">Every</Label>
+                    <Input
+                      id="backup-interval"
+                      type="number"
+                      min={1}
+                      max={1440}
+                      value={backupInterval}
+                      onChange={(e) => {
+                        const clamped = Math.max(1, Math.min(1440, Number(e.target.value)));
+                        setBackupInterval(clamped);
+                        setAutoBackupIntervalMinutes(clamped);
+                      }}
+                      className="w-20 rounded-xl"
+                      data-testid="input-backup-interval"
+                    />
+                    <span className="text-sm text-muted-foreground">minutes</span>
+                  </div>
+                )}
+              </div>
+
               {statusMessage && (
                 <div className="flex items-start gap-2 p-3 rounded-xl bg-muted/50 text-sm" data-testid="text-backup-status">
                   {statusIcon(backupStatus !== "idle" ? backupStatus : restoreStatus)}
@@ -780,6 +848,35 @@ export default function SettingsPage() {
               )}
             </CardContent>
           </Card>
+
+          <AlertDialog open={pendingRestore !== null} onOpenChange={open => { if (!open) setPendingRestore(null); }}>
+            <AlertDialogContent data-testid="dialog-restore-confirm">
+              <AlertDialogHeader>
+                <AlertDialogTitle>Replace this device's data?</AlertDialogTitle>
+                <AlertDialogDescription asChild>
+                  <div className="space-y-2">
+                    <p>
+                      Restoring the backup for <strong>{clientCode.trim()}</strong>, taken{" "}
+                      {pendingRestore ? new Date(pendingRestore.createdAt).toLocaleString() : ""}.
+                    </p>
+                    <p>{pendingRestore ? describeRestore(pendingRestore.plan, pendingRestore.counts) : ""}</p>
+                    {pendingRestore && pendingRestore.plan.untouched.length > 0 && (
+                      <p className="text-muted-foreground">
+                        Not in this backup, and left untouched: {pendingRestore.plan.untouched.join(", ")}.
+                      </p>
+                    )}
+                    <p>This cannot be undone.</p>
+                  </div>
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel data-testid="button-restore-cancel">Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={confirmRestore} data-testid="button-restore-confirm">
+                  Replace my data
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </AppShell>
     </motion.div>

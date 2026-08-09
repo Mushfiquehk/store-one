@@ -563,6 +563,13 @@ router.get("/api/admin/all-data", async (_req: Request, res: Response) => {
   try { res.json({ data: await adminStorage.getAllAdminData() }); } catch (err) { res.status(500).json({ error: "Failed to get all admin data" }); }
 });
 
+// Employees have no table and no storage method server-side — unlike sales, these stubs shadow
+// nothing. See Feature 7 T4 in PLAN.md: keeping the 501 is a legitimate outcome.
+const EMPLOYEES_NOT_ON_SERVER =
+  "Employees are not available on the Express server. Nothing was saved. There is no employees " +
+  "table server-side — employees are managed by the local Capacitor server (http://127.0.0.1:8080) " +
+  "in IndexedDB.";
+
 const serverAdminAdapter: ApiAdminStorage = {
   listProducts: () => adminStorage.listProducts(),
   getProduct: (id) => adminStorage.getProduct(id),
@@ -619,17 +626,30 @@ const serverAdminAdapter: ApiAdminStorage = {
 
   createInvoiceWithLineItems: (inv, lis) => adminStorage.createInvoiceWithLineItems(inv, lis),
 
-  async listSales() { return []; },
-  async getSale() { return null; },
-  async createSale(d) { return d; },
-  async updateSale() { return null; },
+  listSales: () => adminStorage.listSales(),
+  getSale: (id) => adminStorage.getSale(id),
+  createSale: (d) => adminStorage.createSale(d),
+  updateSale: (id, d) => adminStorage.updateSale(id, d),
 
-  async listEmployees() { return []; },
-  async getEmployee() { return null; },
-  async createEmployee(d) { return d; },
-  async updateEmployee() { return null; },
+  // Decided (Feature 7 T4): employees and time punches stay client-side. There is no
+  // employees table in server/schema.ts and never was — unlike sales, these stubs were
+  // not shadowing a working implementation, they were inventing success for something
+  // that was never built. The client already manages employees in Dexie, and adding a
+  // half-server-side employee model (with PIN hashing to get right) to satisfy a stub is
+  // how the sales bug happened. The routes below answer 501.
+  //
+  // If this is revisited: PINs must not be stored in plaintext, and the scrypt hashing
+  // from Feature 4 T1 is the scheme to reuse rather than inventing a second one.
+  async listEmployees() { throw new Error(EMPLOYEES_NOT_ON_SERVER); },
+  async getEmployee() { throw new Error(EMPLOYEES_NOT_ON_SERVER); },
+  async createEmployee() { throw new Error(EMPLOYEES_NOT_ON_SERVER); },
+  async updateEmployee() { throw new Error(EMPLOYEES_NOT_ON_SERVER); },
 
-  async listTimePunches() { return []; },
+  async listTimePunches() { throw new Error(EMPLOYEES_NOT_ON_SERVER); },
+
+  listSettings: () => settingsStorage.list(),
+  getSetting: (key) => settingsStorage.get(key),
+  setSetting: (key, value) => settingsStorage.set(key, value),
 
   getAllData: () => adminStorage.getAllAdminData(),
 };
@@ -648,19 +668,31 @@ async function handleViaSharedHandlers(req: Request, res: Response): Promise<boo
   return true;
 }
 
+// 501 rather than a fake 200: these previously reached adapter stubs that returned [] for reads
+// and echoed the payload back for writes, so a discarded record was indistinguishable from a
+// saved one.
+const notImplemented = (message: string) => async (_req: Request, res: Response) => {
+  res.status(501).json({ error: message });
+};
+
+// Sales persist for real now — the adapter delegates to adminStorage, which writes adminSales.
 router.get("/api/admin/sales", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
 router.get("/api/admin/sales/:id", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
 router.post("/api/admin/sales", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
 router.put("/api/admin/sales/:id", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
 
-router.get("/api/admin/employees", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
-router.get("/api/admin/employees/:id", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
-router.post("/api/admin/employees", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
-router.put("/api/admin/employees/:id", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
+router.get("/api/admin/employees", notImplemented(EMPLOYEES_NOT_ON_SERVER));
+router.get("/api/admin/employees/:id", notImplemented(EMPLOYEES_NOT_ON_SERVER));
+router.post("/api/admin/employees", notImplemented(EMPLOYEES_NOT_ON_SERVER));
+router.put("/api/admin/employees/:id", notImplemented(EMPLOYEES_NOT_ON_SERVER));
 
-router.get("/api/admin/time-punches", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
+router.get("/api/admin/time-punches", notImplemented(EMPLOYEES_NOT_ON_SERVER));
 
 router.get("/api/local/status", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
+
+// The local server forwards every path to the shared handlers; Express registers them
+// one by one, so a shared route is unreachable here until it is listed.
+router.post("/api/admin/menu/apply", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
 
 router.post("/api/orders/simulate", async (req: Request, res: Response) => {
   res.status(501).json({
@@ -1144,34 +1176,9 @@ router.post("/api/schedule/copy-week", async (req: Request, res: Response) => {
   }
 });
 
-router.get("/api/settings", async (_req: Request, res: Response) => {
-  try {
-    const all = await settingsStorage.getAll();
-    res.json({ settings: all });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to load settings" });
-  }
-});
-
-router.get("/api/settings/:key", async (req: Request, res: Response) => {
-  try {
-    const value = await settingsStorage.get(req.params.key);
-    res.json({ value });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to load setting" });
-  }
-});
-
-router.put("/api/settings/:key", async (req: Request, res: Response) => {
-  try {
-    const { value } = req.body;
-    if (value === undefined) return res.status(400).json({ error: "value is required" });
-    await settingsStorage.set(req.params.key, value);
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to save setting" });
-  }
-});
+router.get("/api/settings", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
+router.get("/api/settings/:key", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
+router.put("/api/settings/:key", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
 
 router.post("/api/schedule/publish", async (req: Request, res: Response) => {
   try {
@@ -1180,7 +1187,7 @@ router.post("/api/schedule/publish", async (req: Request, res: Response) => {
       return res.status(400).json({ error: "weekStart, shifts, and employees are required" });
     }
 
-    const emailConfig = await settingsStorage.get("emailConfig") as {
+    const emailConfig = (await settingsStorage.get("emailConfig"))?.value as {
       provider: string; host: string; port: number;
       secure: boolean; username: string; password: string; senderEmail: string; senderName: string;
     } | null;

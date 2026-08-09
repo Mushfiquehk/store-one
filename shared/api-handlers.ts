@@ -1,3 +1,6 @@
+import { parseMenuBlueprint, planMenuApply, type ExistingMenu, type FieldDiff, type MenuPlan } from "./menu-blueprint";
+import type { Modifier, ModifierGroup, Product, ProductModifierGroup, Variant } from "./schema";
+
 export interface ApiRequest {
   method: string;
   path: string;
@@ -79,8 +82,22 @@ export interface ApiAdminStorage {
 
   listTimePunches(): Promise<unknown[]>;
 
+  listSettings(): Promise<StoreSetting[]>;
+  getSetting(key: string): Promise<StoreSetting | null>;
+  setSetting(key: string, value: unknown): Promise<StoreSetting>;
+
   getAllData(): Promise<Record<string, unknown[]>>;
 }
+
+export interface StoreSetting {
+  key: string;
+  value: unknown;
+  updatedAt: number;
+}
+
+// Settings keys become a primary key straight off a request path. Mixed case is
+// allowed because the keys already in use are camelCase (hoursOfOperation, emailConfig).
+const SETTING_KEY_RE = /^[A-Za-z0-9._-]{1,64}$/;
 
 interface CrudConfig {
   entity: string;
@@ -182,6 +199,81 @@ function buildCrudHandlers(cfg: CrudConfig): Array<{ method: string; pattern: st
 
 function generateOrderId(): string {
   return `order_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** Same shape the client components use, so blueprint-created rows are indistinguishable. */
+function uid(prefix: string): string {
+  return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`;
+}
+
+/** `{ basePrice: { from, to } }` -> `{ basePrice: to }`, ready for an update call. */
+function updatePayload(fields: FieldDiff | undefined): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(fields ?? {}).map(([field, { to }]) => [field, to]));
+}
+
+/**
+ * Execute a plan. Creates mint ids here rather than in the planner, which is pure — so
+ * this walks the changes in planner order (groups, modifiers, products, variants, links)
+ * and resolves each parent by name from what it has already created or found.
+ */
+async function applyMenuPlan(store: ApiAdminStorage, plan: MenuPlan, existing: ExistingMenu): Promise<void> {
+  const key = (name: string) => name.trim().toLowerCase();
+  const groupIds = new Map(existing.modifierGroups.filter(g => g.deletedAt == null).map(g => [key(g.name), g.id]));
+  const productIds = new Map(existing.products.filter(p => p.deletedAt == null).map(p => [key(p.name), p.id]));
+
+  for (const change of plan.changes) {
+    if (change.op === "noop") continue;
+    const values = change.values ?? {};
+
+    switch (change.entity) {
+      case "modifierGroup": {
+        if (change.op === "create") {
+          const id = uid("mg");
+          await store.createModifierGroup({ id, name: change.name, ...values });
+          groupIds.set(key(change.name), id);
+        } else {
+          await store.updateModifierGroup(change.id!, updatePayload(change.fields));
+        }
+        break;
+      }
+      case "modifier": {
+        if (change.op === "create") {
+          const modifierGroupId = groupIds.get(key(change.parent!));
+          if (!modifierGroupId) continue;
+          await store.createModifier({ id: uid("mod"), modifierGroupId, name: change.name, ...values });
+        } else {
+          await store.updateModifier(change.id!, updatePayload(change.fields));
+        }
+        break;
+      }
+      case "product": {
+        if (change.op === "create") {
+          const id = uid("prod");
+          await store.createProduct({ id, name: change.name, ...values });
+          productIds.set(key(change.name), id);
+        } else {
+          await store.updateProduct(change.id!, updatePayload(change.fields));
+        }
+        break;
+      }
+      case "variant": {
+        if (change.op === "create") {
+          const productId = productIds.get(key(change.parent!));
+          if (!productId) continue;
+          await store.createVariant({ id: uid("var"), productId, name: change.name, ...values });
+        } else {
+          await store.updateVariant(change.id!, updatePayload(change.fields));
+        }
+        break;
+      }
+      case "productModifierGroups": {
+        const productId = productIds.get(key(change.name));
+        const ids = (change.groupNames ?? []).map(name => groupIds.get(key(name))).filter((id): id is string => id != null);
+        if (productId && ids.length > 0) await store.setProductModifierGroups(productId, ids);
+        break;
+      }
+    }
+  }
 }
 
 export function createApiHandlers(store: ApiAdminStorage) {
@@ -365,6 +457,94 @@ export function createApiHandlers(store: ApiAdminStorage) {
     handler: async () => {
       try { return { status: 200, data: await store.listTimePunches() }; }
       catch { return { status: 500, data: { error: "Failed to list time punches" } }; }
+    },
+  });
+
+  // Settings were Express-only; they live here so the local server serves them too.
+  // Response shapes are the ones client/src/pages/settings.tsx already consumes.
+  routes.push({
+    method: "GET",
+    pattern: "/api/settings",
+    handler: async () => {
+      try {
+        const rows = await store.listSettings();
+        return { status: 200, data: { settings: Object.fromEntries(rows.map(r => [r.key, r.value])) } };
+      } catch { return { status: 500, data: { error: "Failed to load settings" } }; }
+    },
+  });
+
+  routes.push({
+    method: "GET",
+    pattern: "/api/settings/:key",
+    handler: async (req) => {
+      if (!SETTING_KEY_RE.test(req.params.key)) {
+        return { status: 400, data: { error: "Invalid setting key" } };
+      }
+      try {
+        const r = await store.getSetting(req.params.key);
+        // A missing setting is null rather than a 404 — callers read `.value` and
+        // fall back to a default, which is the existing behaviour.
+        return { status: 200, data: { value: r ? r.value : null, updatedAt: r ? r.updatedAt : null } };
+      } catch { return { status: 500, data: { error: "Failed to load setting" } }; }
+    },
+  });
+
+  routes.push({
+    method: "PUT",
+    pattern: "/api/settings/:key",
+    handler: async (req) => {
+      if (!SETTING_KEY_RE.test(req.params.key)) {
+        return { status: 400, data: { error: "Invalid setting key" } };
+      }
+      const body = req.body as Record<string, unknown> | undefined;
+      if (!body || body.value === undefined) {
+        return { status: 400, data: { error: "value is required" } };
+      }
+      try {
+        const r = await store.setSetting(req.params.key, body.value);
+        return { status: 200, data: { success: true, updatedAt: r.updatedAt } };
+      } catch { return { status: 500, data: { error: "Failed to save setting" } }; }
+    },
+  });
+
+  routes.push({
+    method: "POST",
+    pattern: "/api/admin/menu/apply",
+    handler: async (req) => {
+      try {
+        // ApiResponse.data is the HTTP body, so the documented { data: ... } envelope is
+        // written out explicitly here — see docs/api-reference.md > Conventions.
+        const parseResult = parseMenuBlueprint(req.body);
+        if (!parseResult.ok) {
+          return { status: 400, data: { error: "Invalid blueprint", details: parseResult.errors } };
+        }
+        const blueprint = parseResult.blueprint;
+
+        const existing: ExistingMenu = {
+          products: (await store.listProducts()) as Product[],
+          variants: (await store.listVariants()) as Variant[],
+          modifierGroups: (await store.listModifierGroups()) as ModifierGroup[],
+          modifiers: (await store.listModifiers()) as Modifier[],
+          productModifierGroups: (await store.listProductModifierGroups()) as ProductModifierGroup[],
+        };
+
+        const plan = planMenuApply(blueprint, existing);
+
+        // Validate everything before writing anything: one round trip, all the errors.
+        if (plan.errors.length > 0) {
+          return { status: 400, data: { error: "Invalid blueprint", details: plan.errors } };
+        }
+
+        // Same plan either way — the preview cannot drift from what applying does.
+        if (blueprint.dryRun) {
+          return { status: 200, data: { data: { applied: false, changes: plan.changes, errors: [] } } };
+        }
+
+        await applyMenuPlan(store, plan, existing);
+        return { status: 200, data: { data: { applied: true, changes: plan.changes, errors: [] } } };
+      } catch {
+        return { status: 500, data: { error: "Failed to apply menu blueprint" } };
+      }
     },
   });
 

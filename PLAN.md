@@ -84,10 +84,15 @@ there. Either land features serially, or expect to resolve that file on every me
 | File | Features that modify it |
 |---|---|
 | `shared/api-handlers.ts` | 1, 2, 3, 4, 5, 6 — every feature |
-| `server/schema.ts` | 3 (locationId on ten tables), 4 (apiTokens table) |
-| `server/storage.ts` | 3 (~40 methods) |
+| `server/schema.ts` | 3 (locationId on ten tables), 4 (apiTokens table), 11 (two columns on `inventoryItems`) |
+| `server/storage.ts` | 3 (~40 methods), 11 (the invoice-receive path) |
 | `server/routes.ts` | 3, 4, 6 (moves the demo-clear handler out), 7 (the adapter stubs) |
 | `server/bom-engine.ts` | 5 |
+| `client/src/lib/local-storage.ts` | 11 (two copies of the same receive path) |
+| `client/src/components/product-wizard.tsx` | 11 (deletes the duplicated cost arithmetic) |
+| `shared/pricing.ts` | 5 creates it, 10 and 11 both add costing functions — **11 first** |
+| `client/src/pages/reports.tsx` | 10 (adds a margins table), 12 (replaces two fake tabs) — **12 first** |
+| `shared/api-handlers.ts` (reports) | 12 moves the two report handler bodies into `shared/reports.ts` |
 | `client/src/pages/onboarding.tsx` | 6 |
 | `client/src/lib/sync.ts` | 8 |
 | `server/storage.ts` (sync engine) | 8 — a different region from Feature 3's ~40 CRUD methods |
@@ -367,7 +372,13 @@ Features 1–9 are foundation, plumbing, and bug fixes. Necessary, but none of t
 *grow*, which is what VISION.md actually asks for. This is the gap.
 
 **Nothing in the codebase computes cost, margin, or profit.** A grep for those words across
-`server/`, `shared/`, and the reports page returns only CSS `margin` properties. The three report
+`server/`, `shared/`, and the reports page returns only CSS `margin` properties.
+
+> **Correction (Feature 11).** True for `server/` and `shared/`, but not for the client:
+> `renderProfitability()` at `client/src/components/product-wizard.tsx:1601` already computes
+> `quantity × lastPurchasePrice` per BOM line and renders a margin percentage. T1 below must reuse
+> or replace it rather than become a second implementation — and it is currently wrong by the unit
+> bug Feature 11 fixes. **Land Feature 11 first.** The three report
 endpoints — `sales-summary`, `product-mix`, `inventory-status` (`shared/api-handlers.ts:504, 534,
 571`) — are all volume and revenue. An operator can see that they sold 200 croissants and cannot see
 whether they made money on any of them.
@@ -436,6 +447,8 @@ margin report that quietly treats missing data as free is worse than no report.
   zero. Negative margins are the entire point of the report.
 
 **T3 — Show it** (~15 min)
+- **Land Feature 12 first.** Two of the three tabs this table would sit beside are `Math.random()`
+  today, and T2's product-mix join reads volumes that the page fabricates.
 - Add a margins table to `client/src/pages/reports.tsx` alongside the existing reports, worst first,
   with unknown-cost rows visibly flagged rather than sorted as if their margin were 100%.
 - Give unknown-cost rows a direct link to the inventory item that needs a price. The report's job is
@@ -478,7 +491,17 @@ anything the system cannot cost honestly labelled as unknown rather than flatter
 
 ## Feature 9 — A backup that contains everything, and a restore that cannot wipe you
 
-**Status:** planned
+**Status:** done — T1–T4 complete. `shared/backup.ts` (pure restore planning, tested),
+`client/src/lib/backup.ts` (snapshot + auto-backup timer), rewritten backup/restore in
+`client/src/pages/settings.tsx`.
+
+One deviation from T1 as written: rather than a hand-written `BACKUP_TABLES` array plus an assertion
+that it covers the schema, the list is **derived** — `db.tables.map(t => t.name)`. The bug being
+fixed was three hand-maintained copies of one list drifting apart; a fourth copy with a test guarding
+it is still a copy. A derived list cannot drift, so a table added to the schema is backed up with no
+further action and there is nothing for an assertion to catch. Verified that Dexie populates
+`db.tables` before `open()` and accumulates it across `version()` calls, which is what makes this
+safe at module scope.
 **Vision pillar:** #1 — "the best foundation". This is the one that loses a business its records.
 **Added:** 2026-08-09
 
@@ -579,9 +602,10 @@ One list, derived once, used by both paths — then make restore non-destructive
 
 ### Correction to Feature 8
 
-Feature 8's non-goals state that no restore path is exercised anywhere. That is wrong — restore
-exists in `settings.tsx` and does write the snapshot back into Dexie. The real problems are the
-three above, not the absence of a restore.
+~~Feature 8's non-goals state that no restore path is exercised anywhere.~~ **Resolved** — Feature 8's
+non-goals now read "Backup and restore are handled by Feature 9", which is correct. Restore does
+exist in `settings.tsx` and does write snapshots back into Dexie; the real problems were the three
+above, not the absence of a restore.
 
 ### Non-goals
 
@@ -717,7 +741,24 @@ function with a stated rule, and sales have exactly one writer.
 
 ## Feature 7 — Stop the server accepting data it silently throws away
 
-**Status:** planned
+**Status:** done — T1–T4 complete. Sales persist on the Express server and survive a restart;
+store settings are reachable from both servers; employees and time punches answer 501 rather than
+faking success. Four things differed from the plan as written, all verified against a live Postgres:
+
+- **`admin_sales` was never created.** It is defined in `server/schema.ts` but absent from the boot
+  DDL in `server/index.ts`, so T2's delegation would have failed on any fresh database. Added.
+- **T3's premise was wrong.** `storeSettings` was not unreachable — `server/routes.ts` already had
+  `GET /api/settings`, `GET /api/settings/:key` and `PUT /api/settings/:key`. The real gap was that
+  they were Express-only. Those handlers moved into `shared/api-handlers.ts` (backed by a Dexie
+  table, schema v9) rather than adding a second `/api/admin/settings` alongside them.
+- **The settings key regex allows mixed case**, `/^[A-Za-z0-9._-]{1,64}$/`. The plan's lowercase-only
+  version would have rejected `hoursOfOperation` and `emailConfig`, both already in use by
+  `client/src/pages/settings.tsx`.
+- **Employees took the 501**, the outcome this feature's T4 names as legitimate. Recorded in
+  `server/routes.ts` next to the adapter.
+
+Verified end to end by `scripts/check-sales-persistence.sh` (post a sale, restart the server,
+confirm it survived).
 **Vision pillar:** #1 — "the best foundation". A POS that discards sales is not a foundation.
 **Added:** 2026-08-09
 
@@ -1052,7 +1093,9 @@ feature in this plan — one implementation in `shared/`, two hosts.
   loop, passing the combos it now must load.
 - **Combos start working in the live path as a result.** Treat that as the headline of this task,
   and confirm it explicitly rather than assuming it.
-- Kill the hardcoded `taxRate = 0.08`. Read the rate from a store setting, defaulting to `0` — the
+- Kill the hardcoded `taxRate = 0.08`. Read the rate from the `tax.ratePct` store setting via the
+  `getSetting` method Feature 7 T3 added to `ApiAdminStorage` (the HTTP path is `/api/settings/:key`,
+  not `/api/admin/settings/:key`), defaulting to `0` — the
   same default `bom-engine` already uses. Zero is the honest default: a wrong tax rate silently
   charges customers incorrectly, while a zero one is obviously unconfigured. Per-location tax rates
   compose with Feature 3 once locations exist.
@@ -1252,9 +1295,10 @@ not: `adminProducts`, `adminVariants`, `adminModifierGroups`, `adminModifiers`,
 `adminProductModifierGroups`, `adminInventoryItems`, `adminBillOfMaterials`, `adminInvoices`,
 `adminInvoiceLineItems`, and `adminSales`.
 
-(`adminSales` is worth noting: the table exists server-side even though the Express adapter stubs
-`listSales()` to `[]` — see Feature 2's capability table. It still needs the column, so that
-whenever the server does start serving sales, it is scoped from day one rather than retrofitted.)
+(`adminSales` needs the column like the rest. **Updated by Feature 7 T2:** sales now actually persist
+through the Express adapter, so scoping this table is no longer theoretical — unscoped, every
+location reads and writes one another's sales. Note also that its `CREATE TABLE` lives in the boot
+DDL in `server/index.ts`, not in a migration, so T1's column has to be added in both places.)
 
 The storage layer matches. `adminStorage.listProducts` (`server/storage.ts:428`) builds its query as:
 
@@ -1440,6 +1484,13 @@ separate process to supervise, no new deployment unit.
 | `adjust_inventory` | `POST /api/admin/inventory-items/:id/adjust` | both |
 | `sales_summary` | `GET /api/reports/sales-summary` | local only |
 | `product_mix` | `GET /api/reports/product-mix` | local only |
+| `get_settings` / `set_setting` | `GET`/`PUT /api/settings/:key` (Feature 7 T3) | both |
+
+**Updated by Feature 7 T2.** The reason `sales_summary` and `product_mix` are local-only was "the
+Express adapter's `listSales()` returns `[]`". That is no longer true — sales persist on the Express
+server now. The two report *routes* are still Express-side 501s (`server/routes.ts`), so the
+capability split above still holds, but T3's capability probing must decide it from the report routes
+rather than from `listSales()`, which no longer distinguishes the two adapters.
 
 `apply_menu` exposes `dryRun` as a first-class parameter, and its description tells the agent to
 call it with `dryRun: true` and show the operator the change list before applying. The approval
@@ -1531,7 +1582,10 @@ apply it on approval — without the operator seeing a single ID, endpoint, or J
 
 ## Feature 1 — Menu Blueprint: one declarative call to build an entire menu
 
-**Status:** planned
+**Status:** done — T1–T4 complete. `shared/menu-blueprint.ts`, `POST /api/admin/menu/apply` on
+both servers, documented in `docs/api-reference.md`. Caveat: applying is not transactional (see
+the Errors note in that doc) — a mid-flight failure leaves the menu partly updated, recoverable by
+re-applying the same blueprint.
 **Vision pillar:** #2 — AI Agent first POS
 **Added:** 2026-08-09
 

@@ -7,6 +7,7 @@ import {
   adminSales, scheduleShifts, storeSettings,
 } from "./schema";
 import type { Client, Backup, SyncRecord } from "./schema";
+import type { StoreSetting } from "../shared/api-handlers";
 import { eq, desc, sql, and, gt, inArray, isNull, count } from "drizzle-orm";
 
 export interface ListOptions {
@@ -133,6 +134,7 @@ export interface IAdminStorage {
   listSales(): Promise<unknown[]>;
   getSale(id: string): Promise<unknown | null>;
   createSale(data: Record<string, unknown>): Promise<unknown>;
+  updateSale(id: string, data: Record<string, unknown>): Promise<unknown | null>;
 
   getAllAdminData(): Promise<Record<string, unknown[]>>;
   getAllAdminDataWithDeleted(): Promise<Record<string, unknown[]>>;
@@ -878,6 +880,21 @@ export const adminStorage: IAdminStorage = {
       .onConflictDoUpdate({ target: adminSales.id, set: { ...row, updatedAt: now } }).returning();
     return r;
   },
+  async updateSale(id: string, data: Record<string, unknown>) {
+    const now = Date.now();
+    const set: Record<string, unknown> = { updatedAt: now };
+    if (data.subtotalCents !== undefined) set.subtotalCents = data.subtotalCents;
+    if (data.taxCents !== undefined) set.taxCents = data.taxCents;
+    if (data.totalCents !== undefined) set.totalCents = data.totalCents;
+    if (data.comboDiscountCents !== undefined) set.comboDiscountCents = data.comboDiscountCents;
+    if (data.paymentMethod !== undefined) set.paymentMethod = data.paymentMethod;
+    if (data.status !== undefined) set.status = data.status;
+    if (data.customerName !== undefined) set.customerName = data.customerName;
+    if (data.linesJson !== undefined) set.linesJson = data.linesJson;
+    if (data.closedAt !== undefined) set.closedAt = data.closedAt;
+    const [r] = await db.update(adminSales).set(set).where(eq(adminSales.id, id)).returning();
+    return r || null;
+  },
 
   async createInvoiceWithLineItems(invoiceData: Record<string, unknown>, lineItems: Record<string, unknown>[]) {
     const now = Date.now();
@@ -1064,28 +1081,20 @@ export const adminStorage: IAdminStorage = {
 };
 
 export const settingsStorage = {
-  async get(key: string): Promise<unknown | null> {
+  async get(key: string): Promise<StoreSetting | null> {
     const [row] = await db.select().from(storeSettings).where(eq(storeSettings.key, key)).limit(1);
-    return row ? row.value : null;
+    return row || null;
   },
 
-  async set(key: string, value: unknown): Promise<void> {
+  async set(key: string, value: unknown): Promise<StoreSetting> {
     const now = Date.now();
-    const [existing] = await db.select().from(storeSettings).where(eq(storeSettings.key, key)).limit(1);
-    if (existing) {
-      await db.update(storeSettings).set({ value, updatedAt: now }).where(eq(storeSettings.key, key));
-    } else {
-      await db.insert(storeSettings).values({ key, value, updatedAt: now });
-    }
+    const [row] = await db.insert(storeSettings).values({ key, value, updatedAt: now })
+      .onConflictDoUpdate({ target: storeSettings.key, set: { value, updatedAt: now } }).returning();
+    return row;
   },
 
-  async getAll(): Promise<Record<string, unknown>> {
-    const rows = await db.select().from(storeSettings);
-    const result: Record<string, unknown> = {};
-    for (const row of rows) {
-      result[row.key] = row.value;
-    }
-    return result;
+  async list(): Promise<StoreSetting[]> {
+    return db.select().from(storeSettings);
   },
 };
 

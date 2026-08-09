@@ -1,4 +1,5 @@
 import Dexie, { type Table } from "dexie";
+import type { StoreSetting } from "@shared/api-handlers";
 import type {
   ProductAttributes,
   ModifierScaleFactors,
@@ -197,6 +198,7 @@ class PosDatabase extends Dexie {
   comboItems!: Table<ComboItem, string>;
   productGroups!: Table<ProductGroup, string>;
   productGroupItems!: Table<ProductGroupItem, string>;
+  settings!: Table<StoreSetting, string>;
 
   constructor() {
     super("cornerpos");
@@ -419,7 +421,22 @@ class PosDatabase extends Dexie {
         if (emp.email === undefined) emp.email = "";
       });
     });
+
+    this.version(9).stores({
+      settings: "key, updatedAt",
+    });
   }
 }
 
 export const db = new PosDatabase();
+
+/**
+ * Every table backup and restore operate on.
+ *
+ * Derived from the Dexie schema rather than written out by hand. The bug this
+ * replaces was three hand-maintained copies of this list that had drifted to ten
+ * entries while the schema had sixteen — combos, product groups and invoices were
+ * silently missing from every backup. A derived list cannot drift: add a table to
+ * the schema and it is backed up.
+ */
+export const BACKUP_TABLES: string[] = db.tables.map(t => t.name);
