@@ -563,6 +563,12 @@ router.get("/api/admin/all-data", async (_req: Request, res: Response) => {
   try { res.json({ data: await adminStorage.getAllAdminData() }); } catch (err) { res.status(500).json({ error: "Failed to get all admin data" }); }
 });
 
+class NotImplementedOnExpress extends Error {
+  constructor(what: string) {
+    super(`${what} are not available on the Express server`);
+  }
+}
+
 const serverAdminAdapter: ApiAdminStorage = {
   listProducts: () => adminStorage.listProducts(),
   getProduct: (id) => adminStorage.getProduct(id),
@@ -619,17 +625,20 @@ const serverAdminAdapter: ApiAdminStorage = {
 
   createInvoiceWithLineItems: (inv, lis) => adminStorage.createInvoiceWithLineItems(inv, lis),
 
-  async listSales() { return []; },
-  async getSale() { return null; },
-  async createSale(d) { return d; },
-  async updateSale() { return null; },
+  // These have no Express-side implementation. They throw rather than returning empty
+  // arrays or echoing the payload back — a write that reports success and persists
+  // nothing is indistinguishable from a write that worked. The routes below answer 501.
+  async listSales() { throw new NotImplementedOnExpress("sales"); },
+  async getSale() { throw new NotImplementedOnExpress("sales"); },
+  async createSale() { throw new NotImplementedOnExpress("sales"); },
+  async updateSale() { throw new NotImplementedOnExpress("sales"); },
 
-  async listEmployees() { return []; },
-  async getEmployee() { return null; },
-  async createEmployee(d) { return d; },
-  async updateEmployee() { return null; },
+  async listEmployees() { throw new NotImplementedOnExpress("employees"); },
+  async getEmployee() { throw new NotImplementedOnExpress("employees"); },
+  async createEmployee() { throw new NotImplementedOnExpress("employees"); },
+  async updateEmployee() { throw new NotImplementedOnExpress("employees"); },
 
-  async listTimePunches() { return []; },
+  async listTimePunches() { throw new NotImplementedOnExpress("time punches"); },
 
   getAllData: () => adminStorage.getAllAdminData(),
 };
@@ -648,17 +657,36 @@ async function handleViaSharedHandlers(req: Request, res: Response): Promise<boo
   return true;
 }
 
-router.get("/api/admin/sales", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
-router.get("/api/admin/sales/:id", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
-router.post("/api/admin/sales", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
-router.put("/api/admin/sales/:id", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
+const notImplementedOnExpress = (what: string, detail: string) =>
+  (_req: Request, res: Response) => {
+    res.status(501).json({
+      error: `${what} are not available on the Express server. ${detail}`,
+    });
+  };
 
-router.get("/api/admin/employees", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
-router.get("/api/admin/employees/:id", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
-router.post("/api/admin/employees", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
-router.put("/api/admin/employees/:id", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
+const salesUnavailable = notImplementedOnExpress(
+  "Sales",
+  "They are stored client-side in IndexedDB and served by the local Capacitor server (http://127.0.0.1:8080).",
+);
+const employeesUnavailable = notImplementedOnExpress(
+  "Employees",
+  "There is no employee table server-side; employees are managed client-side in IndexedDB.",
+);
 
-router.get("/api/admin/time-punches", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
+router.get("/api/admin/sales", salesUnavailable);
+router.get("/api/admin/sales/:id", salesUnavailable);
+router.post("/api/admin/sales", salesUnavailable);
+router.put("/api/admin/sales/:id", salesUnavailable);
+
+router.get("/api/admin/employees", employeesUnavailable);
+router.get("/api/admin/employees/:id", employeesUnavailable);
+router.post("/api/admin/employees", employeesUnavailable);
+router.put("/api/admin/employees/:id", employeesUnavailable);
+
+router.get("/api/admin/time-punches", notImplementedOnExpress(
+  "Time punches",
+  "There is no time-punch table server-side; they are recorded client-side in IndexedDB.",
+));
 
 router.get("/api/local/status", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
 
