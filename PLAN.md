@@ -5,6 +5,78 @@ Newest feature at the top. Tasks are sized so a single AI coding agent can finis
 
 ---
 
+## How to implement this plan
+
+**One worktree per feature, one branch per feature.** Each feature below is self-contained: four
+tasks, each with a check that must pass before moving on. Do not mix two features in one branch —
+the dependency and conflict notes below only hold if features land one at a time.
+
+### Build order
+
+Dependencies are real here; building out of order means writing code that a later feature deletes.
+
+```
+Feature 4 (auth)  ──┐
+Feature 3 (locations) ──┴──> Feature 2 (agent bridge)
+Feature 1 (menu blueprint) ──┘
+
+Feature 5 (pricing + discounts) — independent, can go first or last
+```
+
+1. **Feature 1 — Menu Blueprint.** No dependencies. The best starting point: it is self-contained,
+   and Features 2 and 3 both build on its primitives.
+2. **Feature 3 — Locations.** Blocks Feature 2. Build before exposing anything to an agent.
+3. **Feature 4 — API tokens.** Supersedes Feature 3's T2. If building 3 and 4 together, skip
+   Feature 3 T2 entirely and take `locationId` from the token — do not build the
+   `X-Store-Location` header only to delete it.
+4. **Feature 2 — Agent Bridge.** Needs Feature 1 (for `apply_menu`) and Feature 3 (or it hands an
+   agent write access to every store's menu).
+5. **Feature 5 — Discounts.** Touches only the pricing path; independent of the other four.
+
+### Features collide in these files — do not run them in parallel blind
+
+`shared/api-handlers.ts` is touched by **all five features**. Parallel worktrees will conflict
+there. Either land features serially, or expect to resolve that file on every merge.
+
+| File | Features that modify it |
+|---|---|
+| `shared/api-handlers.ts` | 1, 2, 3, 4, 5 — every feature |
+| `server/schema.ts` | 3 (locationId on ten tables), 4 (apiTokens table) |
+| `server/storage.ts` | 3 (~40 methods) |
+| `server/routes.ts` | 3, 4 |
+| `server/bom-engine.ts` | 5 |
+| New files, no conflict | `shared/menu-blueprint.ts` (1), `shared/mcp.ts` (2), `server/auth.ts` (4), `shared/pricing.ts` (5) |
+
+Features 1 and 5 are the safest pair to run concurrently: both touch `api-handlers.ts`, but in
+different regions (a new route versus the `/api/orders/simulate` body).
+
+### Before you start: there is no test runner
+
+Every task below ends in a `Check:`. As of this writing the repo has **no test runner, no test
+files, and no `test` script** — `"check": "tsc"` is typecheck only. Verified against `package.json`.
+
+This needs no new dependency. The Dockerfile pins `node:20-slim`, so `node:test` and `node:assert`
+are available, and `tsx` is already installed:
+
+```jsonc
+// package.json
+"test": "tsx --test \"{shared,server}/**/*.test.ts\""
+```
+
+Wire that up first. It matters most for **Feature 5 T1**, which describes itself as a pure refactor
+where "any number that moves is a bug" — with zero coverage on `bom-engine`'s combo allocation and
+rounding, nothing would catch a moved number. Write characterization tests for the existing pricing
+output *before* extracting it, not after.
+
+### Definition of done for any feature
+
+All four tasks complete, every `Check:` passing, `npm run check` (tsc) clean, and the feature's own
+stated "Definition of done" demonstrably true. A feature with three of four tasks done is not
+partially shipped — it is unshipped, and several of these leave the system in a worse state
+half-built than not started (Feature 3 T3 in particular).
+
+---
+
 ## Feature 5 — Discounts, and the one pricing engine they need to live in
 
 **Status:** planned
