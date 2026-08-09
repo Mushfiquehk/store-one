@@ -1,4 +1,5 @@
 import Dexie, { type Table } from "dexie";
+import type { StoreSetting } from "@shared/api-handlers";
 import type {
   ProductAttributes,
   ModifierScaleFactors,
@@ -197,6 +198,7 @@ class PosDatabase extends Dexie {
   comboItems!: Table<ComboItem, string>;
   productGroups!: Table<ProductGroup, string>;
   productGroupItems!: Table<ProductGroupItem, string>;
+  settings!: Table<StoreSetting, string>;
 
   constructor() {
     super("cornerpos");
@@ -418,6 +420,10 @@ class PosDatabase extends Dexie {
       await tx.table("employees").toCollection().modify(emp => {
         if (emp.email === undefined) emp.email = "";
       });
+    });
+
+    this.version(9).stores({
+      settings: "key, updatedAt",
     });
   }
 }

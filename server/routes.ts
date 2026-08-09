@@ -638,6 +638,10 @@ const serverAdminAdapter: ApiAdminStorage = {
 
   async listTimePunches() { throw new Error(EMPLOYEES_NOT_ON_SERVER); },
 
+  listSettings: () => settingsStorage.list(),
+  getSetting: (key) => settingsStorage.get(key),
+  setSetting: (key, value) => settingsStorage.set(key, value),
+
   getAllData: () => adminStorage.getAllAdminData(),
 };
 
@@ -1163,34 +1167,9 @@ router.post("/api/schedule/copy-week", async (req: Request, res: Response) => {
   }
 });
 
-router.get("/api/settings", async (_req: Request, res: Response) => {
-  try {
-    const all = await settingsStorage.getAll();
-    res.json({ settings: all });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to load settings" });
-  }
-});
-
-router.get("/api/settings/:key", async (req: Request, res: Response) => {
-  try {
-    const value = await settingsStorage.get(req.params.key);
-    res.json({ value });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to load setting" });
-  }
-});
-
-router.put("/api/settings/:key", async (req: Request, res: Response) => {
-  try {
-    const { value } = req.body;
-    if (value === undefined) return res.status(400).json({ error: "value is required" });
-    await settingsStorage.set(req.params.key, value);
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to save setting" });
-  }
-});
+router.get("/api/settings", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
+router.get("/api/settings/:key", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
+router.put("/api/settings/:key", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
 
 router.post("/api/schedule/publish", async (req: Request, res: Response) => {
   try {
@@ -1199,7 +1178,7 @@ router.post("/api/schedule/publish", async (req: Request, res: Response) => {
       return res.status(400).json({ error: "weekStart, shifts, and employees are required" });
     }
 
-    const emailConfig = await settingsStorage.get("emailConfig") as {
+    const emailConfig = (await settingsStorage.get("emailConfig"))?.value as {
       provider: string; host: string; port: number;
       secure: boolean; username: string; password: string; senderEmail: string; senderName: string;
     } | null;
