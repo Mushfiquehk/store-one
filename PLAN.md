@@ -10,34 +10,38 @@ is here. The triage below is the entry point.
 
 ## Triage: what is broken versus what is missing
 
-Five of these twelve are **defects in shipped code**, not enhancements. They were found by reading
-the code while planning features, and each is independently verifiable at the file and line cited in
-its section. They are ordered by what they cost if left alone.
+Several entries describe **defects in shipped code** rather than new capability. They were found by
+reading the code while planning, and each is verifiable at the file and line cited in its section.
+
+### Fixed
+
+| # | Was | Status |
+|---|---|---|
+| **7** | `POST /api/admin/sales` returned 200 with the sale echoed and persisted nothing | **done** — sales persist and survive a restart; remaining stubs throw named errors |
+| **9** | Backup omitted 6 of 16 tables; restore wiped what it did not replace, unprompted | **done** — `shared/backup.ts`, one derived table list, non-destructive restore |
+| **1** | — | **done** — `shared/menu-blueprint.ts`, `POST /api/admin/menu/apply`, and the test runner |
+
+### Still broken
 
 | # | Defect | Evidence | Cost if ignored |
 |---|---|---|---|
-| **7** | `POST /api/admin/sales` returns 200 with the sale echoed back and persists nothing | `server/routes.ts:622-632` — `createSale(d) { return d; }`, shadowing a working `storage.ts:860` | Sales silently lost; caller cannot tell success from discard |
-| **9** | Backup omits 6 of 16 tables while the UI calls it a "full snapshot" | `settings.tsx:256` lists ten tables; `db.ts:194-199` defines combos, invoices and more | Restore loses every combo and supplier invoice |
-| **9** | Restore clears tables it may not repopulate, with no confirmation | `settings.tsx:316-340` — unconditional `.clear()`, then `bulkPut` only `if (snapshot.X?.length)` | A partial snapshot or mistyped store code wipes the device |
 | **11** | `lastPurchasePrice` stores price per *purchased* unit; recipes consume *stocking* units | `storage.ts:910`; seed data implies $4.50/oz milk, $12/oz espresso beans | Every cost and margin wrong by orders of magnitude |
 | **8** | Sync compares Drizzle rows to Dexie records via `JSON.stringify`, so they never match | `storage.ts:~270` vs `sync.ts:97` — differing key order and field set | Every menu record re-pushed to every client on every sync, forever |
 | **8** | Conflict resolution reads `adminUpdatedAt` but never compares it | `storage.ts:215+` | Newer POS edits silently discarded |
-| **5** | Combos are ignored by the live order path | `bom-engine.ts` is imported only by `routes.ts:16` for test orders; `/api/orders/simulate` prices inline with a hardcoded 8% tax | Combos charge full price; three different tax rates in the codebase |
+| **5** | Combos are ignored by the live order path | `bom-engine.ts` imported only by `routes.ts:16` for test orders; `/api/orders/simulate` prices inline with a hardcoded 8% tax | Combos charge full price; three tax rates in the codebase |
 
-**Suggested first session**, highest value per unit of risk — all small, all independently shippable:
+**Next session**, in order:
 
-1. **Feature 7 T1** — convert the fake-success stubs to 501s. Few lines, obviously correct, stops
-   silent data loss immediately. Nothing else in this plan should be built on a server that reports
-   success for writes it discarded.
-2. **Feature 9 T1–T3** — complete backups, non-destructive restore, confirmation prompt.
-3. **Feature 11 T1–T2** — the unit conversion, defaulting to `1` so nothing changes until an
-   operator supplies a real factor.
+1. **Feature 11 T1–T2** — the unit conversion, defaulting to `1` so nothing changes until an
+   operator supplies a real factor. Feature 10 is unusable until this lands.
+2. **Feature 8 T1 + T3** — fix the comparison, then the convergence assertion (two syncs, zero
+   movement) that proves it.
+3. **Feature 5 T1–T2** — one pricing core, which also makes combos work in the live path.
 
-The remaining seven features are genuine enhancements and can wait: **1** (menu blueprint), **2**
-(agent bridge), **3** (locations), **4** (auth), **6** (setup status), **10** (margins), **12**
-(voids and refunds). Of those, **4 (auth) is the one with a deadline** — there is no authentication
-of any kind, and the repo now has a Dockerfile and compose file, so it must land before this is
-deployed anywhere public.
+Remaining enhancements: **2** (agent bridge), **3** (locations), **4** (auth), **6** (setup status),
+**10** (margins), **12** (voids/refunds), **13** (labor and prime cost). Of those, **4 (auth) has a
+deadline** — there is still no authentication of any kind, and the repo is containerised, so it must
+land before this is deployed anywhere public.
 
 ---
 
@@ -101,7 +105,12 @@ there. Either land features serially, or expect to resolve that file on every me
 Features 1 and 5 are the safest pair to run concurrently: both touch `api-handlers.ts`, but in
 different regions (a new route versus the `/api/orders/simulate` body).
 
-### Before you start: there is no test runner
+### The test runner exists now — use it
+
+`npm test` runs `npx tsx --test "{shared,server}/**/*.test.ts"`, added with Feature 1 T1. Every
+task's `Check:` belongs there. The rest of this section is kept for the reasoning behind the choice.
+
+### How it was decided (previously: there is no test runner)
 
 Every task below ends in a `Check:`. As of this writing the repo has **no test runner, no test
 files, and no `test` script** — `"check": "tsc"` is typecheck only. Verified against `package.json`.
@@ -125,6 +134,117 @@ All four tasks complete, every `Check:` passing, `npm run check` (tsc) clean, an
 stated "Definition of done" demonstrably true. A feature with three of four tasks done is not
 partially shipped — it is unshipped, and several of these leave the system in a worse state
 half-built than not started (Feature 3 T3 in particular).
+
+---
+
+## Feature 13 — Labor cost, and the prime cost number a second location depends on
+
+**Status:** planned
+**Vision pillar:** #1 — the guiding star. Prime cost is what decides whether growth is affordable.
+**Depends on:** Feature 10 (food cost), Feature 11 (correct unit costs)
+**Added:** 2026-08-09
+
+### The finding
+
+The app schedules staff and records what they are paid, and cannot tell an operator what a week of
+labor costs. A grep for `laborCost`, `hoursWorked`, or `primeCost` across the entire codebase returns
+nothing. `payRate` is stored, edited, and displayed — never multiplied by anything.
+
+Both halves exist:
+
+- **Shifts, server-side.** `scheduleStorage` (`server/storage.ts:1094-1143`) has `listShifts`,
+  `createShift`, `updateShift`, `deleteShift`, and `copyWeek`, wired to `/api/schedule/shifts`
+  (`server/routes.ts:1093`) behind a 557-line `schedule.tsx`. Duration is
+  `endMinutes - startMinutes` (`server/schema.ts:157-158`).
+- **Pay rates, client-side.** `payRate` on the employee type (`shared/schema.ts:147`), edited in
+  `employees.tsx`, stored in Dexie.
+
+### Why it cannot be computed anywhere today
+
+**Neither side has both.** Shifts live only on the server; employees and their pay rates live only in
+the client's Dexie database. Feature 7 T4 settled that deliberately — `server/routes.ts:643` now
+throws `EMPLOYEES_NOT_ON_SERVER`, with the reasoning recorded in the code. That decision stands, and
+this feature works with it rather than reopening it.
+
+So the fix is not to move employees to the server. It is to **move shifts onto the shared handler
+layer**, exactly as Feature 7 T3 did for `storeSettings`. Then the client — which already has
+employees, sales, and recipes — has every input, and labor cost is computed where sales-summary and
+product-mix already are. That also keeps this consistent with Feature 2's capability model: labor and
+prime cost become local-server capabilities, like every other report that needs sales.
+
+### Why prime cost, not just labor
+
+Food cost alone (Feature 10) does not tell an operator whether they can afford a second location.
+**Prime cost — food plus labor over revenue — is the number the industry runs on**, and the one a
+lender or landlord asks for. It is also the only metric here that spans both halves of what the
+system knows. Nothing else in the product joins them.
+
+### A unit hazard, again
+
+`employees.tsx:55` defaults `payRate: 1500`, which reads as cents per hour ($15.00/hr) — but nothing
+says so. Same class of defect as Feature 11: a bare number whose unit exists only in the head of
+whoever wrote it. Fix it as **cents per hour**, documented on the type and validated on input.
+Getting it wrong scales the entire labor line by 100.
+
+### Tasks
+
+**T1 — Move shifts onto the shared handler layer** (~15 min)
+- Move the `/api/schedule/shifts` handlers from `server/routes.ts:1093+` into
+  `shared/api-handlers.ts`, adding the `scheduleStorage` methods to `ApiAdminStorage` and leaving
+  the Express routes as thin delegations. Follow exactly what Feature 7 T3 did for `storeSettings` —
+  same shape, same reasoning.
+- Back them with a Dexie table on the client side so the local server serves shifts too.
+- Keep `copyWeek`; it is the most-used affordance in `schedule.tsx` and must not be lost in the move.
+- Check: both servers return the same shape for a week of shifts, and `copyWeek` still works
+  through the shared layer.
+
+**T2 — Weekly labor cost** (~15 min)
+- `GET /api/reports/labor-cost?weekStart=YYYY-MM-DD`, per-employee scheduled hours and cost plus a
+  week total: `costCents = ((endMinutes - startMinutes) / 60) × payRate`.
+- Document `payRate` as cents per hour on the shared type and validate it as a non-negative integer.
+- **Scheduled, not worked.** `timePunches` are client-side and `listTimePunches()` returns `[]` on
+  the server. Name the fields and the UI *scheduled* labor — an operator who reads a schedule-based
+  figure as payroll will be wrong every week anyone stays late.
+- Handle a shift crossing midnight (`endMinutes < startMinutes`) explicitly rather than emitting a
+  negative cost — reject at creation or treat as next-day, but decide.
+- A shift whose `employeeId` resolves to nobody must be counted and reported, not silently dropped.
+- Check: two employees with known rates and shift lengths produce a hand-verifiable total; a
+  midnight-crossing shift does not go negative; an orphaned shift appears in the unresolved count.
+
+**T3 — Prime cost** (~15 min)
+- `GET /api/reports/prime-cost?from=&to=` combining Feature 10's food cost on sold items with T2's
+  labor over the same window, against revenue from `sales-summary`:
+  `primeCostPct = (foodCostCents + laborCostCents) / revenueCents`.
+- **Propagate uncertainty.** If any sold item has unknown ingredient cost (Feature 10) or any shift
+  has no resolvable employee, mark the figure partial and say which. A prime cost that quietly omits
+  what it could not price is a number someone makes a hiring decision on, wrong in the flattering
+  direction.
+- Exclude reversed sales once Feature 12 lands, or voided orders inflate revenue and deflate the
+  percentage.
+- No benchmark, no verdict. Report the number; the operator knows their target better than a
+  hardcoded constant.
+- Check: a window with known sales, recipes and shifts gives a hand-checkable percentage, and
+  removing one ingredient price flips the response to partial.
+
+**T4 — Surface it** (~15 min)
+- Add prime cost to `reports.tsx` with food and labor broken out — an operator seeing 68% needs to
+  know which half it is, because the fixes are entirely different.
+- Add `prime_cost` to the Feature 2 MCP tool table so an agent can answer "can I afford another
+  cook" from real data rather than guessing.
+- Show the partial-data warning prominently. A quietly-partial number is the failure mode this
+  feature exists to avoid.
+- Check: seeded data renders; removing one ingredient price visibly marks the report partial.
+
+### Non-goals
+
+Actual-versus-scheduled variance, overtime rules, payroll taxes and burden (a real employee costs
+meaningfully more than their wage — named so nobody mistakes this for payroll), labor forecasting
+from sales, salaried amortisation, and cross-location comparison.
+
+### Definition of done
+
+An operator can see what a scheduled week costs, what prime cost is over a period, and whether that
+number is complete — with scheduled labor never presented as actual payroll.
 
 ---
 
