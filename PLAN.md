@@ -5,6 +5,139 @@ Newest feature at the top. Tasks are sized so a single AI coding agent can finis
 
 ---
 
+## Feature 3 — Locations: make a second store possible at all
+
+**Status:** planned
+**Vision pillar:** #1 — the easiest path to grow into a second location
+**Blocks:** Feature 2 (an unscoped MCP endpoint would let any agent edit every store's menu)
+**Added:** 2026-08-09
+
+### The finding
+
+The `admin_*` tables have no tenancy column. Verified in `server/schema.ts`: of every table in the
+file, exactly two carry a `clientId` — `backups` and `syncRecords`. All **ten** `admin_*` tables do
+not: `adminProducts`, `adminVariants`, `adminModifierGroups`, `adminModifiers`,
+`adminProductModifierGroups`, `adminInventoryItems`, `adminBillOfMaterials`, `adminInvoices`,
+`adminInvoiceLineItems`, and `adminSales`.
+
+(`adminSales` is worth noting: the table exists server-side even though the Express adapter stubs
+`listSales()` to `[]` — see Feature 2's capability table. It still needs the column, so that
+whenever the server does start serving sales, it is scoped from day one rather than retrofitted.)
+
+The storage layer matches. `adminStorage.listProducts` (`server/storage.ts:428`) builds its query as:
+
+```ts
+const conditions = [isNull(adminProducts.deletedAt)];
+```
+
+That is the entire filter. Every client hitting the Express admin API reads and writes **one global
+menu**. There is a per-client sync layer sitting on top of a single-tenant admin store.
+
+Two consequences, and the second is the reason this jumps the queue:
+
+1. **The guiding star is unreachable.** "Grow into a second location" is the product's stated
+   purpose, and there is currently no column in which a second location could exist. Not a missing
+   feature — a missing dimension.
+2. **It makes Feature 2 unsafe to ship.** Feature 2 mounts an MCP endpoint that hands an agent
+   `apply_menu`. Against a global admin store, one operator's agent rewrites every operator's menu.
+   Feature 2 should not be deployed against a shared server until this lands.
+
+### The feature
+
+Add a `locationId` to the admin tables, resolve it once per request, and scope every admin read and
+write to it.
+
+**Deliberately narrow choices**, because tenancy refactors are where projects disappear for a month:
+
+- **`locationId` is `text`, not a foreign key to a new table.** Reuse the existing `clients.code`
+  as the location identifier. There is already a client-code concept the sync layer and backups
+  use (`storage.ts:1008`, `getClientSyncData`); a parallel `locations` table would be a second
+  identity system to keep in sync with the first.
+- **Backfill to a single default location, non-null after.** Existing rows get
+  `locationId = 'default'`. Nothing breaks, and there is no nullable-tenant state where a forgotten
+  filter silently returns everyone's data. Nullable tenancy columns are how these bugs survive
+  code review.
+- **Resolve the location in exactly one place**, at the handler boundary, never in individual
+  route bodies. One resolution point is one thing to audit.
+- **The local server always resolves to a single location.** An in-app IndexedDB database *is* one
+  store's data; there is no cross-tenant risk there and no reason to complicate the Dexie adapter.
+
+### Tasks
+
+Each is completable by an AI agent in about 15 minutes. T3 is the one that matters — read its
+warning before starting.
+
+**T1 — Schema column and backfill migration** (~15 min)
+- Add `locationId: text("location_id").notNull().default("default")` to all ten `admin_*` tables
+  in `server/schema.ts`.
+- Generate the Drizzle migration (`drizzle-kit` is already a dependency — do not hand-write SQL that
+  the tool generates). Confirm the generated migration backfills existing rows via the column
+  default rather than leaving them null.
+- Add an index on `locationId` for each table. Every list query is about to filter on it, and
+  adding the index later means a lock on a table that by then has real data in it.
+- Check: run the migration against a database with seed data loaded and confirm every existing row
+  reads back `location_id = 'default'` and no row is null.
+
+**T2 — Resolve the location once, at the boundary** (~15 min)
+- In `shared/api-handlers.ts`, extend `ApiRequest` with a `locationId: string` field, and read it
+  from an `X-Store-Location` header in `handleViaSharedHandlers` (`server/routes.ts:639`) with
+  `'default'` as the fallback.
+- In `client/src/lib/local-server.ts`, set it to the constant `'default'` — the in-app database is
+  already single-store.
+- Validate the header: non-empty, and matching `/^[a-zA-Z0-9_-]{1,64}$/`. It is about to become
+  part of a SQL predicate, and an unvalidated tenant identifier arriving from a header is a trust
+  boundary. Reject anything else with a 400 rather than falling back to `'default'` — silently
+  serving the wrong store's menu is worse than an error.
+- Check: assertions that a valid header passes through, that a missing header yields `'default'`,
+  and that a malformed one 400s.
+
+**T3 — Scope the storage layer** (~15 min, and the one that can go wrong)
+- Thread `locationId` through `IAdminStorage` and add it to every predicate in the admin methods in
+  `server/storage.ts`: `and(isNull(x.deletedAt), eq(x.locationId, locationId))` on lists, and on
+  `get`/`update`/`delete` **as a second condition alongside the primary key**.
+- That last part is the whole security property and the easy thing to skip. IDs are
+  client-generated and guessable; a `get` that matches on `id` alone reads across locations even
+  though the list endpoint looks correctly scoped. Filter by ID *and* location on every
+  single-record method.
+- **Warning:** this touches roughly 40 methods. It is 15 minutes of mechanical work only if done
+  mechanically — one method at a time, the same two-condition shape each time. If a method seems to
+  need a different shape, stop and write it down rather than inventing a variant. A tenancy filter
+  that is right 39 times out of 40 provides no security at all.
+- Set `locationId` on insert in every `create*` method.
+- Check: seed two locations with a same-named product each, then assert that a list scoped to A
+  returns only A's row, and — the test that actually matters — that a `get` for **B's product ID
+  under location A returns null**, not B's row.
+
+**T4 — Clone a menu into a new location** (~15 min)
+- Add `POST /api/admin/locations/:id/clone-from` taking `{ sourceLocationId, dryRun }`.
+- Implement it as pure composition of what already exists: export the source location's blueprint
+  (Feature 2 T1), then apply it to the target location (Feature 1). No new copy logic, no new
+  entity walker. If this task requires writing a menu-traversal routine, the earlier features were
+  built wrong and that is worth knowing.
+- This is the product's guiding star as a single endpoint: opening store #2 starts with store #1's
+  menu, previewable via `dryRun` before it lands, and the second location is a real store from its
+  first minute rather than a blank database.
+- Check: clone `default` into `store-2`, assert the blueprint exports of both are now identical,
+  and assert location `default` was not modified.
+
+### Non-goals
+
+Per-location pricing, per-location availability (86'ing an item at one store), cross-location
+reporting, and user↔location permissions are all out of scope. This feature adds the *dimension*;
+those are the things worth building once it exists, and none of them are expressible today.
+
+Note that **authentication is still absent** — `X-Store-Location` is self-asserted, so this feature
+delivers isolation, not authorization. Anyone who can reach the server can name any location. That
+is a real limit and it is exactly why the auth feature below the fold still needs to be planned and
+built before anything is exposed publicly.
+
+### Definition of done
+
+Two locations, two independent menus, on one deployment — and an operator opening their second
+store seeds its menu from their first with one call.
+
+---
+
 ## Feature 2 — Agent Bridge: let an agent actually connect to the POS
 
 **Status:** planned
