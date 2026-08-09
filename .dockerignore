@@ -1,0 +1,7 @@
+node_modules
+dist
+.git
+ios
+ios-plugin
+attached_assets
+.env
