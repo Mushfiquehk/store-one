@@ -13,6 +13,10 @@ the dependency and conflict notes below only hold if features land one at a time
 
 ### Build order
 
+**Start with Feature 7 T1.** It is a one-file, few-line change that converts silent data loss into a
+loud error, and it is independent of everything else. Nothing in this plan is worth building on top
+of a server that reports success for writes it discarded.
+
 Dependencies are real here; building out of order means writing code that a later feature deletes.
 
 ```
@@ -46,7 +50,7 @@ there. Either land features serially, or expect to resolve that file on every me
 | `shared/api-handlers.ts` | 1, 2, 3, 4, 5, 6 — every feature |
 | `server/schema.ts` | 3 (locationId on ten tables), 4 (apiTokens table) |
 | `server/storage.ts` | 3 (~40 methods) |
-| `server/routes.ts` | 3, 4, 6 (moves the demo-clear handler out) |
+| `server/routes.ts` | 3, 4, 6 (moves the demo-clear handler out), 7 (the adapter stubs) |
 | `server/bom-engine.ts` | 5 |
 | `client/src/pages/onboarding.tsx` | 6 — the only feature touching the client |
 | New files, no conflict | `shared/menu-blueprint.ts` (1), `shared/mcp.ts` (2), `server/auth.ts` (4), `shared/pricing.ts` (5) |
@@ -78,6 +82,128 @@ All four tasks complete, every `Check:` passing, `npm run check` (tsc) clean, an
 stated "Definition of done" demonstrably true. A feature with three of four tasks done is not
 partially shipped — it is unshipped, and several of these leave the system in a worse state
 half-built than not started (Feature 3 T3 in particular).
+
+---
+
+## Feature 7 — Stop the server accepting data it silently throws away
+
+**Status:** planned
+**Vision pillar:** #1 — "the best foundation". A POS that discards sales is not a foundation.
+**Added:** 2026-08-09
+
+### The finding
+
+`server/routes.ts:622-632` defines the Express storage adapter. Most of it delegates to
+`adminStorage`. These eleven lines do not:
+
+```ts
+async listSales()      { return []; },
+async getSale()        { return null; },
+async createSale(d)    { return d; },      // <-- accepts, echoes, saves nothing
+async updateSale()     { return null; },
+
+async listEmployees()  { return []; },
+async getEmployee()    { return null; },
+async createEmployee(d){ return d; },      // <-- same
+async updateEmployee() { return null; },
+
+async listTimePunches(){ return []; },
+```
+
+`createSale(d) { return d; }` is the serious one. `POST /api/admin/sales` returns **200 with the
+sale echoed back**. A caller — a client, an integration, an agent — cannot distinguish "saved" from
+"discarded", because the response looks exactly like success. The sale is gone.
+
+**And the real implementation already exists.** `server/storage.ts` has working `listSales` (line
+853), `getSale` (856), and `createSale` (860) — the last one an upsert that writes to the
+`adminSales` table, which is fully defined at `server/schema.ts:130`. The adapter shadows a working
+implementation sitting three files over. This is not a missing feature; it is a disconnected wire.
+
+Two more things surfaced alongside it:
+
+- **`storeSettings` is implemented and unreachable.** A key/value table (`server/schema.ts:146`)
+  with working get/set/list in `storage.ts:1068-1083`, imported by nothing outside that file. No
+  route, no handler. Feature 5 T2 needs "read the tax rate from a store setting" — that store
+  already exists and just needs a door.
+- **Employees genuinely do not exist server-side.** `grep -c "employees" server/schema.ts` returns
+  **0**. There is no table and no storage method — so unlike sales, the employee stubs are not
+  shadowing anything. They are inventing success for a feature that was never built. Employees live
+  only in the client's Dexie database.
+
+### The principle
+
+A stub that returns a 501 with an explanation is fine — `server/routes.ts` already does exactly
+that in three places for reports and order simulation, with a clear message about IndexedDB. That
+pattern is honest and it is already in the codebase. A stub that returns fake success is not a stub,
+it is a data-loss bug wearing a stub's clothes.
+
+So this feature has a cheap first task that stops the bleeding, and slower ones that connect the
+wires properly. Do them in order — T1 alone is worth shipping on its own.
+
+### Tasks
+
+**T1 — Make the lying stubs honest** (~15 min)
+- Replace every fake-success stub in `server/routes.ts:622-632` with a 501 carrying a message in
+  the same style as the existing report stubs. `createSale` and `createEmployee` are the urgent
+  ones; a write that reports success and persists nothing is the worst failure mode available.
+- Do **not** implement anything in this task. It is a small, obviously-correct diff that converts
+  silent data loss into a loud, diagnosable error, and it should be reviewable in a minute.
+- Check: `POST /api/admin/sales` returns 501 with an explanatory body rather than 200 and the echoed
+  payload.
+
+**T2 — Connect sales to the storage that already works** (~15 min)
+- Delete the four sales stubs and delegate to `adminStorage`, exactly like the neighbouring
+  inventory and invoice entries: `listSales: () => adminStorage.listSales()`, and so on.
+- `updateSale` is the one that genuinely does not exist in `storage.ts` — write it, following
+  `updateProduct` (`storage.ts:455`) for the shape: build a partial `set`, always bump `updatedAt`,
+  return the updated row or `null`.
+- Check: `POST` a sale, then `GET /api/admin/sales/:id` and confirm the persisted row comes back
+  with matching totals — and confirm it survives a server restart. The restart is the assertion that
+  actually distinguishes this from the bug being fixed.
+
+**T3 — Give `storeSettings` a door** (~15 min)
+- Add `getSetting` / `setSetting` / `listSettings` to the `ApiAdminStorage` interface in
+  `shared/api-handlers.ts`, plus `GET`/`PUT /api/admin/settings/:key` and `GET /api/admin/settings`.
+  Delegate to the existing `storage.ts:1068-1083` methods on the Express side; back them with a
+  Dexie table on the local side.
+- Validate the key (`/^[a-z0-9._-]{1,64}$/`) — it is a primary key arriving from a request.
+- **This unblocks Feature 5 T2's configurable tax rate with no new table.** Note the key name there
+  and here so both features agree: `tax.ratePct`.
+- Check: set a value, read it back, overwrite it, confirm `updatedAt` moved and no duplicate row
+  was created.
+
+**T4 — Decide employees honestly, and fix what this changes downstream** (~15 min)
+- Employees have no table and no storage. Either add `adminEmployees` (mirroring the
+  `shared/schema.ts` `Employee` type: `id`, `name`, `role`, `payRate`, `pin`, `email`) with four
+  storage methods and delegation, or leave the T1 501s in place. **Leaving the 501 is a legitimate
+  outcome** — the client already manages employees in Dexie, and inventing a half-server-side
+  employee model to satisfy a stub is how the sales bug happened in the first place. Whichever is
+  chosen, record it in the code as a comment rather than leaving a bare stub for the next reader to
+  re-litigate.
+- If employees do get a table: PINs must not be stored in plaintext. Reuse the `scrypt` hashing
+  from Feature 4 T1 rather than adding a second scheme. If that seems like too much for this task,
+  that is the signal to take the 501.
+- **Update Feature 2's capability table.** It states that `sales_summary` and `product_mix` are
+  local-only because "the Express adapter's `listSales()` returns `[]`". After T2 that is no longer
+  true for sales data, and the capability probing must reflect it or the Express server will
+  under-advertise what it can do.
+- **Update Feature 3.** `adminSales` is one of the ten tables getting a `locationId`; now that sales
+  actually persist there, its scoping stops being theoretical.
+- Check: whichever path is taken for employees, `GET /api/admin/employees` never returns `[]` while
+  employees exist somewhere — it either returns them or says it cannot serve them.
+
+### Non-goals
+
+Time punches, scheduling (`scheduleShifts` exists at `server/schema.ts:152` and is equally
+unreachable), and reconciling the two sales paths — `bom-engine.ts:447` writes `adminSales` directly
+for test orders, while sales also flow through `syncRecords` as JSON blobs under the `sales` sync
+group (`shared/schema.ts:34`). **Two writers into one table via different paths is worth a proper
+look**, but it is a separate investigation and should not be smuggled into a bug fix.
+
+### Definition of done
+
+No endpoint on this server returns success for a write it did not perform. Sales posted to the
+Express server survive a restart, and a store setting can be read and written through the API.
 
 ---
 
