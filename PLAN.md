@@ -87,7 +87,21 @@ half-built than not started (Feature 3 T3 in particular).
 
 ## Feature 7 — Stop the server accepting data it silently throws away
 
-**Status:** planned
+**Status:** done — T1–T4 complete. Sales persist on the Express server and survive a restart;
+store settings are reachable from both servers; employees and time punches answer 501 rather than
+faking success. Four things differed from the plan as written, all verified against a live Postgres:
+
+- **`admin_sales` was never created.** It is defined in `server/schema.ts` but absent from the boot
+  DDL in `server/index.ts`, so T2's delegation would have failed on any fresh database. Added.
+- **T3's premise was wrong.** `storeSettings` was not unreachable — `server/routes.ts` already had
+  `GET /api/settings`, `GET /api/settings/:key` and `PUT /api/settings/:key`. The real gap was that
+  they were Express-only. Those handlers moved into `shared/api-handlers.ts` (backed by a Dexie
+  table, schema v9) rather than adding a second `/api/admin/settings` alongside them.
+- **The settings key regex allows mixed case**, `/^[A-Za-z0-9._-]{1,64}$/`. The plan's lowercase-only
+  version would have rejected `hoursOfOperation` and `emailConfig`, both already in use by
+  `client/src/pages/settings.tsx`.
+- **Employees took the 501**, the outcome this feature's T4 names as legitimate. Recorded in
+  `server/routes.ts` next to the adapter.
 **Vision pillar:** #1 — "the best foundation". A POS that discards sales is not a foundation.
 **Added:** 2026-08-09
 
@@ -422,7 +436,9 @@ feature in this plan — one implementation in `shared/`, two hosts.
   loop, passing the combos it now must load.
 - **Combos start working in the live path as a result.** Treat that as the headline of this task,
   and confirm it explicitly rather than assuming it.
-- Kill the hardcoded `taxRate = 0.08`. Read the rate from a store setting, defaulting to `0` — the
+- Kill the hardcoded `taxRate = 0.08`. Read the rate from the `tax.ratePct` store setting via the
+  `getSetting` method Feature 7 T3 added to `ApiAdminStorage` (the HTTP path is `/api/settings/:key`,
+  not `/api/admin/settings/:key`), defaulting to `0` — the
   same default `bom-engine` already uses. Zero is the honest default: a wrong tax rate silently
   charges customers incorrectly, while a zero one is obviously unconfigured. Per-location tax rates
   compose with Feature 3 once locations exist.
@@ -622,9 +638,10 @@ not: `adminProducts`, `adminVariants`, `adminModifierGroups`, `adminModifiers`,
 `adminProductModifierGroups`, `adminInventoryItems`, `adminBillOfMaterials`, `adminInvoices`,
 `adminInvoiceLineItems`, and `adminSales`.
 
-(`adminSales` is worth noting: the table exists server-side even though the Express adapter stubs
-`listSales()` to `[]` — see Feature 2's capability table. It still needs the column, so that
-whenever the server does start serving sales, it is scoped from day one rather than retrofitted.)
+(`adminSales` needs the column like the rest. **Updated by Feature 7 T2:** sales now actually persist
+through the Express adapter, so scoping this table is no longer theoretical — unscoped, every
+location reads and writes one another's sales. Note also that its `CREATE TABLE` lives in the boot
+DDL in `server/index.ts`, not in a migration, so T1's column has to be added in both places.)
 
 The storage layer matches. `adminStorage.listProducts` (`server/storage.ts:428`) builds its query as:
 
@@ -810,6 +827,13 @@ separate process to supervise, no new deployment unit.
 | `adjust_inventory` | `POST /api/admin/inventory-items/:id/adjust` | both |
 | `sales_summary` | `GET /api/reports/sales-summary` | local only |
 | `product_mix` | `GET /api/reports/product-mix` | local only |
+| `get_settings` / `set_setting` | `GET`/`PUT /api/settings/:key` (Feature 7 T3) | both |
+
+**Updated by Feature 7 T2.** The reason `sales_summary` and `product_mix` are local-only was "the
+Express adapter's `listSales()` returns `[]`". That is no longer true — sales persist on the Express
+server now. The two report *routes* are still Express-side 501s (`server/routes.ts`), so the
+capability split above still holds, but T3's capability probing must decide it from the report routes
+rather than from `listSales()`, which no longer distinguishes the two adapters.
 
 `apply_menu` exposes `dryRun` as a first-class parameter, and its description tells the agent to
 call it with `dryRun: true` and show the operator the change list before applying. The approval

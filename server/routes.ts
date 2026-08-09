@@ -630,10 +630,15 @@ const serverAdminAdapter: ApiAdminStorage = {
   createSale: (d) => adminStorage.createSale(d),
   updateSale: (id, d) => adminStorage.updateSale(id, d),
 
-  // Employees and time punches have no Express-side implementation. They throw rather
-  // than returning empty arrays or echoing the payload back — a write that reports
-  // success and persists nothing is indistinguishable from one that worked. See T4 note
-  // on the routes below.
+  // Decided (Feature 7 T4): employees and time punches stay client-side. There is no
+  // employees table in server/schema.ts and never was — unlike sales, these stubs were
+  // not shadowing a working implementation, they were inventing success for something
+  // that was never built. The client already manages employees in Dexie, and adding a
+  // half-server-side employee model (with PIN hashing to get right) to satisfy a stub is
+  // how the sales bug happened. The routes below answer 501.
+  //
+  // If this is revisited: PINs must not be stored in plaintext, and the scrypt hashing
+  // from Feature 4 T1 is the scheme to reuse rather than inventing a second one.
   async listEmployees() { throw new NotImplementedOnExpress("employees"); },
   async getEmployee() { throw new NotImplementedOnExpress("employees"); },
   async createEmployee() { throw new NotImplementedOnExpress("employees"); },
