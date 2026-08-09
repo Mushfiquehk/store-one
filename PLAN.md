@@ -87,6 +87,129 @@ half-built than not started (Feature 3 T3 in particular).
 
 ---
 
+## Feature 10 — Menu margins: the number that decides whether there is a second location
+
+**Status:** planned
+**Vision pillar:** #1 — the guiding star itself, "boost their business into getting a second location"
+**Depends on:** Feature 5 T1 (needs the pure pricing/BOM functions out of `server/bom-engine.ts`)
+**Added:** 2026-08-09
+
+### The finding
+
+Features 1–9 are foundation, plumbing, and bug fixes. Necessary, but none of them help a business
+*grow*, which is what VISION.md actually asks for. This is the gap.
+
+**Nothing in the codebase computes cost, margin, or profit.** A grep for those words across
+`server/`, `shared/`, and the reports page returns only CSS `margin` properties. The three report
+endpoints — `sales-summary`, `product-mix`, `inventory-status` (`shared/api-handlers.ts:504, 534,
+571`) — are all volume and revenue. An operator can see that they sold 200 croissants and cannot see
+whether they made money on any of them.
+
+**Every input already exists:**
+
+| Input | Where |
+|---|---|
+| What an item costs to make | `billOfMaterials.quantityDeducted` × `inventoryItems.lastPurchasePrice` (`server/schema.ts:101, 90`) |
+| What it sells for | `variants.basePrice` |
+| What actually sold | `sales.linesJson` |
+| What was really paid for stock | `invoiceLineItems.unitPriceCents` |
+
+And the hard part is already written. `computeInventoryDeductions` (`server/bom-engine.ts:203`) is a
+**pure function** taking line items plus preloaded data and returning
+`Map<inventoryItemId, quantity>` — already handling modifiers, scale factors, and composite
+products. Costing one variant is that map, priced:
+
+```
+cost(variant) = Σ over computeInventoryDeductions([{variantId, qty: 1}], data)
+                  of quantity × inventoryItem.lastPurchasePrice
+```
+
+Do not write a second BOM traversal. If this feature grows one, it was built wrong.
+
+### Why this is the growth feature
+
+Food cost percentage is the number restaurant operators actually run on. It decides which items to
+push, which to reprice, and which to cut — and whether the business throws off enough margin to
+fund a second location. It is also the most useful thing an agent could tell an operator without
+being asked: *"your croissant is priced below what it costs you to make."* That is Pillar 2's
+"maintain", as opposed to the setup work Features 1 and 6 cover.
+
+### The honesty requirement
+
+`lastPurchasePrice` is nullable (`server/schema.ts:90`). An item whose ingredients have no recorded
+price has an **unknown** cost, not a zero cost — and zero cost renders as 100% margin, which is the
+most flattering possible lie about a menu. Every task below must keep "unknown" distinct from
+"zero", and the API must say which ingredients are missing prices so the operator can fix it. A
+margin report that quietly treats missing data as free is worse than no report.
+
+### Tasks
+
+**T1 — Cost per variant** (~15 min)
+- Add `costVariant(variantId, data)` to `shared/pricing.ts` (created by Feature 5 T1, which is what
+  moves `computeInventoryDeductions` out of the db-coupled `bom-engine.ts`). Reuse that function;
+  do not re-walk the BOM.
+- Return `{ costCents, unknownIngredients: string[] }` — never a bare number. If any contributing
+  inventory item has a null `lastPurchasePrice`, name it. The caller decides how to present partial
+  information; the costing function must not decide by silently dropping it.
+- Check: a variant with fully-priced ingredients returns the expected cost; a variant with one
+  unpriced ingredient returns that ingredient's name and does **not** report a lower cost as if it
+  were free.
+
+**T2 — `GET /api/reports/menu-margins`** (~15 min)
+- One row per variant: name, `priceCents`, `costCents`, `marginCents`, `marginPct`, and
+  `costKnown: boolean`. Sort worst-margin first — the rows an operator needs are the bad ones, and
+  a report that opens on the best sellers buries them.
+- Include a `?since=` window and join against `product-mix` volumes so rows carry the weighted
+  contribution, not just per-unit margin. A terrible margin on an item that sells twice a month
+  matters less than a mediocre one on the top seller, and per-unit margin alone cannot show that.
+- Register in `shared/api-handlers.ts` so both servers expose it. Note it needs sales data, so it
+  falls under Feature 2's capability probing — and after Feature 7 T2, the Express server can serve
+  it too.
+- Check: an item priced below its ingredient cost reports a negative margin rather than clamping to
+  zero. Negative margins are the entire point of the report.
+
+**T3 — Show it** (~15 min)
+- Add a margins table to `client/src/pages/reports.tsx` alongside the existing reports, worst first,
+  with unknown-cost rows visibly flagged rather than sorted as if their margin were 100%.
+- Give unknown-cost rows a direct link to the inventory item that needs a price. The report's job is
+  to be actionable, and "go find which of your 60 ingredients is missing a price" is not.
+- Check: with seeded demo data, items with no `lastPurchasePrice` render as unknown and do not
+  appear as the most profitable items on the menu.
+
+**T4 — Let the agent use it** (~15 min)
+- Add `menu_margins` to the Feature 2 MCP tool table, described so an agent knows to check margins
+  before proposing price changes — this is the read that makes Feature 5's discount tooling safe.
+  An agent that can apply a 20% discount without seeing that the item runs a 15% margin is a
+  liability.
+- Document the interaction in `docs/agent-setup.md`: read margins → propose repricing → dry-run
+  through `menu/apply` → operator approves. Same read-propose-preview-apply loop as Feature 6, which
+  is the pattern this whole plan keeps converging on.
+- Check: after an `apply_menu` price change, `menu_margins` reflects the new margin with no other
+  call.
+
+### Non-goals
+
+Yield and waste factors (a 10kg case of tomatoes does not yield 10kg of usable tomato), labour cost
+per item, prep-time weighting, supplier price-trend analysis, and any "you are ready for a second
+location" scoring. That last one is tempting and should be resisted until the margin numbers have
+been trusted by a real operator for a few months — a readiness score built on unvalidated cost data
+is a confident wrong answer about someone's livelihood.
+
+### A unit hazard worth naming
+
+`inventoryItems.unitOfMeasure` is free text and `billOfMaterials.quantityDeducted` is a bare number.
+Nothing enforces that a BOM quantity is in the same unit as the item's purchase price. Grams against
+a per-kilo price is a 1000× costing error that looks entirely plausible on screen. This feature does
+not fix it, but T1 should surface the item's `unitOfMeasure` in its output so the mismatch is at
+least visible, and it is worth its own feature.
+
+### Definition of done
+
+An operator opens Reports and sees, worst first, which menu items make money and which do not — with
+anything the system cannot cost honestly labelled as unknown rather than flattered.
+
+---
+
 ## Feature 9 — A backup that contains everything, and a restore that cannot wipe you
 
 **Status:** planned
