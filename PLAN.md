@@ -5,6 +5,161 @@ Newest feature at the top. Tasks are sized so a single AI coding agent can finis
 
 ---
 
+## Feature 2 — Agent Bridge: let an agent actually connect to the POS
+
+**Status:** planned
+**Vision pillar:** #2 — AI Agent first POS
+**Depends on:** Feature 1 (uses `menu/apply` as its main write tool)
+**Added:** 2026-08-09
+
+### The problem
+
+Feature 1 gives an agent a good pair of hands for the menu. It does not give the agent a way to
+*reach* the POS. Today there is no agent-facing entry point of any kind in this repo — no MCP
+server, no tool manifest, no LLM dependency in `package.json`. "An AI agent living alongside the
+system" is, as of now, entirely unimplemented.
+
+Two concrete gaps stand between the current REST API and a working agent:
+
+1. **No connection.** An operator running Claude (desktop, mobile, or in this repo) has no way to
+   point it at their store. The only integration path is "read `docs/api-reference.md` and hand-write
+   `curl`", which is not something a restaurant owner does.
+2. **No read half.** Even with `menu/apply`, an agent cannot safely *change* a menu it cannot see.
+   Answering "what's on my menu and what does it cost" currently means `GET`ing products, variants,
+   modifier groups, modifiers, and product-modifier-group links, then joining five arrays by ID —
+   the same N+1 problem Feature 1 fixed for writes, unfixed for reads, and it burns an enormous
+   amount of the agent's context on raw rows.
+
+### The architectural constraint that shapes this feature
+
+There are **two servers** running the same handler layer, and they do not have the same data:
+
+| | Express server (`server/routes.ts`) | Local server (`client/src/lib/local-server.ts`) |
+|---|---|---|
+| Runs on | Node, port 5000 | In-app, `127.0.0.1:8080` via the Capacitor plugin |
+| Storage | PostgreSQL via Drizzle | IndexedDB via Dexie |
+| Menu data | yes | yes |
+| **Sales data** | **no — returns 501** | yes |
+| Reports, order simulate | **no — returns 501** | yes |
+
+`server/routes.ts` has three explicit 501 responses saying so outright: *"Sales are stored
+client-side in IndexedDB."* This is not a bug to route around; it is the offline-first design. It
+means an agent's available capabilities depend on **which server it is talking to**, and the feature
+has to model that honestly rather than advertising tools that will 501.
+
+### The feature
+
+A single **MCP endpoint mounted on the shared handler layer**:
+
+```
+POST /api/mcp
+```
+
+Because it lives in `shared/api-handlers.ts` alongside everything else, it is exposed by *both*
+servers automatically — the same trick that makes Feature 1 work online and offline with one
+implementation. Point an agent at port 5000 and it gets menu-management tools. Point it at the
+in-app server on 8080 and it additionally gets sales and reporting tools. No second codebase, no
+separate process to supervise, no new deployment unit.
+
+**Tools exposed (first cut):**
+
+| Tool | Backed by | Available on |
+|---|---|---|
+| `get_menu` | `GET /api/admin/menu/blueprint` (T1 below) | both |
+| `apply_menu` | `POST /api/admin/menu/apply` (Feature 1) | both |
+| `list_inventory` | `GET /api/admin/inventory-items` | both |
+| `adjust_inventory` | `POST /api/admin/inventory-items/:id/adjust` | both |
+| `sales_summary` | `GET /api/reports/sales-summary` | local only |
+| `product_mix` | `GET /api/reports/product-mix` | local only |
+
+`apply_menu` exposes `dryRun` as a first-class parameter, and its description tells the agent to
+call it with `dryRun: true` and show the operator the change list before applying. The approval
+step is part of the tool contract, not an afterthought.
+
+### Do not add the MCP SDK
+
+MCP is JSON-RPC 2.0 with three methods that matter here: `initialize`, `tools/list`, and
+`tools/call`. Hand-writing that dispatch is roughly 80 lines and has no dependencies. Adding
+`@modelcontextprotocol/sdk` would pull a Node-oriented package into `shared/`, which is also
+bundled into the browser for the local server — the exact place where a Node-only transport
+breaks.
+
+```
+ponytail: hand-rolled MCP over plain JSON-RPC POST. No SSE, no streaming,
+no resources/prompts/sampling. Adopt @modelcontextprotocol/sdk if and when
+server-initiated messages or resource subscriptions are actually needed.
+```
+
+### Tasks
+
+Each is independently completable by an AI agent in about 15 minutes.
+
+**T1 — `GET /api/admin/menu/blueprint`: the read half** (~15 min)
+- In `shared/api-handlers.ts`, add a handler that reads products, variants, modifier groups,
+  modifiers, and product-modifier-group links, and assembles them into **exactly the shape that
+  `menu/apply` accepts** — nested, name-referenced, no IDs, no `updatedAt`, no `deletedAt`.
+- Skip soft-deleted rows. Sort products and variants by name so the output is stable across calls;
+  an agent diffing two exports should see only real changes.
+- The invariant that makes this worth building: **export → apply is always a no-op.** Feeding the
+  output of `menu/blueprint` straight into `menu/apply` must produce a change list that is entirely
+  `noop`. That single property is what turns read + write into a safe edit loop: an agent fetches
+  the menu, edits the JSON it already understands, and applies it back.
+- Check: an assertion that seeds a small menu, exports it, runs it through `planMenuApply` from
+  Feature 1 T2, and asserts every change is `noop`. This is the highest-value test in either feature
+  — it pins both halves against each other.
+
+**T2 — MCP JSON-RPC core** (~15 min)
+- In a new `shared/mcp.ts`, implement the dispatch for `initialize` (reply with protocol version and
+  `{ capabilities: { tools: {} } }`), `tools/list`, and `tools/call`.
+- Handle JSON-RPC framing properly: echo the request `id`, return errors in the
+  `{ code, message }` envelope rather than throwing, and return `-32601` for unknown methods and
+  `-32602` for bad params. Notifications (a request with no `id`) get no response body.
+- A tool result is `{ content: [{ type: "text", text: "<json>" }] }` — MCP tool output is text
+  blocks, not raw JSON, and getting this wrong is the most common way a hand-rolled MCP server
+  fails to work with a real client.
+- Check: assertions for a valid `tools/list`, an unknown method returning `-32601`, and a
+  notification returning nothing.
+
+**T3 — Tool definitions and capability probing** (~15 min)
+- Define the tool table above, each entry mapping to an existing route in `api-handlers.ts` with a
+  JSON Schema for its input. Reuse the Feature 1 zod schema for `apply_menu`'s input schema rather
+  than hand-writing a second copy that can drift.
+- Register `POST /api/mcp` in `createApiHandlers`, dispatching into `shared/mcp.ts`.
+- **Capability probing:** `tools/list` must only advertise tools the current storage adapter can
+  actually serve. The Express adapter's `listSales()` returns `[]` and its report routes 501; the
+  Dexie adapter serves both. Decide availability from the adapter — for example a
+  `supports?: string[]` field on `ApiAdminStorage`, defaulting to full support so the local server
+  needs no change — rather than sniffing the environment. An agent that is never offered
+  `sales_summary` cannot waste a turn calling it and reading a 501.
+- Check: a `tools/list` against a stub adapter without sales support omits `sales_summary` and
+  `product_mix`, and includes them when support is declared.
+
+**T4 — Connection docs** (~15 min)
+- New `docs/agent-setup.md`: what the endpoint is, the two servers and their differing capability
+  sets (reproduce the table above — this is the single most confusing thing about the system for
+  anyone connecting an agent), a ready-to-paste MCP client config block, and a worked example of the
+  read → dry-run → approve → apply loop.
+- Link it from `docs/api-reference.md` and `replit.md` so it is discoverable from where people
+  already look.
+
+### Non-goals
+
+No authentication on the MCP endpoint in this cut — it inherits whatever the admin API already has,
+which is nothing, and the local server binds to `127.0.0.1` only. **Do not deploy the Express server
+with `/api/mcp` reachable from the public internet until auth exists.** Write that warning into
+`docs/agent-setup.md` as part of T4. Auth is its own feature and should be planned as one.
+
+Also out of scope: streaming/SSE transport, MCP resources and prompts, employee and scheduling
+tools, and any tool that moves money.
+
+### Definition of done
+
+An operator connects Claude to their store with one config block, asks "add a large oat milk latte
+for $6.50", and watches the agent read the current menu, show them exactly what will change, and
+apply it on approval — without the operator seeing a single ID, endpoint, or JSON payload.
+
+---
+
 ## Feature 1 — Menu Blueprint: one declarative call to build an entire menu
 
 **Status:** planned
