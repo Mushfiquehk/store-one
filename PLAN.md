@@ -91,7 +91,8 @@ there. Either land features serially, or expect to resolve that file on every me
 | `client/src/lib/local-storage.ts` | 11 (two copies of the same receive path) |
 | `client/src/components/product-wizard.tsx` | 11 (deletes the duplicated cost arithmetic) |
 | `shared/pricing.ts` | 5 creates it, 10 and 11 both add costing functions — **11 first** |
-| `client/src/pages/reports.tsx` | 10 (adds a margins table), 13 (replaces two fake tabs) — **13 first** |
+| `client/src/pages/reports.tsx` | 10 (adds a margins table), 13 (replaces two fake tabs), 14 (adds labour) — **13 first** |
+| `client/src/pages/employees.tsx` | 14 (adds the pay-rate field) |
 | `shared/api-handlers.ts` (reports) | 12 moves the two report handler bodies into `shared/reports.ts` |
 | `client/src/pages/onboarding.tsx` | 6 |
 | `client/src/lib/sync.ts` | 8 |
@@ -125,6 +126,122 @@ All four tasks complete, every `Check:` passing, `npm run check` (tsc) clean, an
 stated "Definition of done" demonstrably true. A feature with three of four tasks done is not
 partially shipped — it is unshipped, and several of these leave the system in a worse state
 half-built than not started (Feature 3 T3 in particular).
+
+---
+
+## Feature 14 — Labour: the second-biggest number, and nobody can even type a wage
+
+**Status:** planned
+**Vision pillar:** #1 — "the best foundation". Food cost plus labour is prime cost, and prime cost is
+the number that decides whether a business can afford a second location.
+**Depends on:** Feature 13 (labour as a percentage of *random* revenue is not a number)
+**Added:** 2026-08-09
+
+### The finding
+
+Labour is the second-largest line in a restaurant's P&L, usually within a few points of COGS. The
+codebase has employees, pay rates, time punches and a full drag-and-drop schedule — and computes
+nothing from any of it.
+
+**1. `payRate` is multiplied by nothing, anywhere.** Grep it across `client/`, `server/` and
+`shared/`: it is declared (`shared/schema.ts:147`), seeded (`server/seed-data.ts:255-258` at 2200,
+1600, 1550 and 1400), stored, and round-tripped through both storage layers. It is never an operand.
+
+**2. There is no way to enter one.** The employee dialog in `client/src/pages/employees.tsx` renders
+exactly four fields — Name (`:189`), Role (`:193`), Email (`:203`), Access PIN (`:215`). There is no
+pay-rate input. `payRate` is set to a hardcoded `1500` when the dialog opens for a new employee
+(`:55`) and otherwise carried through untouched, so **every employee an operator creates in the app
+is silently $15.00/hour**, and nothing on screen ever says so. A labour report built today would
+report confident numbers about a wage nobody chose.
+
+**3. Nothing closes an open punch.** Clocking in writes `{ timeIn: Date.now() }` with no `timeOut`
+(`client/src/components/app-shell.tsx:76-81`); clocking out sets it (`:73`). `activePunch` is found
+by `!tp.timeOut` (`:60`). A closing shift where someone forgets to clock out leaves a punch open
+forever — and the naive `now - timeIn` is then 60 unpaid-looking hours by Monday. Any hours
+calculation has to decide what an open punch means *before* it can produce a number.
+
+**4. The data is split across the client/server line.** Employees and time punches are **client-only
+by Feature 7 T4's deliberate decision** — the server answers 501 (`server/routes.ts:643, 648`).
+Schedule shifts are the opposite: real server routes at `server/routes.ts:1125-1159`, fetched over
+HTTP by `client/src/pages/schedule.tsx:139`. Actual hours and scheduled hours therefore live on
+opposite sides of that line, and this feature must not quietly relocate either one.
+
+### The shape
+
+Actual labour cost is one multiply — `hours × payRate` — over data that already exists. What this
+feature is really about is the three honesty problems around it: a wage nobody set, a punch nobody
+closed, and a percentage whose denominator is currently `Math.random()`.
+
+### Tasks
+
+**T1 — A wage an operator can actually set** (~15 min)
+- Add a pay-rate field to the employee dialog (`client/src/pages/employees.tsx:189-220`), beside the
+  existing four. Label it with its unit — **per hour** — and edit in dollars while storing cents, the
+  way the rest of the app treats money.
+- Delete the hardcoded `1500` default at `:55`. A new employee should start empty and be **required**
+  to have a rate before saving, or be explicitly marked unpaid; inventing a plausible wage is exactly
+  the "flattering lie" failure Feature 10 and Feature 11 both got caught by.
+- Existing rows keep whatever they have. Do not backfill 1500 onto them — a wrong wage that looks
+  deliberate is worse than a blank one.
+- Check: create an employee, set $18.50, reload, and confirm `payRate === 1850`. Then confirm an
+  employee saved before this change still reads back unchanged.
+
+**T2 — Hours, with an explicit answer for the punch nobody closed** (~15 min)
+- Add `shared/labor.ts` with `hoursWorked(punches, { since, until })` and
+  `laborCostCents(punches, employees, window)`, pure over the types in `shared/schema.ts:154-161`.
+- Clamp every punch to the window so a shift spanning midnight is split across days rather than
+  counted twice or dropped.
+- **Open punches:** a punch with no `timeOut` whose `timeIn` is within the current shift counts to
+  `now` and is reported as *in progress*. One older than a configurable cutoff (default 16 hours) is
+  **not** silently billed — it is returned in an `unclosedPunches` list for the operator to fix,
+  exactly as Feature 10 returns `unknownIngredients` rather than costing them at zero. Return
+  `{ costCents, hours, inProgress, unclosedPunches }`, never a bare number.
+- Employees with no `payRate` yield hours but unknown cost, and must appear in the unknown list
+  rather than contributing zero.
+- Check: a punch open for 40 hours does not add 40 hours to the total and does appear in
+  `unclosedPunches`; a punch crossing midnight splits correctly across two days.
+
+**T3 — Labour on the reports page, as cost and as a percentage** (~15 min)
+- Add labour to `client/src/pages/reports.tsx`: cost for the selected window and **labour as a
+  percentage of revenue**, which is the form operators actually manage against. `employees` is
+  already destructured there (`reports.tsx:105`) and currently unused; `timePunches` comes off the
+  same `useStore()` (`client/src/lib/store.tsx:251-252`).
+- **This is why Feature 13 comes first.** Labour percent divides by revenue, and until Feature 13
+  lands that denominator is `generateMockSalesData()`. Shipping this against the current page
+  produces a labour percentage that changes on every render.
+- Any window containing an unclosed punch must say so next to the number rather than quietly
+  under-reporting it.
+- Check: with seeded punches the labour percentage equals `laborCostCents / revenueCents` for the
+  same window, and two consecutive loads agree.
+
+**T4 — Scheduled versus actual** (~15 min)
+- The schedule already holds intent: `scheduleShifts` (`server/schema.ts:157`) with `weekStart`,
+  `dayOfWeek`, `startMinutes`, `endMinutes`. Scheduled hours are `(endMinutes - startMinutes) / 60`
+  summed per employee per week, and scheduled cost is that times `payRate`.
+- Show scheduled versus actual for the week, per employee, with the variance. "You rostered 38 hours
+  and paid 44" is the single most actionable labour number a small operator gets, and it is the one
+  an agent should be able to read before it is trusted to touch a schedule (pillar #2).
+- Shifts come from the server (`GET /api/schedule/shifts?weekStart=`) while punches are local —
+  fetch the week rather than assuming a local table, and degrade to actual-only if that call fails.
+  Do **not** "fix" the split by moving punches server-side; that reverses Feature 7 T4 and is its own
+  feature.
+- Check: a week with a rostered shift and no matching punch shows the full shift as variance rather
+  than being omitted, and the page still renders actual hours when the shifts request fails.
+
+### Non-goals
+
+Payroll runs, tax withholding, overtime rules (they are jurisdictional and belong nowhere near a
+first pass), break tracking, tips and tip-outs, salaried staff, labour cost attributed per menu item
+— Feature 10 already lists that as a non-goal and it stays one — and moving employees or punches to
+the server. **Prime cost** (Feature 10's COGS percentage plus this feature's labour percentage) is
+the obvious next step and deliberately not bundled here: it is one addition once both numbers are
+trustworthy, and worthless before then.
+
+### Definition of done
+
+An operator can set a wage, see what they actually paid in labour for a period, see it as a
+percentage of real revenue, and see where the week's hours diverged from the roster — with forgotten
+clock-outs surfaced as something to fix rather than folded silently into the total.
 
 ---
 
@@ -219,8 +336,8 @@ Date-range pickers beyond the existing granularity selector, comparison periods 
 export, charting the inventory tab (it is already honest), and the labour/payroll side of the P&L —
 `employees.payRate` (`shared/schema.ts:147`) is stored, seeded, and edited but multiplied by nothing
 anywhere in the codebase, and `timePunches` are client-only by Feature 7 T4's deliberate decision.
-**Labour cost is the natural next feature** and, with Feature 10's margins, is what makes prime cost
-reachable; it is not this one.
+**Labour cost is Feature 14**, which depends on this one for its denominator; with Feature 10's
+margins it is what makes prime cost reachable.
 
 ### Definition of done
 
