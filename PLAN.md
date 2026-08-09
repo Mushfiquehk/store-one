@@ -87,6 +87,126 @@ half-built than not started (Feature 3 T3 in particular).
 
 ---
 
+## Feature 11 — Purchase units vs stocking units: the bug that makes every cost wrong
+
+**Status:** planned
+**Vision pillar:** #1 — Feature 10 is unusable without this
+**Blocks:** Feature 10 (margins computed on today's data are off by orders of magnitude)
+**Added:** 2026-08-09
+
+### The finding
+
+Feature 10 named a unit hazard and left it for later. Checking how `lastPurchasePrice` is maintained
+showed it is not a hazard — it is a live, structural error, and the demo data demonstrates it.
+
+The good news first: the invoice→cost link works. `createInvoiceWithLineItems`
+(`server/storage.ts:910`, mirrored at `client/src/lib/local-storage.ts:444-497`) writes
+`lastPurchasePrice: lineItem.unitPriceCents` when an invoice is recorded. Costs do get maintained.
+
+The problem is **what unit that number is in**. `unitPriceCents` is the price per unit *as
+purchased* — a case, a gallon, a sack. `inventoryItems.unitOfMeasure` is the unit the item is
+*stocked and consumed* in, and `billOfMaterials.quantityDeducted` is expressed in that stocking
+unit. Nothing converts between them. The invoice's per-case price is written straight into the field
+that costing multiplies by a per-ounce recipe quantity.
+
+The seeded demo data shows exactly what this produces:
+
+| Item | `unitOfMeasure` | `lastPurchasePrice` | What the number really is | Implied |
+|---|---|---|---|---|
+| Whole Milk | `oz` | `450` | $4.50 per gallon | **$4.50 per ounce** |
+| Espresso Beans | `oz` | `1200` | $12.00 per bag | **$12.00 per ounce** |
+| Matcha Powder | `tsp` | `2500` | $25.00 per tin | **$25.00 per teaspoon** |
+| All-Purpose Flour | `oz` | `300` | $3.00 per bag | **$3.00 per ounce** |
+
+A 12 oz latte would cost `12 × $4.50 = $54` in milk alone. The chocolate chip cookie
+(`server/seed-data.ts:230`) deducts 2 oz of flour, costing $6.00 of flour in a $2.75 cookie.
+
+So Feature 10 built on today's data would not be slightly off — it would report that essentially the
+entire menu loses money, and it would be *believable enough to act on*. That is worse than no margin
+report, and it is why this feature blocks that one.
+
+### The fix, and what not to build
+
+Two fields on the inventory item and one division:
+
+- `purchaseUnit` — free text label, e.g. `"gallon"`, `"case of 24"`. Display only.
+- `stockUnitsPerPurchaseUnit` — a number. "One gallon is 128 oz" → `128`.
+
+```
+costPerStockUnit = unitPriceCents / stockUnitsPerPurchaseUnit
+```
+
+**Do not build a unit-conversion system.** No `convert-units` dependency, no ounce/gram/litre
+conversion graph, no unit ontology. The operator knows their own pack sizes; one number they type
+once per item beats a library that has to guess whether "oz" means weight or volume — a distinction
+that genuinely matters for flour versus milk and that no generic converter can resolve.
+
+```
+ponytail: one conversion factor per item, entered by the operator. No unit
+algebra, no dimension checking. If suppliers start changing pack sizes often
+enough that this drifts, the upgrade is a factor per invoice line, not a
+units library.
+```
+
+### Tasks
+
+**T1 — Add the fields, defaulting to no-op** (~15 min)
+- Add `purchaseUnit: text` (nullable) and `stockUnitsPerPurchaseUnit: doublePrecision NOT NULL
+  DEFAULT 1` to `adminInventoryItems` in `server/schema.ts` and to the Dexie schema in
+  `client/src/lib/db.ts`. Generate the migration with `drizzle-kit`.
+- **A default of `1` makes existing behaviour bit-identical** — dividing by one changes nothing. The
+  data stays as wrong as it is today until an operator supplies a real factor, and nothing breaks on
+  the way there. Never default this to `0`; a division by zero here would take out costing entirely.
+- Check: migration applies to a seeded database, every existing row reads back `1`, and current cost
+  arithmetic is unchanged.
+
+**T2 — Store cost per stocking unit** (~15 min)
+- In both copies of `createInvoiceWithLineItems` (`server/storage.ts:882`,
+  `client/src/lib/local-storage.ts`), write
+  `lastPurchasePrice = unitPriceCents / stockUnitsPerPurchaseUnit` instead of the raw unit price.
+  These two implementations must stay in step — a divergence here means the server and the tablet
+  disagree about what every item costs.
+- Guard the divisor: treat null, zero, or negative as `1` and record that the conversion was skipped.
+  Silently producing `Infinity` into a money field is the failure mode to design out.
+- Add a comment on the `lastPurchasePrice` field in both schemas stating its unit is **cents per
+  stocking unit**. The absence of that sentence is the root cause of this entire feature.
+- Check: an invoice line for one gallon at $4.50 against an item stocked in `oz` with a factor of
+  128 stores `≈3.5` cents per ounce, not `450`.
+
+**T3 — Ask for the factor where the operator already is** (~15 min)
+- Surface both fields in the inventory editor and in `admin-invoice-intake.tsx`, phrased as a
+  question rather than a schema field: *"You bought 1 gallon. How many oz is that?"* The operator is
+  looking at the physical case when recording the invoice — that is the moment they can answer.
+- Show the derived per-stocking-unit cost immediately after entry so an implausible number is
+  visible while it is still cheap to fix.
+- Do not block invoice recording on it. An operator entering invoices at 11pm must be able to finish;
+  an unset factor means the cost stays unconverted and the item is flagged, exactly like Feature 10's
+  unknown-cost rows.
+- Check: entering a factor updates the displayed per-unit cost live, and leaving it blank still
+  records the invoice.
+
+**T4 — Fix the demo data, and flag implausible costs** (~15 min)
+- Correct `server/seed-data.ts` and `client/src/lib/seed-data.ts` (the two copies) so the demo
+  catalogue carries honest per-stocking-unit costs and realistic factors. The demo data currently
+  encodes the bug, so anyone building Feature 10 against it would conclude their maths was broken.
+- Add a plausibility flag to Feature 10's margin report: an item whose ingredient cost exceeds its
+  selling price is either genuinely underpriced or has a bad conversion factor. Say both, and link to
+  the item. This is a signal, not a hard error — some loss-leaders are real.
+- Check: after correction, the demo latte's milk cost is cents rather than dollars, and the seeded
+  menu reports plausible margins end to end.
+
+### Non-goals
+
+Yield and waste factors (Feature 10 already defers these), per-invoice pack sizes, unit conversion
+between measurement systems, and any automatic inference of pack size from supplier descriptions.
+
+### Definition of done
+
+`lastPurchasePrice` means cents per stocking unit everywhere, it is documented as such in both
+schemas, and the demo menu produces margins a restaurant operator would recognise as real.
+
+---
+
 ## Feature 10 — Menu margins: the number that decides whether there is a second location
 
 **Status:** planned
@@ -195,13 +315,12 @@ location" scoring. That last one is tempting and should be resisted until the ma
 been trusted by a real operator for a few months — a readiness score built on unvalidated cost data
 is a confident wrong answer about someone's livelihood.
 
-### A unit hazard worth naming
+### The unit hazard — now Feature 11, and it blocks this feature
 
-`inventoryItems.unitOfMeasure` is free text and `billOfMaterials.quantityDeducted` is a bare number.
-Nothing enforces that a BOM quantity is in the same unit as the item's purchase price. Grams against
-a per-kilo price is a 1000× costing error that looks entirely plausible on screen. This feature does
-not fix it, but T1 should surface the item's `unitOfMeasure` in its output so the mismatch is at
-least visible, and it is worth its own feature.
+`lastPurchasePrice` currently holds the price per *purchased* unit while `quantityDeducted` is in
+*stocking* units, with no conversion. Margins computed on today's data are wrong by orders of
+magnitude — see Feature 11, which must land first. T1 should still surface the item's
+`unitOfMeasure` in its output so any residual mismatch stays visible.
 
 ### Definition of done
 
