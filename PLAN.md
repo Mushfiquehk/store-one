@@ -92,166 +92,374 @@ half-built than not started (Feature 3 T3 in particular).
 
 ---
 
-## Feature 8 — CYO: half-and-half, and toppings that thin out as you add them
+## Feature 10 — Menu margins: the number that decides whether there is a second location
 
 **Status:** planned
-**Vision pillar:** #4 — "flexible enough to allow creating a 1/2 & 1/2 CYO Pizza with unlimited
-toppings. The topping amounts in the recipe will be dynamically calculated based on the total topping
-amounts, using a matrix setup by the operator."
+**Vision pillar:** #1 — the guiding star itself, "boost their business into getting a second location"
+**Depends on:** Feature 5 T1 (needs the pure pricing/BOM functions out of `server/bom-engine.ts`)
 **Added:** 2026-08-09
 
 ### The finding
 
-Most of pillar #4 is already built, and the plan should say so before anyone rebuilds it.
-`server/bom-engine.ts:203` already resolves sub-recipes five levels deep with cycle detection,
-already deducts per-modifier inventory (`bom-engine.ts:270-292`), and already scales BOM quantities
-through a matrix (`bom-engine.ts:257-261`). "Unlimited toppings" needs no work at all — a modifier
-group with `maxSelections` set high already does it.
+Features 1–9 are foundation, plumbing, and bug fixes. Necessary, but none of them help a business
+*grow*, which is what VISION.md actually asks for. This is the gap.
 
-Two things are genuinely missing, and they are the two the vision statement names explicitly.
+**Nothing in the codebase computes cost, margin, or profit.** A grep for those words across
+`server/`, `shared/`, and the reports page returns only CSS `margin` properties. The three report
+endpoints — `sales-summary`, `product-mix`, `inventory-status` (`shared/api-handlers.ts:504, 534,
+571`) — are all volume and revenue. An operator can see that they sold 200 croissants and cannot see
+whether they made money on any of them.
 
-**1. There is no such thing as half a pizza.** Grep the repo for `placement`, `half`, `portion`:
-nothing outside a seed-data ingredient called "Whole Milk". `SaleLine.modifiers`
-(`shared/schema.ts:16-21`) carries `modifierId`, `name`, `qty`, `unitPrice` — there is nowhere to
-record that the pepperoni went on the left. A 1/2 & 1/2 pizza is currently orderable only by
-deducting a full portion of both toppings, which overstates COGS on every split order.
+**Every input already exists:**
 
-**2. Both existing matrices key on size, never on topping count.** `ScaleFactorMatrix`
-(`shared/schema.ts:8`) is `Record<string, number>` looked up by variant id or variant name
-(`bom-engine.ts:259`). `ModifierScaleFactors` (`shared/schema.ts:6`) is
-`modifierId → variantKey → price`. Neither can express the rule the vision actually describes: *one
-topping is 4oz, but four toppings are 2oz each.* Today a 4-topping pizza deducts 4 × 4oz = 16oz of
-topping, which is not what the kitchen puts on it and not what the operator paid for.
+| Input | Where |
+|---|---|
+| What an item costs to make | `billOfMaterials.quantityDeducted` × `inventoryItems.lastPurchasePrice` (`server/schema.ts:101, 90`) |
+| What it sells for | `variants.basePrice` |
+| What actually sold | `sales.linesJson` |
+| What was really paid for stock | `invoiceLineItems.unitPriceCents` |
 
-### The feature
+And the hard part is already written. `computeInventoryDeductions` (`server/bom-engine.ts:203`) is a
+**pure function** taking line items plus preloaded data and returning
+`Map<inventoryItemId, quantity>` — already handling modifiers, scale factors, and composite
+products. Costing one variant is that map, priced:
 
-One new matrix, one new field on a modifier selection.
-
-**Placement.** A modifier selection gains `placement: "WHOLE" | "LEFT" | "RIGHT"` (default `WHOLE`).
-It resolves to a fraction — `WHOLE` = 1, `LEFT`/`RIGHT` = 0.5 — that multiplies both what is deducted
-and (through one operator knob) what is charged. Halves are the whole of 1/2 & 1/2; thirds and
-quadrants are a non-goal.
-
-**The count matrix.** `productModifierGroups` gains `countScaleMatrix`, shaped
-`variantKey → countKey → multiplier`:
-
-```jsonc
-{
-  "Large":  { "1": 1.0, "2": 0.8, "3": 0.65, "5": 0.5 },
-  "*":      { "1": 1.0, "2": 0.85, "4": 0.7 }   // fallback for sizes not listed
-}
+```
+cost(variant) = Σ over computeInventoryDeductions([{variantId, qty: 1}], data)
+                  of quantity × inventoryItem.lastPurchasePrice
 ```
 
-Read it as: on a Large, each topping is deducted at 65% of its base BOM quantity once three toppings
-are on the pizza. The lookup takes the **largest declared count key ≤ N**, so `"5"` means "5 or
-more" without anyone inventing a `"5+"` syntax; N below the smallest key clamps to the smallest.
-An absent matrix means multiplier 1 and today's behaviour, unchanged.
+Do not write a second BOM traversal. If this feature grows one, it was built wrong.
 
-It lives on `productModifierGroups` and not on the BOM entry because that is the operator's actual
-mental model — "on a Large pizza, the topping matrix is…" — and it is one lookup for every topping
-in the group rather than one per ingredient.
+### Why this is the growth feature
 
-### Reuse, do not rebuild
+Food cost percentage is the number restaurant operators actually run on. It decides which items to
+push, which to reprice, and which to cut — and whether the business throws off enough margin to
+fund a second location. It is also the most useful thing an agent could tell an operator without
+being asked: *"your croissant is priced below what it costs you to make."* That is Pillar 2's
+"maintain", as opposed to the setup work Features 1 and 6 cover.
 
-- `productModifierGroups` already carries a per-product-per-group jsonb matrix (`server/schema.ts:66`)
-  with a storage method, an interface entry (`shared/api-handlers.ts:44`), a route
-  (`server/routes.ts:502`) and blueprint plumbing (`server/routes.ts:806`). This feature adds a second
-  column beside it and widens that same path — it does not add an endpoint.
-- The deduction loops at `bom-engine.ts:252-292` already thread a multiplier through sub-recipes.
-  Both new factors are multipliers. Nothing about the recursion changes.
-- The pricing knob belongs in `storeSettings`, whose door **Feature 7 T3** opens. Use the key
-  `toppings.halfChargeFactor`. Do not add a table.
+### The honesty requirement
+
+`lastPurchasePrice` is nullable (`server/schema.ts:90`). An item whose ingredients have no recorded
+price has an **unknown** cost, not a zero cost — and zero cost renders as 100% margin, which is the
+most flattering possible lie about a menu. Every task below must keep "unknown" distinct from
+"zero", and the API must say which ingredients are missing prices so the operator can fix it. A
+margin report that quietly treats missing data as free is worse than no report.
 
 ### Tasks
 
-**T1 — Placement: half a topping, deducted and charged** (~15 min)
-- Add `placement?: "WHOLE" | "LEFT" | "RIGHT"` to `LineItemInput["modifiers"]`
-  (`server/bom-engine.ts:8-12`) and to `SaleLine["modifiers"]` (`shared/schema.ts:16-21`) so the split
-  survives into sales history and receipts. Absent means `WHOLE`; reject any other string in
-  `validateLineItems` rather than silently treating it as whole — a typo'd placement that quietly
-  bills a full topping is exactly the silent-wrongness Feature 7 exists to stamp out.
-- One helper, `placementFactor(p)` → 1 or 0.5, used in the modifier deduction loop
-  (`bom-engine.ts:270-292`) on both the BOM branch and the `quantityPerUse` fallback branch. Both
-  branches, or a split order deducts correctly only for toppings that happen to have a BOM row.
-- Charging: multiply the modifier price in `getModifierPrice` (`bom-engine.ts:85`) by
-  `placementFactor × toppings.halfChargeFactor`, read from `storeSettings` with **default 1.0** —
-  most shops charge full price for a topping on half. This is the knob, not the policy; the default
-  must not be silently 0.5.
-- Check: the same topping ordered `LEFT` deducts exactly half what it deducts `WHOLE`, and with the
-  default factor costs exactly the same. Assert both in one test.
+**T1 — Cost per variant** (~15 min)
+- Add `costVariant(variantId, data)` to `shared/pricing.ts` (created by Feature 5 T1, which is what
+  moves `computeInventoryDeductions` out of the db-coupled `bom-engine.ts`). Reuse that function;
+  do not re-walk the BOM.
+- Return `{ costCents, unknownIngredients: string[] }` — never a bare number. If any contributing
+  inventory item has a null `lastPurchasePrice`, name it. The caller decides how to present partial
+  information; the costing function must not decide by silently dropping it.
+- Check: a variant with fully-priced ingredients returns the expected cost; a variant with one
+  unpriced ingredient returns that ingredient's name and does **not** report a lower cost as if it
+  were free.
 
-**T2 — Give the count matrix a column and a door** (~15 min)
-- Add `countScaleMatrix: jsonb("count_scale_matrix")` to `adminProductModifierGroups`
-  (`server/schema.ts:66`, beside `scaleFactors`), and
-  `CountScaleMatrix = Record<string, Record<string, number>>` to `shared/schema.ts:8` alongside the
-  two existing matrix types.
-- Widen the **existing** setter rather than adding one: `setScaleFactorsSchema`
-  (`server/routes.ts:252`) takes an optional `countScaleMatrix`, and
-  `setProductModifierGroupScaleFactors` (`shared/api-handlers.ts:44`) takes it as a second optional
-  argument. Omitted must mean "leave it alone", not "null it" — the two matrices are set from
-  different screens and must not clobber each other.
-- Validate on write: every count key parses as a positive integer, every multiplier is a finite
-  number in `[0, 10]`. This is operator-authored jsonb arriving from a request and it multiplies
-  inventory; a `"abc"` key or a negative multiplier must not reach T3's lookup.
-- Check: set only `countScaleMatrix` on a group that already has `scaleFactors`, read both back, and
-  confirm `scaleFactors` is untouched. Then restart and confirm both persist.
+**T2 — `GET /api/reports/menu-margins`** (~15 min)
+- One row per variant: name, `priceCents`, `costCents`, `marginCents`, `marginPct`, and
+  `costKnown: boolean`. Sort worst-margin first — the rows an operator needs are the bad ones, and
+  a report that opens on the best sellers buries them.
+- Include a `?since=` window and join against `product-mix` volumes so rows carry the weighted
+  contribution, not just per-unit margin. A terrible margin on an item that sells twice a month
+  matters less than a mediocre one on the top seller, and per-unit margin alone cannot show that.
+- Register in `shared/api-handlers.ts` so both servers expose it. Note it needs sales data, so it
+  falls under Feature 2's capability probing — and after Feature 7 T2, the Express server can serve
+  it too.
+- Check: an item priced below its ingredient cost reports a negative margin rather than clamping to
+  zero. Negative margins are the entire point of the report.
 
-**T3 — Resolve the matrix in the deduction engine** (~15 min)
-- In `computeInventoryDeductions` (`bom-engine.ts:203`), per line and per modifier group, compute the
-  topping load `N = Σ (sel.qty × placementFactor(sel.placement))` over that line's selections in the
-  group — a topping on half contributes 0.5 to the load, which is the entire point of the number.
-- Look up `matrix[variant.id] ?? matrix[variant.name] ?? matrix["*"]`, then within it the value at
-  the largest declared numeric key ≤ N, clamping to the smallest key when N is below it. Missing at
-  any step → multiplier 1.
-- **Where it collides with the size matrix:** a MODIFIER BOM entry may already carry its own
-  `scaleFactorMatrix`, also keyed by variant. `countScaleMatrix` is keyed by variant too, so applying
-  both double-counts size. When the group has a `countScaleMatrix`, it wins and the entry's
-  `scaleFactorMatrix` is skipped for that entry. Put that rule in a comment at the branch — it is the
-  kind of decision that gets silently reversed six months later.
-- Final quantity for a modifier deduction is `base × countMultiplier × placementFactor × sel.qty ×
-  line.qty`. Variant BOM entries (`bom-engine.ts:252-268`) are untouched: dough and sauce do not thin
-  out because you added a topping.
-- Check: with `{"Large": {"1": 1.0, "4": 0.5}}` and a 4oz base, one topping deducts 4oz and four
-  toppings deduct 2oz **each** (8oz total, not 16oz). Then confirm one of those four on `LEFT` makes
-  the load 3.5 and deducts half of whatever the 3.5 tier resolves to.
+**T3 — Show it** (~15 min)
+- Add a margins table to `client/src/pages/reports.tsx` alongside the existing reports, worst first,
+  with unknown-cost rows visibly flagged rather than sorted as if their margin were 100%.
+- Give unknown-cost rows a direct link to the inventory item that needs a price. The report's job is
+  to be actionable, and "go find which of your 60 ingredients is missing a price" is not.
+- Check: with seeded demo data, items with no `lastPurchasePrice` render as unknown and do not
+  appear as the most profitable items on the menu.
 
-**T4 — Let an agent declare the matrix** (~15 min)
-- A matrix an operator can only reach through a form is invisible to pillar #2. Add optional
-  `countScaleMatrix` to the product↔modifier-group link in `shared/menu-blueprint.ts`, validated with
-  the same rules as T2 (extract that validator once in T2 and import it here — do not write the
-  bounds check twice), and thread it through apply beside the existing `pmg.scaleFactors` call at
-  `server/routes.ts:806`.
-- Apply must stay idempotent — that invariant is asserted in `shared/menu-blueprint.test.ts:126` and
-  this feature must not be what breaks it.
-- Check: apply a blueprint declaring a CYO pizza with a topping matrix twice; the second apply
-  reports no changes and the matrix is byte-identical.
+**T4 — Let the agent use it** (~15 min)
+- Add `menu_margins` to the Feature 2 MCP tool table, described so an agent knows to check margins
+  before proposing price changes — this is the read that makes Feature 5's discount tooling safe.
+  An agent that can apply a 20% discount without seeing that the item runs a 15% margin is a
+  liability.
+- Document the interaction in `docs/agent-setup.md`: read margins → propose repricing → dry-run
+  through `menu/apply` → operator approves. Same read-propose-preview-apply loop as Feature 6, which
+  is the pattern this whole plan keeps converging on.
+- Check: after an `apply_menu` price change, `menu_margins` reflects the new margin with no other
+  call.
 
 ### Non-goals
 
-**COGS and profitability (pillar #5) are the next feature, not this one.** This feature makes the
-*quantity* deducted correct; nothing here records what that quantity cost. `lastPurchasePrice` exists
-on `adminInventoryItems` (`server/schema.ts:90`) and is currently read by exactly one line of
-`server/routes.ts:1059` — no sale, anywhere, stores a cost. Until a sale snapshots the cost of what
-it consumed, profitability over a period cannot be computed after the fact at any accuracy. Plan that
-next; do not smuggle a `costCents` column into T2.
+Yield and waste factors (a 10kg case of tomatoes does not yield 10kg of usable tomato), labour cost
+per item, prep-time weighting, supplier price-trend analysis, and any "you are ready for a second
+location" scoring. That last one is tempting and should be resisted until the margin numbers have
+been trusted by a real operator for a few months — a readiness score built on unvalidated cost data
+is a confident wrong answer about someone's livelihood.
 
-Also out: thirds and quadrants (`LEFT`/`RIGHT` only), per-topping price tiers by count (the count
-matrix moves quantity, not price), unit-of-measure conversion, and any client UI for building a
-split pizza — this feature makes the model and the engine capable, and the POS screen follows once
-they are.
+### A unit hazard worth naming
+
+`inventoryItems.unitOfMeasure` is free text and `billOfMaterials.quantityDeducted` is a bare number.
+Nothing enforces that a BOM quantity is in the same unit as the item's purchase price. Grams against
+a per-kilo price is a 1000× costing error that looks entirely plausible on screen. This feature does
+not fix it, but T1 should surface the item's `unitOfMeasure` in its output so the mismatch is at
+least visible, and it is worth its own feature.
 
 ### Definition of done
 
-A 1/2 & 1/2 pizza with four toppings on one side deducts, from inventory, exactly what a kitchen
-would put on it: each topping at its matrix multiplier for the load on that side, halved for being on
-one side only. The matrix is declarable in a single blueprint call by an agent. With no matrix and no
-placement set, every existing order deducts exactly what it deducted before this feature.
+An operator opens Reports and sees, worst first, which menu items make money and which do not — with
+anything the system cannot cost honestly labelled as unknown rather than flattered.
+
+---
+
+## Feature 9 — A backup that contains everything, and a restore that cannot wipe you
+
+**Status:** planned
+**Vision pillar:** #1 — "the best foundation". This is the one that loses a business its records.
+**Added:** 2026-08-09
+
+### The finding
+
+Backup and restore both exist and both work, in `client/src/pages/settings.tsx`. The card describes
+them as *"Full snapshot backup of all local data"* (line 740). It is not.
+
+The snapshot is a hand-written object literal (line 256) listing **ten** tables:
+
+```
+products, variants, modifierGroups, productModifierGroups, modifiers,
+inventoryItems, billOfMaterials, employees, timePunches, sales
+```
+
+The Dexie database defines **sixteen**. These six are in `client/src/lib/db.ts` and in
+`SYNC_CATEGORY_TABLES` (`shared/schema.ts:32-35`), but in neither backup nor restore:
+
+```
+combos, comboItems, productGroups, productGroupItems, invoices, invoiceLineItems
+```
+
+So an operator who builds combos and product groups, then restores from backup, loses all of them.
+Supplier invoices too. The word "Full" in that description is the dangerous part — it is the reason
+nobody would think to check.
+
+**Three defects, in descending order of how much they cost:**
+
+1. **Backup silently omits six of sixteen tables** while claiming to be complete.
+2. **Restore clears tables it may not repopulate.** It unconditionally `.clear()`s all ten tables,
+   then writes each back only `if (snapshot.X?.length)`. A snapshot that is missing a key, or has an
+   empty array for it, leaves that table wiped with nothing put back. Restoring a menu-only snapshot
+   deletes the sales history.
+3. **Restore has no confirmation.** `handleRestore` validates that a client code was typed, then
+   goes straight to fetching and wiping ten tables. A mistyped code that happens to match another
+   store replaces this device's data with theirs, with no prompt and no undo.
+
+And underneath all three: **the table list is written out by hand three times** — once in the
+backup literal, once in the restore `clear()` block, once in the restore `bulkPut` block. Three
+hand-maintained copies of the same list is why six tables fell out of two of them. Adding the
+missing tables to all three lists fixes today's symptom and leaves the mechanism that produced it
+fully intact.
+
+### The feature
+
+One list, derived once, used by both paths — then make restore non-destructive by construction.
+
+### Tasks
+
+**T1 — One table list, no hand-maintained copies** (~15 min)
+- Export a single `BACKUP_TABLES` array from `client/src/lib/db.ts`, next to the Dexie schema it
+  must stay in step with — all sixteen tables.
+- Rewrite backup to build its snapshot by iterating that list, and restore to clear and repopulate
+  by iterating the same list. No table name should appear literally in `settings.tsx` afterwards.
+- Add an assertion that `BACKUP_TABLES` covers every table in the Dexie schema, so a table added
+  later fails loudly instead of being silently excluded from backups for a year.
+- Check: back up a database containing combos and invoices, inspect the uploaded snapshot, and
+  confirm all sixteen keys are present.
+
+**T2 — Restore that cannot destroy what it is not replacing** (~15 min)
+- Validate the snapshot **before** touching the database: confirm it is an object and that every key
+  it contains is a known table. Reject and abort with a clear message otherwise. Nothing should be
+  cleared until the snapshot has been shown to be usable.
+- Clear only tables the snapshot actually carries a key for. A snapshot with an explicit empty array
+  for `sales` means "no sales" and should clear; a snapshot with **no `sales` key at all** is an
+  older or partial format and must leave the table alone rather than wipe it.
+- Keep the whole thing in the existing Dexie `rw` transaction so a mid-restore failure rolls back.
+  That part is already right — do not lose it in the rewrite.
+- Check: restoring a snapshot containing only `products` leaves existing sales intact; restoring one
+  with `sales: []` clears sales. Those two cases must behave differently.
+
+**T3 — Confirm before wiping, and say what will be lost** (~15 min)
+- Put a confirmation in front of restore that names the client code being restored from, the
+  backup's `createdAt`, and the row counts about to be replaced — "this will replace 412 sales and
+  38 products on this device". The endpoint already returns `createdAt`; the counts are a local
+  count before the write.
+- The current flow can silently replace one store's data with another's on a typo. This is the only
+  irreversible action in the app.
+- While here: the success message says *"Reload the page to see updated data."* If a reload is
+  required for correctness, trigger it rather than asking — a user who does not reload is looking
+  at stale state after a destructive operation.
+- Check: cancelling the confirmation leaves every table untouched.
+
+**T4 — Make backup happen without being remembered** (~15 min)
+- Backup is manual only. `client/src/lib/sync.ts:200-208` has a `setInterval` auto-timer, but it
+  drives **auto-sync**, not backup — there is no automatic backup anywhere. A small restaurant's
+  disaster recovery currently depends on the owner remembering to open Settings and click a button.
+- Reuse the existing auto-sync timer pattern rather than adding a second scheduler: same
+  enabled/interval settings shape, same `localStorage` key convention (`cornerpos_sync_` prefix),
+  a separate interval for backup.
+- Surface "last backup" with its age on the Settings card, and in the Feature 6 setup status. A
+  backup that last ran three weeks ago should look wrong at a glance.
+- Skip the upload when nothing has changed since the last backup — compare the max `updatedAt`
+  across tables against the last backup time. Snapshots are whole-database blobs; re-uploading an
+  unchanged one on a timer is pure waste.
+- Check: with auto-backup enabled and a short interval, a change triggers exactly one upload and an
+  idle period triggers none.
+
+### Correction to Feature 8
+
+Feature 8's non-goals state that no restore path is exercised anywhere. That is wrong — restore
+exists in `settings.tsx` and does write the snapshot back into Dexie. The real problems are the
+three above, not the absence of a restore.
+
+### Non-goals
+
+Server-side backup scheduling, multiple retained backup versions (`getLatestBackup` returns only the
+most recent, so there is exactly one restore point per client — worth revisiting, but a schema and
+retention question), point-in-time recovery, and export to a file the operator holds themselves.
+
+### Definition of done
+
+A backup contains every table the app stores, restoring one cannot delete data it is not replacing,
+restore asks first, and a store that has not been backed up in weeks says so.
+
+---
+
+## Feature 8 — Sync that converges, and a conflict policy that is written down
+
+**Status:** planned
+**Vision pillar:** #1 — "the best foundation". Sales records are the business's books.
+**Added:** 2026-08-09
+
+### How sync works today
+
+Clients push changed rows per category to `POST /api/sync/:category`; the server stores them as JSON
+blobs in `syncRecords`, keyed `(clientId, tableName, recordId)`, and returns `serverChanges` for the
+client to apply. `processSyncChanges` (`server/storage.ts:215`) is the whole conflict engine.
+
+For the menu tables it builds an `adminLookups` map — `products`, `variants`, `modifierGroups`,
+`modifiers`, `productModifierGroups` — and for each incoming change looks up the corresponding
+`admin_*` row. That design intent is sound: the admin console owns the menu, POS devices consume it.
+
+Two problems with the implementation.
+
+### Problem 1 — the comparison can essentially never be equal
+
+```ts
+const posDataJson  = JSON.stringify(change.data);
+const adminDataJson = JSON.stringify(adminData);
+const dataMatches = posDataJson === adminDataJson && change.deletedAt === adminDeletedAt;
+```
+
+`JSON.stringify` is sensitive to key order and to the exact set of keys. The two sides are built by
+entirely different machinery:
+
+- `adminData` is a Drizzle row — every column, in schema-definition order.
+- `change.data` is `data: record` straight out of Dexie (`client/src/lib/sync.ts:97`) — whatever
+  shape the client wrote, in its own key order.
+
+So they differ on key order, and separately on field set: `adminProducts` carries a `createdAt`
+column the client record need not have, and Feature 3 is about to add `locationId` to all ten tables,
+widening the gap further.
+
+When `dataMatches` is false the server overwrites the sync record with the admin version and pushes
+it back to the client. If the comparison never returns true, **every menu record is pushed to every
+client on every sync, forever.** Sync does not converge; it just moves the same rows back and forth.
+
+### Problem 2 — "admin wins" is unconditional, and undocumented
+
+`adminUpdatedAt` is read out of the row and written into `syncRecords`, but it is **never compared
+to `change.updatedAt`**. Whenever the two sides differ, admin wins regardless of which edit is newer.
+
+For menu data that may well be the intended policy — but it is nowhere stated, and it means a newer
+POS-side edit is discarded silently. A conflict policy that lives only in the shape of an `if`
+statement is one that gets reversed by accident during the next refactor.
+
+### The feature
+
+Make sync converge, and write the policy down where it can be checked.
+
+### Tasks
+
+**T1 — Confirm the mismatch, then fix the comparison** (~15 min)
+- **Confirm before fixing.** Add temporary logging of `posDataJson` and `adminDataJson` on a
+  mismatch and run one sync against seeded data. The reasoning above predicts they differ on key
+  order and field set; verify that is what is actually happening rather than trusting the analysis.
+  If they match, the real cause is elsewhere and the rest of this task is wrong.
+- Replace the string comparison with a value comparison over an **explicit field list per table** —
+  the fields sync is actually responsible for. Not a deep-equal over whatever keys happen to be
+  present: an explicit projection also stops server-only columns (`locationId`, `createdAt`) from
+  ever counting as a difference.
+- Normalise before comparing: treat `undefined` and `null` as equal, and compare numbers as numbers.
+  Dexie and Postgres disagree about empty values often enough that this is where the next
+  false-mismatch will come from.
+- Check: two semantically identical records with different key insertion order and one extra
+  server-only field compare as equal.
+
+**T2 — Make the conflict policy explicit** (~15 min)
+- Write the policy as a named function — `resolveConflict(pos, admin)` returning which side wins and
+  why — rather than leaving it implicit in control flow. One place to read, one place to change.
+- Keep admin-wins for the menu tables if that is the intent, but make it a stated rule with a
+  comment explaining *why* (the admin console is the source of truth for the menu; POS devices
+  consume it). For tables with no admin counterpart, last-write-wins on `updatedAt` is the fallback
+  that is already implied — state it.
+- Fix the timestamp fallback at `client/src/lib/sync.ts:99`:
+  `updatedAt: (record.updatedAt as number) || Date.now()`. A record with no `updatedAt` is stamped
+  *now*, which makes the oldest data in the system look like the newest — precisely backwards for
+  last-write-wins.
+- Check: an admin-owned table resolves to admin even when the POS record is newer; a non-admin table
+  resolves to whichever side has the greater `updatedAt`.
+
+**T3 — The convergence test** (~15 min)
+- The load-bearing check for this whole feature: seed data, sync, then **sync again with no changes
+  in between and assert the second round pushes zero and pulls zero.** That single assertion is what
+  proves the system reaches a fixed point, and it is exactly what fails today.
+- Then: change one field on the client, sync, and assert exactly one record moves — not the whole
+  table.
+- Add a third case for the delete path, since `deletedAt` participates in the comparison and
+  soft-deletes are the easiest thing to get wrong when reworking equality.
+
+**T4 — Resolve the two-writer question for sales** (~15 min, deferred here from Feature 7)
+- Sales reach the server two ways: `bom-engine.ts:447` inserts into `adminSales` directly for test
+  orders, and POS sales flow through `syncRecords` as JSON blobs under the `sales` sync group
+  (`shared/schema.ts:34`). After Feature 7 T2 wires `createSale` through, there is a third.
+- Note that `sales` has **no entry in `adminLookups`**, so sync treats it as a plain blob table while
+  `adminSales` is separately a real table with real rows. Determine what actually happens today when
+  the same sale arrives by both paths, and write the answer down.
+- Decide one owner for sales rows and route the others through it. Do not add reconciliation logic
+  between two writers — that is a second system to keep correct.
+- **This task is an investigation first.** If it turns out to need more than a 15-minute change,
+  the deliverable is a written finding and a follow-up feature entry in this file, not a rushed fix
+  to the path that carries the business's revenue records.
+
+### Non-goals
+
+Real-time or push-based sync, multi-device conflict UI, and per-field merge. Backup and restore are
+handled by Feature 9.
+
+### Definition of done
+
+Two consecutive syncs with no intervening edits move zero records, the conflict policy is a named
+function with a stated rule, and sales have exactly one writer.
 
 ---
 
 ## Feature 7 — Stop the server accepting data it silently throws away
 
-**Status:** planned
+**Status:** in progress — T1 and T2 done (sales persist for real; employees/time-punches remain
+501), T3–T4 unstarted. T2 also had to add the missing `admin_sales` table to `initDb` in
+`server/index.ts` — the bootstrap never created it, so every sales write failed on a fresh
+database. Verified end to end by `scripts/check-sales-persistence.sh`.
 **Vision pillar:** #1 — "the best foundation". A POS that discards sales is not a foundation.
 **Added:** 2026-08-09
 

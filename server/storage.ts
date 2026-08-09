@@ -133,6 +133,7 @@ export interface IAdminStorage {
   listSales(): Promise<unknown[]>;
   getSale(id: string): Promise<unknown | null>;
   createSale(data: Record<string, unknown>): Promise<unknown>;
+  updateSale(id: string, data: Record<string, unknown>): Promise<unknown | null>;
 
   getAllAdminData(): Promise<Record<string, unknown[]>>;
   getAllAdminDataWithDeleted(): Promise<Record<string, unknown[]>>;
@@ -877,6 +878,21 @@ export const adminStorage: IAdminStorage = {
     const [r] = await db.insert(adminSales).values(row)
       .onConflictDoUpdate({ target: adminSales.id, set: { ...row, updatedAt: now } }).returning();
     return r;
+  },
+  async updateSale(id: string, data: Record<string, unknown>) {
+    const now = Date.now();
+    const set: Record<string, unknown> = { updatedAt: now };
+    if (data.subtotalCents !== undefined) set.subtotalCents = data.subtotalCents;
+    if (data.taxCents !== undefined) set.taxCents = data.taxCents;
+    if (data.totalCents !== undefined) set.totalCents = data.totalCents;
+    if (data.comboDiscountCents !== undefined) set.comboDiscountCents = data.comboDiscountCents;
+    if (data.paymentMethod !== undefined) set.paymentMethod = data.paymentMethod;
+    if (data.status !== undefined) set.status = data.status;
+    if (data.customerName !== undefined) set.customerName = data.customerName;
+    if (data.linesJson !== undefined) set.linesJson = data.linesJson;
+    if (data.closedAt !== undefined) set.closedAt = data.closedAt;
+    const [r] = await db.update(adminSales).set(set).where(eq(adminSales.id, id)).returning();
+    return r || null;
   },
 
   async createInvoiceWithLineItems(invoiceData: Record<string, unknown>, lineItems: Record<string, unknown>[]) {

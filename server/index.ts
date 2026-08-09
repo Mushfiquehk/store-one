@@ -168,6 +168,25 @@ async function initDb() {
       deleted_at BIGINT
     )
   `);
+  // Missing from this bootstrap until Feature 7 T2, though storage.ts and bom-engine.ts both
+  // write to it — on a fresh database every sales write failed with "relation does not exist".
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS admin_sales (
+      id TEXT PRIMARY KEY,
+      created_at BIGINT NOT NULL,
+      subtotal_cents INTEGER NOT NULL DEFAULT 0,
+      tax_cents INTEGER NOT NULL DEFAULT 0,
+      total_cents INTEGER NOT NULL DEFAULT 0,
+      combo_discount_cents INTEGER NOT NULL DEFAULT 0,
+      payment_method TEXT NOT NULL DEFAULT 'test',
+      status TEXT NOT NULL DEFAULT 'completed',
+      customer_name TEXT NOT NULL DEFAULT '',
+      lines_json JSONB NOT NULL,
+      closed_at BIGINT,
+      updated_at BIGINT NOT NULL,
+      deleted_at BIGINT
+    )
+  `);
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS store_settings (
       key TEXT PRIMARY KEY,
