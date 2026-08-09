@@ -55,6 +55,8 @@ there. Either land features serially, or expect to resolve that file on every me
 | `client/src/lib/local-storage.ts` | 11 (two copies of the same receive path) |
 | `client/src/components/product-wizard.tsx` | 11 (deletes the duplicated cost arithmetic) |
 | `shared/pricing.ts` | 5 creates it, 10 and 11 both add costing functions — **11 first** |
+| `client/src/pages/reports.tsx` | 10 (adds a margins table), 12 (replaces two fake tabs) — **12 first** |
+| `shared/api-handlers.ts` (reports) | 12 moves the two report handler bodies into `shared/reports.ts` |
 | `client/src/pages/onboarding.tsx` | 6 |
 | `client/src/lib/sync.ts` | 8 |
 | `server/storage.ts` (sync engine) | 8 — a different region from Feature 3's ~40 CRUD methods |
@@ -87,6 +89,108 @@ All four tasks complete, every `Check:` passing, `npm run check` (tsc) clean, an
 stated "Definition of done" demonstrably true. A feature with three of four tasks done is not
 partially shipped — it is unshipped, and several of these leave the system in a worse state
 half-built than not started (Feature 3 T3 in particular).
+
+---
+
+## Feature 12 — Reports that show what actually happened
+
+**Status:** planned
+**Vision pillar:** #1 — "the best foundation". An operator cannot grow on numbers that were invented.
+**Blocks:** Feature 10 (its T3 adds a margins table "alongside the existing reports", and its T2
+joins against product-mix volumes — both of those neighbours are currently random)
+**Added:** 2026-08-09
+
+### The finding
+
+**The Reports page does not report. It generates random numbers.**
+
+`client/src/pages/reports.tsx` calls no API at all — grep it for `useQuery`, `fetch`, or `/api/` and
+there are zero hits. Two of its three tabs are fabricated:
+
+| Tab | What it shows | Reality |
+|---|---|---|
+| Sales | revenue chart, plus **Total Sales / Transactions / Avg Check** KPI cards | `generateMockSalesData()` at `reports.tsx:38-62` — `Math.random()` in all three granularities. The KPIs at `:115-123` are sums of that random series. |
+| Product Mix | per-product quantity and revenue, sorted by revenue | `reports.tsx:125-138` — real product *names*, but `quantity` and `revenue` are `Math.floor(Math.random() * 100) + 20`. |
+| Inventory | on-hand and low-stock | **Real.** Reads `inventory` from the store (`reports.tsx:105`). |
+
+Line 105 destructures `sales` and `employees` from `useStore()` and then never uses either. The real
+sales are sitting in scope, unread, while the chart above them is dice.
+
+**The real computations already exist and are ignored.** `shared/api-handlers.ts` implements
+`/api/reports/sales-summary` (`:684`) and `/api/reports/product-mix` (`:712`); the latter already
+walks `sale.linesJson` and accumulates true per-variant quantity and revenue — precisely the numbers
+the page is faking twenty lines of `Math.random()` to approximate. Nothing is missing but the wiring.
+
+**Why this outranks the remaining feature backlog.** A demo that invents its numbers is a demo
+problem. This is shipped in the operator-facing Reports page with no "sample data" label anywhere,
+and Feature 10 is about to build the margin report — the number that decides whether there is a
+second location — *next to it*, and to join against its volumes. A correct margin on a random volume
+is a wrong answer with a credible face.
+
+### The gap the endpoints do not cover
+
+`sales-summary` returns four scalars over **all sales, ever**. It has no date window and no time
+bucketing, so it cannot answer what the page's hourly/daily/monthly selector asks. That is the one
+piece of genuinely new logic here; everything else in this feature is deletion and wiring.
+
+### Tasks
+
+**T1 — One computation, shared by the page and the endpoint** (~15 min)
+- Create `shared/reports.ts` with two pure functions over `Sale[]`:
+  `salesSeries(sales, { granularity, since, until })` → `{ label, revenueCents, transactions }[]`,
+  and `productMix(sales)` → the existing per-variant shape.
+- Move the bodies of the two handlers (`api-handlers.ts:685-709`, `:715-746`) into them and have the
+  handlers call them. `productMix` is a straight lift — do not rewrite it, and keep its
+  `sale.linesJson` guard and its revenue-descending sort.
+- Bucket by `sale.createdAt` in **local time**, since "hourly" means the operator's trading day, not
+  UTC. Say so in a comment; it is the kind of thing that silently shifts a whole chart by hours.
+- Check: `productMix` over a hand-built two-sale fixture returns the expected quantity and revenue,
+  and `salesSeries` over sales spanning a day boundary puts each in the right bucket.
+
+**T2 — Point the sales tab at real sales, and delete the generator** (~15 min)
+- Replace `generateMockSalesData` (`reports.tsx:38-62`, and the `:113` call) with `salesSeries` over
+  the `sales` already destructured at `:105`. Delete the function — leaving it behind means it gets
+  used again.
+- The KPI totals at `:115-123` then follow from real data with no change to their arithmetic.
+  `avgCheck` already guards divide-by-zero; keep that.
+- Check: with seeded demo sales the chart totals equal the sum of `sales[].totalCents` for the
+  window, and the page renders identical numbers on two consecutive loads. Today it does not — it is
+  different dice every render, which is also the fastest way to demonstrate the bug.
+
+**T3 — Point product mix at real lines, and delete the other generator** (~15 min)
+- Replace `reports.tsx:125-138` with `productMix(sales)`. It returns per-*variant* rows while the tab
+  currently shows per-*product*; aggregate by `productId` in the page rather than adding a second
+  function, and keep the existing `showIngredientProducts` filter working against the real rows.
+- Drop the `.slice(0, 8)` or make it an explicit "top 8 by revenue" label. Silently truncating a
+  report is the same class of dishonesty as inventing it — the operator cannot tell the list ended.
+- Check: a product sold twice shows quantity 2 and revenue equal to its two line totals; a product
+  never sold does not appear at all rather than appearing with a random quantity.
+
+**T4 — An empty store must look empty** (~15 min)
+- A new operator has no sales. The chart must say "No sales yet" rather than drawing a flat line at
+  zero, and the KPI cards must show `—` rather than `$0.00` — the whole point of Feature 6 is that
+  day one is a real state, and a zeroed report is indistinguishable from a business that sold nothing
+  all week.
+- Add `shared/reports.test.ts` covering the empty case and the fixture from T1, and assert
+  `Math.random` appears nowhere in `reports.tsx`. That last check is one line and it is what stops
+  this regressing the next time someone needs a chart to look good in a screenshot.
+- Check: `npm test` passes with an empty sales array, and the page with no sales shows the empty
+  state rather than zeros.
+
+### Non-goals
+
+Date-range pickers beyond the existing granularity selector, comparison periods ("vs last week"),
+export, charting the inventory tab (it is already honest), and the labour/payroll side of the P&L —
+`employees.payRate` (`shared/schema.ts:147`) is stored, seeded, and edited but multiplied by nothing
+anywhere in the codebase, and `timePunches` are client-only by Feature 7 T4's deliberate decision.
+**Labour cost is the natural Feature 13** and, with Feature 10's margins, is what makes prime cost
+reachable; it is not this feature.
+
+### Definition of done
+
+Every number on the Reports page traces to a row in the database. `Math.random()` does not appear in
+`client/src/pages/reports.tsx`. Two consecutive loads of the page show the same figures, and a store
+with no sales says so instead of reporting zeros.
 
 ---
 
@@ -313,6 +417,8 @@ margin report that quietly treats missing data as free is worse than no report.
   zero. Negative margins are the entire point of the report.
 
 **T3 — Show it** (~15 min)
+- **Land Feature 12 first.** Two of the three tabs this table would sit beside are `Math.random()`
+  today, and T2's product-mix join reads volumes that the page fabricates.
 - Add a margins table to `client/src/pages/reports.tsx` alongside the existing reports, worst first,
   with unknown-cost rows visibly flagged rather than sorted as if their margin were 100%.
 - Give unknown-cost rows a direct link to the inventory item that needs a price. The report's job is
