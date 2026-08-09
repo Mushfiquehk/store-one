@@ -48,10 +48,13 @@ there. Either land features serially, or expect to resolve that file on every me
 | File | Features that modify it |
 |---|---|
 | `shared/api-handlers.ts` | 1, 2, 3, 4, 5, 6 — every feature |
-| `server/schema.ts` | 3 (locationId on ten tables), 4 (apiTokens table) |
-| `server/storage.ts` | 3 (~40 methods) |
+| `server/schema.ts` | 3 (locationId on ten tables), 4 (apiTokens table), 11 (two columns on `inventoryItems`) |
+| `server/storage.ts` | 3 (~40 methods), 11 (the invoice-receive path) |
 | `server/routes.ts` | 3, 4, 6 (moves the demo-clear handler out), 7 (the adapter stubs) |
 | `server/bom-engine.ts` | 5 |
+| `client/src/lib/local-storage.ts` | 11 (two copies of the same receive path) |
+| `client/src/components/product-wizard.tsx` | 11 (deletes the duplicated cost arithmetic) |
+| `shared/pricing.ts` | 5 creates it, 10 and 11 both add costing functions — **11 first** |
 | `client/src/pages/onboarding.tsx` | 6 |
 | `client/src/lib/sync.ts` | 8 |
 | `server/storage.ts` (sync engine) | 8 — a different region from Feature 3's ~40 CRUD methods |
@@ -87,6 +90,141 @@ half-built than not started (Feature 3 T3 in particular).
 
 ---
 
+## Feature 11 — One unit per number: stop costing a $2 espresso at $6
+
+**Status:** planned
+**Vision pillar:** #1 — "the best foundation". Feature 10 is the growth feature; this is the feature
+that makes Feature 10's numbers true.
+**Blocks:** Feature 10 (do this first, or ship a margin report that is confidently wrong)
+**Added:** 2026-08-09
+
+### The finding
+
+Feature 10 names this hazard in its closing section and defers it: *"Nothing enforces that a BOM
+quantity is in the same unit as the item's purchase price… a 1000× costing error that looks entirely
+plausible on screen."* That deferral is not safe, for two reasons found while planning this.
+
+**1. The wrong number is already on screen today.** Feature 10 states that "nothing in the codebase
+computes cost, margin, or profit" and that a grep returns only CSS `margin`. That is not correct.
+`renderProfitability()` at `client/src/components/product-wizard.tsx:1601-1760` already computes
+`quantity × lastPurchasePrice` per BOM line, sums it, and renders a coloured margin percentage to the
+operator — the exact formula Feature 10 T1 proposes to write. **Feature 10 T1 must reuse or replace
+that code, not become a second implementation of it.**
+
+**2. On the shipped seed data it produces nonsense.** Trace one item:
+
+| Fact | Value | Source |
+|---|---|---|
+| Espresso Beans, unit of measure | `oz` | `server/seed-data.ts:35` |
+| Espresso Beans, `lastPurchasePrice` | `1200` ($12 — a per-*bag* price) | `server/seed-data.ts:35` |
+| Espresso Shot Single, BOM quantity | `0.5` (oz) | `server/seed-data.ts:208` |
+| Espresso Shot Single, sells for | `200` ($2.00) | `server/seed-data.ts:99` |
+
+The wizard costs that shot at `0.5 × 1200` = **$6.00 against a $2.00 sale, and renders −200% margin
+in red** on the demo data every new operator sees first. The arithmetic is fine. The two numbers are
+simply in different units, and nothing in the system knows that.
+
+**The root cause is one line, copied three times.** Receiving an invoice does:
+
+```ts
+lastPurchasePrice: lineItem.unitPriceCents,          // price of one PURCHASED unit (a bag)
+currentQuantity: existing.currentQuantity + lineItem.quantity,   // added to STOCK units (oz)
+```
+
+at `server/storage.ts:926-928`, `client/src/lib/local-storage.ts:443-447`, and again at
+`client/src/lib/local-storage.ts:485-489`. Buy 2 bags at $12 and stock goes up by **2**, not by 640
+oz, while the price becomes $12 *per oz*. `unitOfMeasure` (`server/schema.ts:87`) cannot help: it is
+free text typed into a bare `<Input>` (`client/src/pages/inventory.tsx:218`), defaults to `"each"`,
+is displayed in six places, and is read by **zero** calculations.
+
+### The feature
+
+An inventory item is bought in one unit and consumed in another. Say so, with one number.
+
+`inventoryItems` gains `purchaseUnit: text` (a label — "bag", "case", "gallon") and
+`unitsPerPurchase: double, default 1` — how many stocking units come in one purchase unit. Receiving
+then converts both sides:
+
+```ts
+currentQuantity += lineItem.quantity * unitsPerPurchase       // 2 bags → +1280 oz
+lastPurchasePrice = lineItem.unitPriceCents / unitsPerPurchase // $12/bag → 1.875¢/oz
+```
+
+`lastPurchasePrice` becomes, by definition, **cost per stocking unit** — the unit BOM quantities are
+already in. Every existing cost consumer becomes correct without changing its arithmetic, including
+the wizard.
+
+**Deliberately not a units library.** No gram↔ounce table, no dimensional analysis, no unit registry
+to keep current. One operator-supplied number per item, defaulting to 1 — which is exactly today's
+behaviour, so nothing changes until someone fills it in. A real case of tomatoes is not a clean 10kg
+anyway; the operator is the only one who knows what is actually in the box, and this is the knob
+where they say so.
+
+### Tasks
+
+**T1 — Two columns and a default that changes nothing** (~15 min)
+- Add `purchaseUnit: text("purchase_unit")` and
+  `unitsPerPurchase: doublePrecision("units_per_purchase").notNull().default(1)` to
+  `adminInventoryItems` (`server/schema.ts:87`), the `InventoryItem` type (`shared/schema.ts:100`),
+  the Dexie table (`client/src/lib/db.ts:68`), and both storage create/update paths
+  (`server/storage.ts:685`, `client/src/lib/dexie-admin-storage.ts:241`).
+- Default `1` everywhere, including the sync-import row builder at `server/storage.ts:999`, which
+  constructs items field-by-field and will otherwise write `undefined` into a `NOT NULL` column the
+  first time a pre-upgrade device syncs.
+- Check: `npm run check` clean, existing rows read back with `unitsPerPurchase === 1`, and a sync
+  import of a record lacking the field produces `1` rather than failing or nulling.
+
+**T2 — Convert once, in one place** (~15 min)
+- Write `applyPurchase(item, lineItem)` returning `{ currentQuantity, lastPurchasePrice }` and use it
+  at all **three** call sites (`server/storage.ts:926`, `client/src/lib/local-storage.ts:443` and
+  `:485`). Three copies of this arithmetic is how it drifted; do not leave two of them.
+- Guard `unitsPerPurchase <= 0` — it is a divisor arriving from operator input, and a zero there
+  turns a cost into `Infinity`, which will render as a margin.
+- The "item does not exist yet" branches (`local-storage.ts:449`, `:491`) invent an item with
+  `unitOfMeasure: "each"`. Keep `unitsPerPurchase: 1` there and leave `purchaseUnit` null — an
+  invented item has no known pack size, and guessing one is worse than leaving it for the operator.
+- Check: an item at 1 oz on hand, `unitsPerPurchase: 640`, receiving 2 units at $12 ends at 1281 oz
+  with `lastPurchasePrice` of 1.875 — assert both numbers, since getting quantity right and price
+  wrong is the failure this task exists to prevent.
+
+**T3 — One costing function, and delete the duplicate** (~15 min)
+- Put `costPerStockUnit(item)` and `costOfBom(entries, items)` in `shared/pricing.ts` (Feature 5 T1),
+  returning `{ costCents, unknownIngredients, unitOfMeasure }` — never a bare number, matching what
+  Feature 10 T1 specifies so that task becomes a re-export rather than a rewrite.
+- Point `renderProfitability()` (`product-wizard.tsx:1601`) at it and delete the inline arithmetic at
+  `:1717` and `:1636`. This is the task that actually fixes the −200% espresso, and it is a deletion.
+- Leave null `lastPurchasePrice` as unknown, not zero — the wizard already does this correctly at
+  `:1628` and `:1708`, and that behaviour must survive the refactor.
+- Check: with seed data, the Espresso Shot Single reports a positive margin. Assert the cost is
+  under 200 cents; today it is 600.
+
+**T4 — Make the unit visible where the number is typed** (~15 min)
+- Fix the seed data so the demo is coherent: give the purchased items a `purchaseUnit` and
+  `unitsPerPurchase` matching the per-pack prices already there (`server/seed-data.ts:35-51` and its
+  copy at `client/src/lib/seed-data.ts:22`). Both files, or the two demo datasets disagree.
+- Show the stocking unit beside every quantity input that feeds a calculation — the BOM quantity
+  fields in `product-wizard.tsx` and `product-editor.tsx` already have the item in scope
+  (`product-wizard.tsx:1231`, `product-editor.tsx:589` render it). Add `purchaseUnit` and
+  `unitsPerPurchase` to the inventory edit form (`client/src/pages/inventory.tsx:218`) so there is
+  somewhere to set them at all.
+- Check: seeding fresh produces no negative margins in the wizard, and an operator can set "1 bag =
+  640 oz" and see the cost per oz update.
+
+### Non-goals
+
+Unit conversion between measurement systems, a canonical unit vocabulary (`unitOfMeasure` stays free
+text — constraining it is a separate argument worth having later), yield and waste factors, per-lot
+or weighted-average costing, and repricing history. `lastPurchasePrice` remains exactly what its name
+says: the last one. Moving to weighted-average cost is a real improvement and a different feature.
+
+### Definition of done
+
+No screen in the product shows a margin derived from two numbers in different units. The demo data
+costs an espresso shot at less than it sells for, one function computes ingredient cost for the whole
+codebase, and an operator can state their pack size in the one place it belongs.
+
+---
+
 ## Feature 10 — Menu margins: the number that decides whether there is a second location
 
 **Status:** planned
@@ -100,7 +238,13 @@ Features 1–9 are foundation, plumbing, and bug fixes. Necessary, but none of t
 *grow*, which is what VISION.md actually asks for. This is the gap.
 
 **Nothing in the codebase computes cost, margin, or profit.** A grep for those words across
-`server/`, `shared/`, and the reports page returns only CSS `margin` properties. The three report
+`server/`, `shared/`, and the reports page returns only CSS `margin` properties.
+
+> **Correction (Feature 11).** True for `server/` and `shared/`, but not for the client:
+> `renderProfitability()` at `client/src/components/product-wizard.tsx:1601` already computes
+> `quantity × lastPurchasePrice` per BOM line and renders a margin percentage. T1 below must reuse
+> or replace it rather than become a second implementation — and it is currently wrong by the unit
+> bug Feature 11 fixes. **Land Feature 11 first.** The three report
 endpoints — `sales-summary`, `product-mix`, `inventory-status` (`shared/api-handlers.ts:504, 534,
 571`) — are all volume and revenue. An operator can see that they sold 200 croissants and cannot see
 whether they made money on any of them.
