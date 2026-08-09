@@ -131,10 +131,14 @@ half-built than not started (Feature 3 T3 in particular).
 
 ## Feature 14 — Labour: the second-biggest number, and nobody can even type a wage
 
-**Status:** planned
-**Vision pillar:** #1 — "the best foundation". Food cost plus labour is prime cost, and prime cost is
-the number that decides whether a business can afford a second location.
-**Depends on:** Feature 13 (labour as a percentage of *random* revenue is not a number)
+**Status:** in progress — T1 done (`purchaseUnit` / `unitsPerPurchase` columns, default 1
+everywhere), T2–T4 unstarted. Note for T2/T3: the client-side `InventoryItem`
+(`client/src/lib/db.ts`) declares `unitsPerPurchase` **optional** because rows written before the
+Dexie v10 upgrade genuinely lack it — read it as `?? 1`, do not assume it is present. The
+server-side type and column are non-null.
+**Vision pillar:** #1 — "the best foundation". Feature 10 is the growth feature; this is the feature
+that makes Feature 10's numbers true.
+**Blocks:** Feature 10 (do this first, or ship a margin report that is confidently wrong)
 **Added:** 2026-08-09
 
 ### The finding

@@ -126,10 +126,16 @@ async function initDb() {
       current_quantity DOUBLE PRECISION NOT NULL DEFAULT 0,
       low_stock_threshold DOUBLE PRECISION,
       last_purchase_price DOUBLE PRECISION,
+      purchase_unit TEXT,
+      units_per_purchase DOUBLE PRECISION NOT NULL DEFAULT 1,
       updated_at BIGINT NOT NULL,
       deleted_at BIGINT
     )
   `);
+  // CREATE TABLE IF NOT EXISTS does nothing to a database that already has the table, so new
+  // columns need their own statement. The DEFAULT backfills existing rows to today's behaviour.
+  await db.execute(sql`ALTER TABLE admin_inventory_items ADD COLUMN IF NOT EXISTS purchase_unit TEXT`);
+  await db.execute(sql`ALTER TABLE admin_inventory_items ADD COLUMN IF NOT EXISTS units_per_purchase DOUBLE PRECISION NOT NULL DEFAULT 1`);
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS admin_bill_of_materials (
       id TEXT PRIMARY KEY,

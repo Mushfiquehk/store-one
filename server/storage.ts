@@ -686,6 +686,8 @@ export const adminStorage: IAdminStorage = {
       currentQuantity: (data.currentQuantity as number) ?? 0,
       lowStockThreshold: (data.lowStockThreshold as number) ?? null,
       lastPurchasePrice: (data.lastPurchasePrice as number) ?? null,
+      purchaseUnit: (data.purchaseUnit as string) ?? null,
+      unitsPerPurchase: (data.unitsPerPurchase as number) ?? 1,
       updatedAt: now, deletedAt: null,
     };
     const [r] = await db.insert(adminInventoryItems).values(row)
@@ -700,6 +702,8 @@ export const adminStorage: IAdminStorage = {
     if (data.currentQuantity !== undefined) set.currentQuantity = data.currentQuantity;
     if (data.lowStockThreshold !== undefined) set.lowStockThreshold = data.lowStockThreshold;
     if (data.lastPurchasePrice !== undefined) set.lastPurchasePrice = data.lastPurchasePrice;
+    if (data.purchaseUnit !== undefined) set.purchaseUnit = data.purchaseUnit;
+    if (data.unitsPerPurchase !== undefined) set.unitsPerPurchase = data.unitsPerPurchase;
     const [r] = await db.update(adminInventoryItems).set(set).where(eq(adminInventoryItems.id, id)).returning();
     return r || null;
   },
@@ -996,7 +1000,9 @@ export const adminStorage: IAdminStorage = {
           const row = { id: data.id as string, modifierGroupId: data.modifierGroupId as string, name: data.name as string, baseUpcharge: (data.baseUpcharge as number) ?? 0, inventoryItemId: (data.inventoryItemId as string) ?? null, quantityPerUse: (data.quantityPerUse as number) ?? null, updatedAt: sourceUpdatedAt, deletedAt: null };
           await db.insert(adminModifiers).values(row).onConflictDoUpdate({ target: adminModifiers.id, set: { ...row } });
         } else if (tableName === "inventoryItems") {
-          const row = { id: data.id as string, name: data.name as string, unitOfMeasure: (data.unitOfMeasure as string) ?? "each", currentQuantity: (data.currentQuantity as number) ?? 0, lowStockThreshold: (data.lowStockThreshold as number) ?? null, lastPurchasePrice: (data.lastPurchasePrice as number) ?? null, updatedAt: sourceUpdatedAt, deletedAt: null };
+          // unitsPerPurchase defaults to 1 here too: a pre-upgrade device syncs records without the
+          // field, and `undefined` into a NOT NULL column fails the insert.
+          const row = { id: data.id as string, name: data.name as string, unitOfMeasure: (data.unitOfMeasure as string) ?? "each", currentQuantity: (data.currentQuantity as number) ?? 0, lowStockThreshold: (data.lowStockThreshold as number) ?? null, lastPurchasePrice: (data.lastPurchasePrice as number) ?? null, purchaseUnit: (data.purchaseUnit as string) ?? null, unitsPerPurchase: (data.unitsPerPurchase as number) ?? 1, updatedAt: sourceUpdatedAt, deletedAt: null };
           await db.insert(adminInventoryItems).values(row).onConflictDoUpdate({ target: adminInventoryItems.id, set: { ...row } });
         } else if (tableName === "billOfMaterials") {
           const row = { id: data.id as string, sourceType: data.sourceType as string, sourceId: data.sourceId as string, inventoryItemId: data.inventoryItemId as string, sourceProductId: (data.sourceProductId as string) ?? null, quantityDeducted: (data.quantityDeducted as number) ?? 0, scaleFactorMatrix: data.scaleFactorMatrix ?? null, overrideModifierGroupId: (data.overrideModifierGroupId as string) ?? null, updatedAt: sourceUpdatedAt, deletedAt: null };

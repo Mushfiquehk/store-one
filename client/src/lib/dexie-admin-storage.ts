@@ -242,6 +242,8 @@ export const dexieAdminStorage: ApiAdminStorage = {
       currentQuantity: (data.currentQuantity as number) ?? 0,
       lowStockThreshold: (data.lowStockThreshold as number) ?? null,
       lastPurchasePrice: (data.lastPurchasePrice as number) ?? null,
+      purchaseUnit: (data.purchaseUnit as string) ?? null,
+      unitsPerPurchase: (data.unitsPerPurchase as number) ?? 1,
       updatedAt: now,
       deletedAt: null,
     };

@@ -88,6 +88,11 @@ export const adminInventoryItems = pgTable("admin_inventory_items", {
   currentQuantity: doublePrecision("current_quantity").notNull().default(0),
   lowStockThreshold: doublePrecision("low_stock_threshold"),
   lastPurchasePrice: doublePrecision("last_purchase_price"),
+  // An item is bought in one unit and consumed in another: purchaseUnit labels the bought one
+  // ("bag"), unitsPerPurchase says how many stocking units come in it. Default 1 is today's
+  // behaviour exactly, so nothing changes until an operator fills it in.
+  purchaseUnit: text("purchase_unit"),
+  unitsPerPurchase: doublePrecision("units_per_purchase").notNull().default(1),
   updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
   deletedAt: bigint("deleted_at", { mode: "number" }),
 });
