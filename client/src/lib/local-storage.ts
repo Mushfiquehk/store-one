@@ -1,4 +1,5 @@
 import { db } from "./db";
+import { costPerStockUnit } from "@shared/units";
 import type {
   Product,
   Variant,
@@ -441,11 +442,14 @@ export const storage = {
         const existingItem = await db.inventoryItems.get(lineItem.inventoryItemId);
         if (existingItem) {
           await db.inventoryItems.update(existingItem.id, {
-            lastPurchasePrice: lineItem.unitPriceCents,
+            // The invoice quotes a price per purchase unit; lastPurchasePrice is per stocking unit.
+            lastPurchasePrice: costPerStockUnit(lineItem.unitPriceCents, existingItem.unitsPerPurchase),
             currentQuantity: existingItem.currentQuantity + lineItem.quantity,
             updatedAt: now,
           });
         } else {
+          // A brand new item has no pack size yet, so it is stocked in whatever it was
+          // bought in — unitsPerPurchase 1, price unconverted.
           const newItem: InventoryItem = {
             id: lineItem.inventoryItemId,
             name: lineItem.description || "Unknown Item",
@@ -453,6 +457,8 @@ export const storage = {
             currentQuantity: lineItem.quantity,
             lowStockThreshold: null,
             lastPurchasePrice: lineItem.unitPriceCents,
+            purchaseUnit: null,
+            unitsPerPurchase: 1,
             updatedAt: now,
             deletedAt: null,
           };
@@ -483,7 +489,8 @@ export const storage = {
       const existingItem = await db.inventoryItems.get(lineItem.inventoryItemId);
       if (existingItem) {
         await db.inventoryItems.update(existingItem.id, {
-          lastPurchasePrice: lineItem.unitPriceCents,
+          // The invoice quotes a price per purchase unit; lastPurchasePrice is per stocking unit.
+          lastPurchasePrice: costPerStockUnit(lineItem.unitPriceCents, existingItem.unitsPerPurchase),
           currentQuantity: existingItem.currentQuantity + lineItem.quantity,
           updatedAt: now,
         });
@@ -495,6 +502,8 @@ export const storage = {
           currentQuantity: lineItem.quantity,
           lowStockThreshold: null,
           lastPurchasePrice: lineItem.unitPriceCents,
+          purchaseUnit: null,
+          unitsPerPurchase: 1,
           updatedAt: now,
           deletedAt: null,
         };
