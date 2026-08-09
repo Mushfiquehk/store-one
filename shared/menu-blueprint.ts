@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { Modifier, ModifierGroup, Product, ProductModifierGroup, Variant } from "./schema";
 
 /**
  * A declarative description of a menu — the request body of POST /api/admin/menu/apply.
@@ -108,4 +109,187 @@ export function parseMenuBlueprint(
       message: issue.message,
     })),
   };
+}
+
+/* ------------------------------------------------------------------ *
+ * The diff planner: blueprint + current state -> the list of changes.
+ * Pure. No storage calls, no id generation, no clock — so the dry-run
+ * preview cannot drift from what applying actually does.
+ * ------------------------------------------------------------------ */
+
+/** The current menu, as the ApiAdminStorage list methods return it. */
+export type ExistingMenu = {
+  products: Product[];
+  variants: Variant[];
+  modifierGroups: ModifierGroup[];
+  modifiers: Modifier[];
+  productModifierGroups: ProductModifierGroup[];
+};
+
+export type ChangeEntity = "modifierGroup" | "modifier" | "product" | "variant" | "productModifierGroups";
+
+/** What moves on an update, for the operator-facing preview. */
+export type FieldDiff = Record<string, { from: unknown; to: unknown }>;
+
+export type MenuChange = {
+  op: "create" | "update" | "noop";
+  entity: ChangeEntity;
+  /** Display name — `Large` for a variant reads as `Latte / Large` with its parent. */
+  name: string;
+  /** Owning entity's name: a modifier's group, a variant's product. */
+  parent?: string;
+  /** Existing row id. Absent on `create` — the planner is pure, so T3 mints ids. */
+  id?: string;
+  /** Present on `update`. */
+  fields?: FieldDiff;
+  /** Present on `create`: the values to write. Parent linkage is resolved by name at apply time. */
+  values?: Record<string, unknown>;
+  /** Present on `productModifierGroups`: the full desired set of group names. */
+  groupNames?: string[];
+};
+
+export type MenuPlan = { changes: MenuChange[]; errors: BlueprintError[] };
+
+/** Names match case-insensitively after trimming. */
+const key = (name: string) => name.trim().toLowerCase();
+const alive = <T extends { deletedAt: number | null }>(rows: T[]) => rows.filter((r) => r.deletedAt == null);
+
+/** Index live rows by name, first occurrence wins. */
+function byName<T extends { name: string; deletedAt: number | null }>(rows: T[]): Map<string, T> {
+  const map = new Map<string, T>();
+  for (const row of alive(rows)) if (!map.has(key(row.name))) map.set(key(row.name), row);
+  return map;
+}
+
+/** Only the fields that actually move. Empty means unchanged. */
+function diff(current: Record<string, unknown>, desired: Record<string, unknown>): FieldDiff {
+  const fields: FieldDiff = {};
+  for (const [field, to] of Object.entries(desired)) {
+    if (to !== undefined && current[field] !== to) fields[field] = { from: current[field], to };
+  }
+  return fields;
+}
+
+function upsert(
+  entity: ChangeEntity,
+  name: string,
+  existing: { id: string } & Record<string, unknown>,
+  desired: Record<string, unknown>,
+  parent?: string,
+): MenuChange {
+  const fields = diff(existing, desired);
+  return Object.keys(fields).length > 0
+    ? { op: "update", entity, name, parent, id: existing.id, fields }
+    : { op: "noop", entity, name, parent, id: existing.id };
+}
+
+/**
+ * Compute what applying `blueprint` to `existing` would do.
+ *
+ * Upsert, never delete: anything present in the system but absent from the blueprint is
+ * left alone — an agent must not be able to wipe a live menu by omitting a product.
+ */
+export function planMenuApply(blueprint: MenuBlueprint, existing: ExistingMenu): MenuPlan {
+  const changes: MenuChange[] = [];
+  const errors: BlueprintError[] = [];
+
+  const existingGroups = byName(existing.modifierGroups);
+  const existingProducts = byName(existing.products);
+
+  // 1. Modifier groups, then their modifiers — products reference groups by name.
+  for (const group of blueprint.modifierGroups) {
+    const desired = { minSelections: group.minSelections, maxSelections: group.maxSelections };
+    const current = existingGroups.get(key(group.name));
+    changes.push(
+      current
+        ? upsert("modifierGroup", group.name, current, desired)
+        : { op: "create", entity: "modifierGroup", name: group.name, values: desired },
+    );
+
+    // A modifier matches within its group. A group being created has no modifiers yet.
+    const siblings = current
+      ? byName(existing.modifiers.filter((m) => m.modifierGroupId === current.id))
+      : new Map<string, Modifier>();
+
+    for (const modifier of group.modifiers) {
+      const desiredModifier = { baseUpcharge: modifier.baseUpcharge };
+      const currentModifier = siblings.get(key(modifier.name));
+      changes.push(
+        currentModifier
+          ? upsert("modifier", modifier.name, currentModifier, desiredModifier, group.name)
+          : { op: "create", entity: "modifier", name: modifier.name, parent: group.name, values: desiredModifier },
+      );
+    }
+  }
+
+  // 2. Products, their variants, and their modifier-group links.
+  const blueprintGroupNames = new Set(blueprint.modifierGroups.map((g) => key(g.name)));
+
+  blueprint.products.forEach((product, productIndex) => {
+    const current = existingProducts.get(key(product.name));
+    changes.push(
+      current
+        ? upsert("product", product.name, current, { type: product.type })
+        : { op: "create", entity: "product", name: product.name, values: { type: product.type } },
+    );
+
+    // A variant matches within its product.
+    const siblings = current
+      ? byName(existing.variants.filter((v) => v.productId === current.id))
+      : new Map<string, Variant>();
+
+    for (const variant of product.variants) {
+      const desired = { basePrice: variant.basePrice, sku: variant.sku ?? undefined };
+      const currentVariant = siblings.get(key(variant.name));
+      changes.push(
+        currentVariant
+          ? upsert("variant", variant.name, currentVariant, desired, product.name)
+          : { op: "create", entity: "variant", name: variant.name, parent: product.name, values: desired },
+      );
+    }
+
+    // A group reference must name a group in the blueprint or one that already exists.
+    const unknownGroups = product.modifierGroups.filter(
+      (name) => !blueprintGroupNames.has(key(name)) && !existingGroups.has(key(name)),
+    );
+    unknownGroups.forEach((name) => {
+      errors.push({
+        path: `products.${productIndex}.modifierGroups`,
+        message: `unknown modifier group "${name}" — define it in the blueprint or create it first`,
+      });
+    });
+    if (unknownGroups.length > 0) return;
+
+    // setProductModifierGroups replaces the whole set, so the desired set is the union of
+    // what the product already has with what the blueprint asks for. Anything else would
+    // silently unlink groups the blueprint simply did not mention.
+    const linkedNames = current
+      ? existing.productModifierGroups
+          .filter((link) => link.productId === current.id && link.deletedAt == null)
+          .map((link) => existing.modifierGroups.find((g) => g.id === link.modifierGroupId)?.name)
+          .filter((name): name is string => name != null)
+      : [];
+
+    const groupNames = [...linkedNames];
+    const seen = new Set(linkedNames.map(key));
+    let added = false;
+    for (const name of product.modifierGroups) {
+      if (seen.has(key(name))) continue;
+      seen.add(key(name));
+      groupNames.push(name);
+      added = true;
+    }
+
+    if (product.modifierGroups.length > 0 || linkedNames.length > 0) {
+      changes.push({
+        op: added ? (current ? "update" : "create") : "noop",
+        entity: "productModifierGroups",
+        name: product.name,
+        id: current?.id,
+        groupNames,
+      });
+    }
+  });
+
+  return { changes, errors };
 }
