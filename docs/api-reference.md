@@ -70,6 +70,194 @@ When neither `limit` nor `offset` is provided, all matching records are returned
 
 ---
 
+## Menu Blueprint
+
+One declarative call that makes the menu match a description of it — the POS equivalent of
+`kubectl apply`. Building a menu through the per-row CRUD endpoints below takes roughly one HTTP
+call per row, in dependency order, with the caller tracking every returned ID. This endpoint takes
+the whole menu at once.
+
+```
+POST /api/admin/menu/apply
+```
+
+Available on both servers: the Express server on port 5000 and the in-app local server on
+`127.0.0.1:8080`. Menu data lives on both, so a menu can be built offline.
+
+### Guarantees
+
+These are the properties a caller can rely on. They are what make the endpoint safe to hand to an
+agent.
+
+- **Idempotent.** Entities are matched **by name** — case-insensitively, after trimming, and scoped
+  to the parent (a variant matches within its product, a modifier within its group). Applying the
+  same blueprint twice produces a change list that is entirely `noop` on the second run, and writes
+  nothing. Retrying after a network failure is always safe.
+- **Never deletes.** Anything present in the system but absent from the blueprint is left alone.
+  Omitting a product does not remove it; omitting a modifier group does not unlink it. There is no
+  way to destroy menu data through this endpoint. (Destructive sync would need an explicit opt-in
+  flag, which does not exist yet.)
+- **All-or-nothing validation.** Every error in the payload is collected and returned together, and
+  if there are any, nothing is written. A caller gets one round trip to fix all of its mistakes.
+- **Dry run cannot drift.** `dryRun: true` runs the identical planning code path and returns the
+  identical change list, guarded at the write boundary. What the preview shows is what applying
+  does.
+- **Soft-deleted rows are invisible.** A blueprint naming a product that was previously deleted
+  creates a new one rather than resurrecting the old row.
+
+### Request Body Schema
+
+| Field            | Type     | Required | Default | Description                                        |
+|------------------|----------|----------|---------|----------------------------------------------------|
+| `dryRun`         | boolean  | no       | `false` | Compute and return the change list without writing. |
+| `modifierGroups` | object[] | no       | `[]`    | Modifier groups to create or update.                |
+| `products`       | object[] | no       | `[]`    | Products to create or update.                       |
+
+**Modifier group:**
+
+| Field           | Type     | Required | Default | Constraints                          |
+|-----------------|----------|----------|---------|--------------------------------------|
+| `name`          | string   | yes      | —       | Non-empty after trim.                |
+| `minSelections` | integer  | no       | `0`     | Non-negative, `<= maxSelections`.    |
+| `maxSelections` | integer  | no       | `1`     | Non-negative.                        |
+| `modifiers`     | object[] | no       | `[]`    | See below.                           |
+
+**Modifier:**
+
+| Field          | Type    | Required | Default | Constraints                        |
+|----------------|---------|----------|---------|------------------------------------|
+| `name`         | string  | yes      | —       | Non-empty after trim.              |
+| `baseUpcharge` | integer | no       | `0`     | Non-negative integer **cents**.    |
+
+**Product:**
+
+| Field            | Type     | Required | Default        | Constraints                                         |
+|------------------|----------|----------|----------------|-----------------------------------------------------|
+| `name`           | string   | yes      | —              | Non-empty after trim.                               |
+| `type`           | string   | no       | `"RESTAURANT"` | `"RETAIL"` or `"RESTAURANT"`.                       |
+| `variants`       | object[] | no       | `[]`           | See below.                                          |
+| `modifierGroups` | string[] | no       | `[]`           | Group **names**, defined here or already existing.  |
+
+**Variant:**
+
+| Field       | Type    | Required | Default | Constraints                     |
+|-------------|---------|----------|---------|---------------------------------|
+| `name`      | string  | yes      | —       | Non-empty after trim.           |
+| `basePrice` | integer | yes      | —       | Non-negative integer **cents**. |
+| `sku`       | string  | no       | `null`  | Non-empty when present.         |
+
+No IDs, no foreign keys, no ordering, and no timestamps are supplied by the caller. Entities
+reference each other by name, and the server resolves groups first, then products, then variants,
+then product↔group links — so the blueprint may be sent in whatever order it was composed.
+
+Names must be unique within their scope: two products named `Latte`, or two variants named `Large`
+under one product, are rejected, because name matching could not tell them apart.
+
+### Example: preview, then apply
+
+Step 1 — ask what would change. Nothing is written.
+
+```bash
+curl -X POST http://localhost:5000/api/admin/menu/apply \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "dryRun": true,
+    "modifierGroups": [
+      {
+        "name": "Milk",
+        "minSelections": 1,
+        "maxSelections": 1,
+        "modifiers": [
+          { "name": "Whole", "baseUpcharge": 0 },
+          { "name": "Oat", "baseUpcharge": 75 }
+        ]
+      }
+    ],
+    "products": [
+      {
+        "name": "Latte",
+        "type": "RESTAURANT",
+        "variants": [
+          { "name": "Small", "basePrice": 450 },
+          { "name": "Large", "basePrice": 550 }
+        ],
+        "modifierGroups": ["Milk"]
+      }
+    ]
+  }'
+```
+
+**Response** (against a system that already has a `Latte / Large` at $5.00):
+
+```json
+{
+  "data": {
+    "applied": false,
+    "changes": [
+      { "op": "noop", "entity": "modifierGroup", "name": "Milk", "id": "mg_3f2a_1712234567890" },
+      { "op": "noop", "entity": "modifier", "name": "Whole", "parent": "Milk", "id": "mod_5e8f_1712234567893" },
+      { "op": "create", "entity": "modifier", "name": "Oat", "parent": "Milk",
+        "values": { "baseUpcharge": 75 } },
+      { "op": "noop", "entity": "product", "name": "Latte", "id": "prod_9c1d_1712234567891" },
+      { "op": "noop", "entity": "variant", "name": "Small", "parent": "Latte", "id": "var_2a6c_1712234567894" },
+      { "op": "update", "entity": "variant", "name": "Large", "parent": "Latte",
+        "id": "var_7b4e_1712234567892",
+        "fields": { "basePrice": { "from": 500, "to": 550 } } },
+      { "op": "noop", "entity": "productModifierGroups", "name": "Latte",
+        "id": "prod_9c1d_1712234567891", "groupNames": ["Milk"] }
+    ],
+    "errors": []
+  }
+}
+```
+
+Step 2 — show that list to the operator, and on approval send the identical body with
+`"dryRun": false` (or the field omitted). The response has the same shape with
+`"applied": true`.
+
+### Change List
+
+One entry per entity considered, including unchanged ones — a preview reading "18 unchanged, 2
+updated" is more trustworthy than one that silently omits what it did not touch.
+
+| Field        | Present when            | Description                                                        |
+|--------------|-------------------------|--------------------------------------------------------------------|
+| `op`         | always                  | `create`, `update`, or `noop`.                                     |
+| `entity`     | always                  | `modifierGroup`, `modifier`, `product`, `variant`, or `productModifierGroups`. |
+| `name`       | always                  | The entity's name.                                                 |
+| `parent`     | modifiers, variants     | The owning group or product name.                                  |
+| `id`         | `update`, `noop`        | The existing row's ID. Absent on `create` — IDs are minted at write time. |
+| `fields`     | `update`                | `{ field: { from, to } }` for each field that moves.               |
+| `values`     | `create`                | The values that will be written.                                   |
+| `groupNames` | `productModifierGroups` | The full desired set of linked group names.                        |
+
+A `productModifierGroups` entry lists the **union** of the product's current groups and the ones the
+blueprint names, because the underlying set operation replaces the whole set. This is what keeps the
+never-deletes guarantee true for links.
+
+### Errors
+
+**HTTP 400** — the blueprint is invalid. Nothing was written. `details` lists every problem found,
+each with the path of the offending field:
+
+```json
+{
+  "error": "Invalid blueprint",
+  "details": [
+    { "path": "products.0.name", "message": "must not be empty" },
+    { "path": "products.0.variants.0.basePrice", "message": "must not be negative" },
+    { "path": "products.1.modifierGroups",
+      "message": "unknown modifier group \"Nitro\" — define it in the blueprint or create it first" }
+  ]
+}
+```
+
+**HTTP 500** — the write failed partway. Note that applying is **not** transactional: the changes
+are executed in order, so a mid-flight failure can leave the menu partly updated. Re-sending the
+same blueprint is the recovery path, and is safe — it will apply only what is still missing.
+
+---
+
 ## Products
 
 A product represents a sellable item (e.g. a drink, a meal).
