@@ -87,6 +87,117 @@ half-built than not started (Feature 3 T3 in particular).
 
 ---
 
+## Feature 12 — Voids and refunds: a till has to be able to take a mistake back
+
+**Status:** planned
+**Vision pillar:** #1 — "setup **and operate**". Operating a till means correcting it.
+**Added:** 2026-08-09
+
+### The finding
+
+There is no way to void a sale or issue a refund. Searching `server/`, `shared/`, `pos.tsx`, and
+`order-receipts.tsx` for refund, void, comp, or cancel returns nothing but TypeScript `Promise<void>`
+signatures.
+
+`adminSales.status` (`server/schema.ts:138`) defaults to `"completed"` and is written with that
+literal in all three places a sale is created — `client/src/pages/pos.tsx:453`,
+`shared/api-handlers.ts:464`, and `server/bom-engine.ts:440`. It is read once, as a filter in
+`order-receipts.tsx:142`. **No other status value exists in the codebase.** The field is a constant.
+
+This is not an edge case. A cashier rings the wrong item, a customer sends a dish back, a card is
+charged twice — every one of these happens in a restaurant's first week, and today the only recourse
+in this system is `deletedAt`, the soft-delete used by the generic CRUD layer.
+
+**Soft-deleting a sale would be the wrong fix**, and it is the fix this codebase makes easy. Sales
+are financial records. Removing one from the list silently changes historical revenue: yesterday's
+totals, already reported and possibly already filed, quietly become different numbers. Accounting
+does not delete; it posts a reversing entry. `deleteSale` does not currently exist, and it should
+stay that way.
+
+### The feature
+
+A void or refund **appends a reversing record**; the original sale is never modified or removed.
+
+- **Void** — the original was never really a sale (wrong entry, immediate correction). Full reversal.
+- **Refund** — the sale happened and money goes back. Full reversal, but it remains a real
+  transaction that occurred, and it must be visible as such.
+
+Both produce a new sale row with negative amounts, `status` of `"void"` or `"refund"`, and a
+`reversesSaleId` pointing at the original. Revenue for any period is then simply the sum of
+everything — reversals net themselves out, and no report needs to learn about special cases.
+
+### Non-negotiables
+
+- **Never mutate or soft-delete a completed sale.** The original row is immutable after close.
+- **Inventory must be returned.** A voided latte puts the milk back. `computeInventoryDeductions`
+  (`server/bom-engine.ts:203`) already produces the deduction map — apply it negated. Do not write a
+  second traversal; the same rule as Features 10 and 11.
+- **Every reversal records who and why.** Voids are the single most common till-theft vector in food
+  service, and an unattributed void is indistinguishable from a cashier pocketing cash. Employee
+  attribution and a reason are the whole audit value of this feature, not paperwork on top of it.
+
+### Tasks
+
+**T1 — Schema and status vocabulary** (~15 min)
+- Add to `adminSales` (and the Dexie schema in `client/src/lib/db.ts`): `reversesSaleId` (text,
+  nullable), `voidReason` (text, nullable), `voidedByEmployeeId` (text, nullable).
+- Define the status values in one exported constant — `"completed" | "void" | "refund"` — rather
+  than as string literals in the three places sales are created. Replace those literals with it.
+- Do **not** add a `deleteSale` method anywhere, and add a comment on the sales table saying why:
+  reversals are append-only.
+- Check: existing sales read back as `"completed"` with null reversal fields, and the type refuses
+  an unknown status.
+
+**T2 — The reversal endpoint** (~15 min)
+- `POST /api/admin/sales/:id/reverse` taking `{ type: "void" | "refund", reason, employeeId }`, in
+  `shared/api-handlers.ts` so both servers expose it.
+- Create a new sale row: amounts negated, `linesJson` copied from the original with negated
+  quantities, `reversesSaleId` set, status set, reason and employee recorded.
+- Return inventory by applying the negated deduction map from `computeInventoryDeductions`.
+- **Reject a second reversal of the same sale.** Query for an existing row with
+  `reversesSaleId = :id` first and 409 if present. A double-tap on a slow tablet must not refund
+  twice — this is the check the whole endpoint lives or dies on.
+- Require a non-empty reason. An optional audit field is an empty audit field.
+- Check: reversing produces exactly one new row, the original is byte-identical afterwards,
+  inventory returns to its pre-sale level, and a second reversal attempt 409s.
+
+**T3 — Do it from the till** (~15 min)
+- Add void/refund to the recent-sales view the POS already renders (`order-receipts.tsx` filters
+  sales at line 142). Reason and employee are required inputs, not optional prompts.
+- Show reversed sales struck through with their reversal linked, rather than hiding them. An
+  operator asking "where did that $40 order go" needs to see the answer, and a disappeared sale is
+  how a theft looks from the outside.
+- Gate behind the existing `pin-protection.tsx` component. Note it currently validates a hardcoded
+  `1234` client-side (see Feature 4) — this task should use it as-is and **not** invent a second
+  auth mechanism; it gets real when that PIN does.
+- Check: voiding from the till shows the reversal immediately and the day's total drops by exactly
+  the voided amount.
+
+**T4 — Make every report agree** (~15 min)
+- `sales-summary` and `product-mix` (`shared/api-handlers.ts:504, 534`) currently sum all sales.
+  With negative reversal rows they net out automatically — **verify that rather than assuming it**,
+  particularly `product-mix`, which aggregates quantities and must not count a voided item as sold.
+- Feature 10's margin report must exclude reversed sales from volume weighting, or a heavily-voided
+  item looks like a strong seller.
+- Add `void_sale` to the Feature 2 MCP tool table — but describe it as requiring explicit operator
+  confirmation. An agent that can silently reverse transactions is a liability, and this is the one
+  tool in the plan that moves money.
+- Check: a day with one sale and one void reports zero revenue and zero units sold, not one of each.
+
+### Non-goals
+
+Partial and line-level refunds (this cut reverses whole sales only), payment-processor integration
+to actually return funds to a card, cash-drawer reconciliation, tip adjustment, and reopening a
+closed sale for editing. **Partial refunds are the obvious next step** and the schema above supports
+them — `linesJson` on the reversal is already a subset-capable structure.
+
+### Definition of done
+
+A cashier can void a mis-rung order with a reason attached, the original sale is still in the record,
+inventory comes back, and the day's totals are correct without anything having been deleted.
+
+---
+
 ## Feature 11 — Purchase units vs stocking units: the bug that makes every cost wrong
 
 **Status:** planned
