@@ -87,6 +87,126 @@ half-built than not started (Feature 3 T3 in particular).
 
 ---
 
+## Feature 9 — A backup that contains everything, and a restore that cannot wipe you
+
+**Status:** planned
+**Vision pillar:** #1 — "the best foundation". This is the one that loses a business its records.
+**Added:** 2026-08-09
+
+### The finding
+
+Backup and restore both exist and both work, in `client/src/pages/settings.tsx`. The card describes
+them as *"Full snapshot backup of all local data"* (line 740). It is not.
+
+The snapshot is a hand-written object literal (line 256) listing **ten** tables:
+
+```
+products, variants, modifierGroups, productModifierGroups, modifiers,
+inventoryItems, billOfMaterials, employees, timePunches, sales
+```
+
+The Dexie database defines **sixteen**. These six are in `client/src/lib/db.ts` and in
+`SYNC_CATEGORY_TABLES` (`shared/schema.ts:32-35`), but in neither backup nor restore:
+
+```
+combos, comboItems, productGroups, productGroupItems, invoices, invoiceLineItems
+```
+
+So an operator who builds combos and product groups, then restores from backup, loses all of them.
+Supplier invoices too. The word "Full" in that description is the dangerous part — it is the reason
+nobody would think to check.
+
+**Three defects, in descending order of how much they cost:**
+
+1. **Backup silently omits six of sixteen tables** while claiming to be complete.
+2. **Restore clears tables it may not repopulate.** It unconditionally `.clear()`s all ten tables,
+   then writes each back only `if (snapshot.X?.length)`. A snapshot that is missing a key, or has an
+   empty array for it, leaves that table wiped with nothing put back. Restoring a menu-only snapshot
+   deletes the sales history.
+3. **Restore has no confirmation.** `handleRestore` validates that a client code was typed, then
+   goes straight to fetching and wiping ten tables. A mistyped code that happens to match another
+   store replaces this device's data with theirs, with no prompt and no undo.
+
+And underneath all three: **the table list is written out by hand three times** — once in the
+backup literal, once in the restore `clear()` block, once in the restore `bulkPut` block. Three
+hand-maintained copies of the same list is why six tables fell out of two of them. Adding the
+missing tables to all three lists fixes today's symptom and leaves the mechanism that produced it
+fully intact.
+
+### The feature
+
+One list, derived once, used by both paths — then make restore non-destructive by construction.
+
+### Tasks
+
+**T1 — One table list, no hand-maintained copies** (~15 min)
+- Export a single `BACKUP_TABLES` array from `client/src/lib/db.ts`, next to the Dexie schema it
+  must stay in step with — all sixteen tables.
+- Rewrite backup to build its snapshot by iterating that list, and restore to clear and repopulate
+  by iterating the same list. No table name should appear literally in `settings.tsx` afterwards.
+- Add an assertion that `BACKUP_TABLES` covers every table in the Dexie schema, so a table added
+  later fails loudly instead of being silently excluded from backups for a year.
+- Check: back up a database containing combos and invoices, inspect the uploaded snapshot, and
+  confirm all sixteen keys are present.
+
+**T2 — Restore that cannot destroy what it is not replacing** (~15 min)
+- Validate the snapshot **before** touching the database: confirm it is an object and that every key
+  it contains is a known table. Reject and abort with a clear message otherwise. Nothing should be
+  cleared until the snapshot has been shown to be usable.
+- Clear only tables the snapshot actually carries a key for. A snapshot with an explicit empty array
+  for `sales` means "no sales" and should clear; a snapshot with **no `sales` key at all** is an
+  older or partial format and must leave the table alone rather than wipe it.
+- Keep the whole thing in the existing Dexie `rw` transaction so a mid-restore failure rolls back.
+  That part is already right — do not lose it in the rewrite.
+- Check: restoring a snapshot containing only `products` leaves existing sales intact; restoring one
+  with `sales: []` clears sales. Those two cases must behave differently.
+
+**T3 — Confirm before wiping, and say what will be lost** (~15 min)
+- Put a confirmation in front of restore that names the client code being restored from, the
+  backup's `createdAt`, and the row counts about to be replaced — "this will replace 412 sales and
+  38 products on this device". The endpoint already returns `createdAt`; the counts are a local
+  count before the write.
+- The current flow can silently replace one store's data with another's on a typo. This is the only
+  irreversible action in the app.
+- While here: the success message says *"Reload the page to see updated data."* If a reload is
+  required for correctness, trigger it rather than asking — a user who does not reload is looking
+  at stale state after a destructive operation.
+- Check: cancelling the confirmation leaves every table untouched.
+
+**T4 — Make backup happen without being remembered** (~15 min)
+- Backup is manual only. `client/src/lib/sync.ts:200-208` has a `setInterval` auto-timer, but it
+  drives **auto-sync**, not backup — there is no automatic backup anywhere. A small restaurant's
+  disaster recovery currently depends on the owner remembering to open Settings and click a button.
+- Reuse the existing auto-sync timer pattern rather than adding a second scheduler: same
+  enabled/interval settings shape, same `localStorage` key convention (`cornerpos_sync_` prefix),
+  a separate interval for backup.
+- Surface "last backup" with its age on the Settings card, and in the Feature 6 setup status. A
+  backup that last ran three weeks ago should look wrong at a glance.
+- Skip the upload when nothing has changed since the last backup — compare the max `updatedAt`
+  across tables against the last backup time. Snapshots are whole-database blobs; re-uploading an
+  unchanged one on a timer is pure waste.
+- Check: with auto-backup enabled and a short interval, a change triggers exactly one upload and an
+  idle period triggers none.
+
+### Correction to Feature 8
+
+Feature 8's non-goals state that no restore path is exercised anywhere. That is wrong — restore
+exists in `settings.tsx` and does write the snapshot back into Dexie. The real problems are the
+three above, not the absence of a restore.
+
+### Non-goals
+
+Server-side backup scheduling, multiple retained backup versions (`getLatestBackup` returns only the
+most recent, so there is exactly one restore point per client — worth revisiting, but a schema and
+retention question), point-in-time recovery, and export to a file the operator holds themselves.
+
+### Definition of done
+
+A backup contains every table the app stores, restoring one cannot delete data it is not replacing,
+restore asks first, and a store that has not been backed up in weeks says so.
+
+---
+
 ## Feature 8 — Sync that converges, and a conflict policy that is written down
 
 **Status:** planned
@@ -196,9 +316,8 @@ Make sync converge, and write the policy down where it can be checked.
 
 ### Non-goals
 
-Real-time or push-based sync, multi-device conflict UI, and per-field merge. The `backups` table and
-`POST /api/backup` also exist with no restore path exercised anywhere in this plan — worth its own
-feature, since a backup nobody has restored from is not a backup.
+Real-time or push-based sync, multi-device conflict UI, and per-field merge. Backup and restore are
+handled by Feature 9.
 
 ### Definition of done
 
