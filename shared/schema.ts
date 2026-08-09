@@ -100,7 +100,12 @@ export type InventoryItem = {
   unitOfMeasure: string;
   currentQuantity: number;
   lowStockThreshold: number | null;
+  /** Cost of one *stocking* unit — the unit BOM quantities are in. */
   lastPurchasePrice: number | null;
+  /** Label for the unit the item is bought in ("bag", "case"). Null when unknown. */
+  purchaseUnit: string | null;
+  /** How many stocking units come in one purchase unit. 1 means bought and stocked the same way. */
+  unitsPerPurchase: number;
   updatedAt: number;
   deletedAt: number | null;
 };
