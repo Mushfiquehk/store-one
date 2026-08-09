@@ -24,6 +24,19 @@ export function costPerStockUnit(
   return unitPriceCents / unitsPerPurchase;
 }
 
+/**
+ * Money at stocking-unit scale. A cent is a coarse unit here — milk at $4.50 a gallon is
+ * 3.5c an ounce — so this keeps up to four decimal places rather than rounding a real
+ * cost to $0.04 and losing the difference between 3.5c and 4c across ten thousand ounces.
+ */
+export function formatCostPerStockUnit(cents: number): string {
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 4,
+  }).format(cents / 100);
+}
+
 /** True when the item has a real pack size, so its cost has actually been converted. */
 export function hasConversionFactor(unitsPerPurchase: number | null | undefined): boolean {
   return !!unitsPerPurchase && unitsPerPurchase > 1 && Number.isFinite(unitsPerPurchase);

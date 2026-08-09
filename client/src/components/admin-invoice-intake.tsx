@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { Plus, Trash2, FileText, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { useStore } from "@/lib/store";
+import { costPerStockUnit, formatCostPerStockUnit } from "@shared/units";
 
 function uid(prefix: string) {
   return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`;
@@ -25,11 +26,15 @@ type DraftLineItem = {
   description: string;
   quantity: string;
   unitPriceCents: string;
+  // The pack size, asked here because the operator is holding the case while they type.
+  // Blank means "leave the item as it is" — an invoice at 11pm must not be blocked on it.
+  purchaseUnit: string;
+  unitsPerPurchase: string;
 };
 
 export default function AdminInvoiceIntake() {
   const { toast } = useToast();
-  const { inventory, invoices, invoiceLineItems, createInvoiceWithLineItems } = useStore();
+  const { inventory, invoices, invoiceLineItems, createInvoiceWithLineItems, updateInventoryItemAsync } = useStore();
 
   const [supplierName, setSupplierName] = useState("");
   const [invoiceNumber, setInvoiceNumber] = useState("");
@@ -45,11 +50,25 @@ export default function AdminInvoiceIntake() {
       description: "",
       quantity: "1",
       unitPriceCents: "0",
+      purchaseUnit: "",
+      unitsPerPurchase: "",
     }]);
   };
 
   const updateLineItem = (tempId: string, field: keyof DraftLineItem, value: string) => {
     setLineItems(prev => prev.map(li => li.tempId === tempId ? { ...li, [field]: value } : li));
+  };
+
+  // Picking the item pre-fills whatever pack size it already carries, so an operator
+  // correcting one line does not have to retype the others.
+  const selectInventoryItem = (tempId: string, inventoryItemId: string) => {
+    const item = inventory.find(i => i.id === inventoryItemId);
+    setLineItems(prev => prev.map(li => li.tempId === tempId ? {
+      ...li,
+      inventoryItemId,
+      purchaseUnit: item?.purchaseUnit ?? "",
+      unitsPerPurchase: item?.unitsPerPurchase && item.unitsPerPurchase !== 1 ? String(item.unitsPerPurchase) : "",
+    } : li));
   };
 
   const removeLineItem = (tempId: string) => {
@@ -82,6 +101,18 @@ export default function AdminInvoiceIntake() {
         status: "recorded",
         notes: notes.trim(),
       };
+      // Pack sizes must land on the item BEFORE the invoice is recorded: the receive path
+      // reads unitsPerPurchase off the item to convert the price it is about to store.
+      for (const li of lineItems) {
+        const factor = parseFloat(li.unitsPerPurchase);
+        const item = inventory.find(i => i.id === li.inventoryItemId);
+        if (!item) continue;
+        const patch: { purchaseUnit?: string | null; unitsPerPurchase?: number } = {};
+        if (Number.isFinite(factor) && factor > 0 && factor !== (item.unitsPerPurchase ?? 1)) patch.unitsPerPurchase = factor;
+        if (li.purchaseUnit.trim() && li.purchaseUnit.trim() !== item.purchaseUnit) patch.purchaseUnit = li.purchaseUnit.trim();
+        if (Object.keys(patch).length > 0) await updateInventoryItemAsync(item.id, patch);
+      }
+
       const items = lineItems.map(li => ({
         id: uid("ili"),
         inventoryItemId: li.inventoryItemId,
@@ -182,10 +213,14 @@ export default function AdminInvoiceIntake() {
                 {lineItems.map(li => {
                   const qty = parseFloat(li.quantity) || 0;
                   const price = Math.round(parseFloat(li.unitPriceCents) * 100) || 0;
+                  const item = inventory.find(i => i.id === li.inventoryItemId);
+                  const typedFactor = parseFloat(li.unitsPerPurchase);
+                  const factor = Number.isFinite(typedFactor) && typedFactor > 0 ? typedFactor : (item?.unitsPerPurchase ?? 1);
                   return (
-                    <TableRow key={li.tempId}>
+                    <Fragment key={li.tempId}>
+                    <TableRow>
                       <TableCell>
-                        <Select value={li.inventoryItemId} onValueChange={v => updateLineItem(li.tempId, "inventoryItemId", v)}>
+                        <Select value={li.inventoryItemId} onValueChange={v => selectInventoryItem(li.tempId, v)}>
                           <SelectTrigger data-testid={`select-inventory-${li.tempId}`}>
                             <SelectValue placeholder="Select item..." />
                           </SelectTrigger>
@@ -233,6 +268,44 @@ export default function AdminInvoiceIntake() {
                         </Button>
                       </TableCell>
                     </TableRow>
+                    {item && (
+                      <TableRow className="border-b-0 hover:bg-transparent">
+                        <TableCell colSpan={6} className="pt-0 pb-3">
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                            <span>You bought 1</span>
+                            <Input
+                              value={li.purchaseUnit}
+                              onChange={e => updateLineItem(li.tempId, "purchaseUnit", e.target.value)}
+                              placeholder="gallon"
+                              className="h-7 w-28 text-xs"
+                              data-testid={`input-purchase-unit-${li.tempId}`}
+                            />
+                            <span>. How many {item.unitOfMeasure} is that?</span>
+                            <Input
+                              type="number"
+                              min="0"
+                              step="any"
+                              value={li.unitsPerPurchase}
+                              onChange={e => updateLineItem(li.tempId, "unitsPerPurchase", e.target.value)}
+                              placeholder={String(item.unitsPerPurchase ?? 1)}
+                              className="h-7 w-24 text-xs"
+                              data-testid={`input-units-per-purchase-${li.tempId}`}
+                            />
+                            <span className="font-mono" data-testid={`text-cost-per-unit-${li.tempId}`}>
+                              → {formatCostPerStockUnit(costPerStockUnit(price, factor))} per {item.unitOfMeasure}
+                            </span>
+                            {factor === 1 && (
+                              // Not an error: an unset factor is a cost we have not converted, and
+                              // saying so beats a plausible number nobody questions.
+                              <span className="text-amber-600 dark:text-amber-500" data-testid={`text-unconverted-${li.tempId}`}>
+                                not converted — bought and stocked in the same unit
+                              </span>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                    </Fragment>
                   );
                 })}
               </TableBody>
