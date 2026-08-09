@@ -23,7 +23,8 @@ const isDev = process.env.NODE_ENV !== "production";
 if (!isDev) {
   const publicDir = path.resolve(__dirname, "../dist/public");
   app.use(express.static(publicDir));
-  app.get("*", (_req, res) => {
+  // ponytail: regex, not "*" — Express 5 rejects bare wildcard strings
+  app.get(/.*/, (_req, res) => {
     res.sendFile(path.join(publicDir, "index.html"));
   });
 }
