@@ -28,10 +28,13 @@ its section. They are ordered by what they cost if left alone.
 three defects that cost the most: silently discarded sales, a backup that could wipe a device, and
 costs wrong by orders of magnitude.
 
-**Next**, in this order: **Feature 13** (real reports — it blocks both 10 and 14, and two of its
-three tabs are `Math.random()` today), then **Feature 10** (margins, now that 11 has made its
-inputs true), then **Feature 8** (sync convergence). **Feature 4 (auth) still has the deadline** —
-nothing authenticates, and there is a Dockerfile.
+**Next**, in this order: **Feature 10** (margins — both of its blockers, 11 and 13, have now
+landed, so its inputs are finally true), then **Feature 14** (labour, which needs 13's real revenue
+as its denominator), then **Feature 8** (sync convergence). **Feature 4 (auth) still has the
+deadline** — nothing authenticates, and there is a Dockerfile.
+
+Note that Feature 10 T1 depends on **Feature 5 T1** to move `computeInventoryDeductions` out of
+the db-coupled `bom-engine.ts`; that extraction has not happened yet.
 
 The remaining seven features are genuine enhancements and can wait: **1** (menu blueprint), **2**
 (agent bridge), **3** (locations), **4** (auth), **6** (setup status), **10** (margins), **12**
@@ -90,8 +93,8 @@ there. Either land features serially, or expect to resolve that file on every me
 | `server/bom-engine.ts` | 5 |
 | `client/src/lib/local-storage.ts` | 11 (two copies of the same receive path) |
 | `client/src/components/product-wizard.tsx` | 11 (deletes the duplicated cost arithmetic) |
-| `shared/pricing.ts` | 5 creates it, 10 and 11 both add costing functions — **11 first** |
-| `client/src/pages/reports.tsx` | 10 (adds a margins table), 13 (replaces two fake tabs), 14 (adds labour) — **13 first** |
+| `shared/pricing.ts` | 5 creates it, 10 adds costing functions. ~~11~~ **(done)** — its conversion lives in `shared/units.ts` |
+| `client/src/pages/reports.tsx` | 10 (adds a margins table), ~~13~~ **(done)**, 14 (adds labour) |
 | `client/src/pages/employees.tsx` | 14 (adds the pay-rate field) |
 | `shared/api-handlers.ts` (reports) | 12 moves the two report handler bodies into `shared/reports.ts` |
 | `client/src/pages/onboarding.tsx` | 6 |
@@ -248,7 +251,22 @@ clock-outs surfaced as something to fix rather than folded silently into the tot
 
 ## Feature 13 — Reports that show what actually happened
 
-**Status:** planned
+**Status:** done — T1–T4 complete. `shared/reports.ts` (`salesSeries`, `salesSummary`,
+`productMix`, tested), both report endpoints rewired to it, and `reports.tsx` reading the `sales`
+that were already in scope. `Math.random` is gone from the page and a test keeps it gone.
+
+Deviations worth knowing:
+
+- **`sales-summary` also returns a `series` now**, and both endpoints take `?since=`/`?until=`.
+  The scalars alone could not answer what the page's granularity selector asks, and two
+  endpoints returning different views of the same rows is how they drift apart.
+- **Each granularity carries its own range** (hourly = today, daily = 14 days, monthly = 12
+  months). Not in the plan, but unavoidable once the data is real: hourly over months of sales
+  stacks every 09:00 the shop has ever traded under one repeated label.
+- **Empty buckets are omitted, not zero-filled.** `salesSeries` returns `[]` for a store with no
+  sales and the page renders the empty state from that, so T4 needed no separate empty check.
+- The `.slice(0, 8)` on product mix is **gone rather than labelled** — the list is short enough
+  that truncating it bought nothing.
 **Vision pillar:** #1 — "the best foundation". An operator cannot grow on numbers that were invented.
 **Blocks:** Feature 10 (its T3 adds a margins table "alongside the existing reports", and its T2
 joins against product-mix volumes — both of those neighbours are currently random)

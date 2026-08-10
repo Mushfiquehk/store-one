@@ -6,7 +6,6 @@ import {
   PieChart,
   Wallet,
 } from "lucide-react";
-import { format, subDays } from "date-fns";
 import {
   LineChart,
   Line,
@@ -28,37 +27,12 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Switch } from "@/components/ui/switch";
 import { useStore } from "@/lib/store";
+import { productMix, salesSeries, type Granularity } from "@shared/reports";
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 
 function formatMoney(cents: number) {
   return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD" }).format(cents / 100);
-}
-
-function generateMockSalesData(granularity: 'hourly' | 'daily' | 'monthly') {
-  const data = [];
-  if (granularity === 'hourly') {
-    for (let i = 6; i <= 22; i++) {
-      const transactions = Math.floor(Math.random() * 20) + 5;
-      const sales = (transactions * (Math.floor(Math.random() * 500) + 800)) / 100;
-      data.push({ label: `${i}:00`, sales, transactions });
-    }
-  } else if (granularity === 'daily') {
-    for (let i = 0; i < 14; i++) {
-      const date = subDays(new Date(), 13 - i);
-      const transactions = Math.floor(Math.random() * 50) + 40;
-      const sales = (transactions * (Math.floor(Math.random() * 400) + 900)) / 100;
-      data.push({ label: format(date, "MMM dd"), sales, transactions });
-    }
-  } else {
-    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    months.forEach(m => {
-      const transactions = Math.floor(Math.random() * 1000) + 800;
-      const sales = (transactions * (Math.floor(Math.random() * 200) + 1000)) / 100;
-      data.push({ label: m, sales, transactions });
-    });
-  }
-  return data;
 }
 
 function KpiCard({ title, value, icon }: { title: string; value: string; icon: React.ReactNode }) {
@@ -75,6 +49,13 @@ function ChartCard({ title, data, dataKey, format: fmt }: { title: string; data:
     <Card className="shadow-soft rounded-2xl">
       <CardHeader className="pb-2"><CardTitle className="text-base">{title}</CardTitle></CardHeader>
       <CardContent>
+        {data.length === 0 ? (
+          // A flat line at zero and a week of no trading look identical on a chart, and
+          // only one of them is true. Say which.
+          <div className="h-[280px] flex items-center justify-center text-sm text-muted-foreground" data-testid="text-no-sales">
+            No sales yet
+          </div>
+        ) : (
         <div className="h-[280px]">
           <ResponsiveContainer width="100%" height="100%">
             {fmt === "currency" ? (
@@ -96,6 +77,7 @@ function ChartCard({ title, data, dataKey, format: fmt }: { title: string; data:
             )}
           </ResponsiveContainer>
         </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -110,7 +92,25 @@ export default function ReportsPage() {
   const [activeTab, setActiveTab] = useState("sales");
   const [showIngredientProducts, setShowIngredientProducts] = useState(false);
 
-  const salesData = useMemo(() => generateMockSalesData(currentGranularity), [currentGranularity]);
+  // Real sales, bucketed the same way the API buckets them. Two loads of this page now
+  // agree with each other, which the random series they replaced never did.
+  //
+  // Each granularity carries the range it means: hourly is today's trading day, or every
+  // 09:00 the shop has ever traded would stack up under one repeated label.
+  const salesData = useMemo(() => {
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const since = currentGranularity === "hourly"
+      ? startOfToday
+      : currentGranularity === "daily"
+        ? startOfToday - 13 * 86400000
+        : new Date(now.getFullYear(), now.getMonth() - 11, 1).getTime();
+
+    return salesSeries(sales, { granularity: currentGranularity as Granularity, since })
+      .map(b => ({ label: b.label, sales: b.revenueCents / 100, transactions: b.transactions }));
+  }, [sales, currentGranularity]);
+
+  const hasSales = salesData.length > 0;
 
   const totals = useMemo(() => {
     const currentSales = salesData.reduce((acc, curr) => acc + curr.sales, 0);
@@ -122,20 +122,26 @@ export default function ReportsPage() {
     };
   }, [salesData]);
 
+  // productMix returns per-variant rows; the tab shows per-product, so the rollup happens
+  // here rather than in a second shared function. A product that never sold has no row at
+  // all — it is absent from the sales, not present with a quantity of zero.
   const productMixData = useMemo(() => {
-    const filtered = showIngredientProducts
-      ? products
-      : products.filter(p => !p.availableAsIngredient);
-    return filtered.slice(0, 8).map(p => {
-      const pvariants = variants.filter(v => v.productId === p.id);
-      const avgPrice = pvariants.length > 0 ? pvariants.reduce((s, v) => s + v.basePrice, 0) / pvariants.length : 0;
-      return {
-        name: p.name,
-        quantity: Math.floor(Math.random() * 100) + 20,
-        revenue: (Math.floor(Math.random() * 100) + 20) * (avgPrice / 100),
-      };
-    }).sort((a, b) => b.revenue - a.revenue);
-  }, [products, variants, showIngredientProducts]);
+    const productOfVariant = new Map(variants.map(v => [v.id, v.productId]));
+    const byProduct = new Map<string, { name: string; quantity: number; revenueCents: number }>();
+
+    for (const row of productMix(sales)) {
+      const productId = row.productId || productOfVariant.get(row.variantId) || "";
+      const product = products.find(p => p.id === productId);
+      if (!showIngredientProducts && product?.availableAsIngredient) continue;
+      const key = productId || row.variantId;
+      const existing = byProduct.get(key) ?? { name: product?.name || row.productName || "Unknown", quantity: 0, revenueCents: 0 };
+      existing.quantity += row.quantity;
+      existing.revenueCents += row.revenueCents;
+      byProduct.set(key, existing);
+    }
+
+    return Array.from(byProduct.values()).sort((a, b) => b.revenueCents - a.revenueCents);
+  }, [sales, products, variants, showIngredientProducts]);
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
@@ -173,9 +179,9 @@ export default function ReportsPage() {
 
             <TabsContent value="sales" className="space-y-6 mt-0">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <KpiCard title="Total Revenue" value={formatMoney(totals.sales * 100)} icon={<DollarSign className="h-4 w-4" />} />
-                <KpiCard title="Avg Ticket" value={formatMoney(totals.avgCheck * 100)} icon={<TrendingUp className="h-4 w-4" />} />
-                <KpiCard title="Transactions" value={totals.txns.toString()} icon={<Users className="h-4 w-4" />} />
+                <KpiCard title="Total Revenue" value={hasSales ? formatMoney(totals.sales * 100) : "\u2014"} icon={<DollarSign className="h-4 w-4" />} />
+                <KpiCard title="Avg Ticket" value={hasSales ? formatMoney(totals.avgCheck * 100) : "\u2014"} icon={<TrendingUp className="h-4 w-4" />} />
+                <KpiCard title="Transactions" value={hasSales ? totals.txns.toString() : "\u2014"} icon={<Users className="h-4 w-4" />} />
               </div>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <ChartCard title="Sales Overview" data={salesData} dataKey="sales" format="currency" />
@@ -208,11 +214,17 @@ export default function ReportsPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {productMixData.map((item, i) => (
+                      {productMixData.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={3} className="text-center text-muted-foreground py-8" data-testid="text-no-product-mix">
+                            No sales yet
+                          </TableCell>
+                        </TableRow>
+                      ) : productMixData.map((item, i) => (
                         <TableRow key={i}>
                           <TableCell className="font-medium">{item.name}</TableCell>
                           <TableCell className="text-right">{item.quantity}</TableCell>
-                          <TableCell className="text-right">{formatMoney(item.revenue * 100)}</TableCell>
+                          <TableCell className="text-right">{formatMoney(item.revenueCents)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
