@@ -1,12 +1,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createApiHandlers, type ApiAdminStorage, type StoreSetting } from "./api-handlers";
+import { SECRET_SETTING_FIELDS, SECRET_SET_MARKER } from "./schema";
 
 // A storage stub backed by a Map. Only the settings methods are real; everything
 // else throws, so a test that accidentally reaches another entity fails loudly.
 function stubStore(): ApiAdminStorage {
   const settings = new Map<string, StoreSetting>();
   return new Proxy({
+    // Exposed so a test can assert on what was *stored* — the API deliberately
+    // never returns a secret, so there is no other way to check it survived a save.
+    __settings: settings,
     async listSettings() { return [...settings.values()]; },
     async getSetting(key: string) { return settings.get(key) ?? null; },
     async setSetting(key: string, value: unknown) {
@@ -119,6 +123,46 @@ test("keys are validated before becoming a primary key", async () => {
   // A slash or an empty key never reaches the handler — the router does not match it.
   for (const bad of ["a/b", ""]) {
     assert.notEqual((await call(h, "GET", `/api/settings/${bad}`)).status, 200, `expected non-200 for ${bad}`);
+  }
+});
+
+const storedValue = (store: ApiAdminStorage, key: string) =>
+  (store as unknown as { __settings: Map<string, StoreSetting> }).__settings.get(key)!.value as Record<string, unknown>;
+
+test("a stored credential is never in a settings response, and survives a redacted save", async () => {
+  const store = stubStore();
+  const h = createApiHandlers(store);
+  const config = { host: "smtp.example.com", user: "owner@example.com", password: "s3cret" };
+
+  assert.equal((await call(h, "PUT", "/api/settings/emailConfig", { value: config })).status, 200);
+
+  const one = (await call(h, "GET", "/api/settings/emailConfig")).data as { value: Record<string, unknown> };
+  const all = (await call(h, "GET", "/api/settings")).data;
+  for (const body of [one, all]) {
+    assert.ok(!JSON.stringify(body).includes("s3cret"), `plaintext leaked: ${JSON.stringify(body)}`);
+  }
+  assert.equal(one.value.password, SECRET_SET_MARKER);
+  assert.equal(one.value.host, "smtp.example.com", "non-secret fields still read back");
+
+  // Saving the redacted object back must not blank the password.
+  await call(h, "PUT", "/api/settings/emailConfig", { value: { ...one.value, user: "new@example.com" } });
+  assert.equal(storedValue(store, "emailConfig").password, "s3cret");
+  assert.equal(storedValue(store, "emailConfig").user, "new@example.com");
+
+  // An actual new value replaces it.
+  await call(h, "PUT", "/api/settings/emailConfig", { value: { ...config, password: "next" } });
+  assert.equal(storedValue(store, "emailConfig").password, "next");
+});
+
+test("every secret field in the map is redacted, not just emailConfig's", async () => {
+  for (const [key, fields] of Object.entries(SECRET_SETTING_FIELDS)) {
+    const h = createApiHandlers(stubStore());
+    const value = Object.fromEntries(fields.map(f => [f, `plain-${f}`]));
+    await call(h, "PUT", `/api/settings/${key}`, { value });
+    const body = JSON.stringify((await call(h, "GET", "/api/settings")).data);
+    for (const f of fields) {
+      assert.ok(!body.includes(`plain-${f}`), `${key}.${f} leaked from GET /api/settings`);
+    }
   }
 });
 

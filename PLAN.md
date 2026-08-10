@@ -1183,7 +1183,10 @@ the number means something.
 
 ## Feature 17 — The SMTP password is in the backup, and in every settings response
 
-**Status:** planned
+**Status:** T1 done — `SECRET_SETTING_FIELDS`, `redactSetting` and `mergeSettingSecrets` live in
+`shared/schema.ts`; both settings read handlers redact, and `PUT` merges a marker or absent secret
+over the stored value (`shared/api-handlers.ts:479-524`, tests in `shared/api-handlers.test.ts`).
+T2–T4 remain: the backup snapshot (T2) still contains the plaintext.
 **Vision pillar:** #3 — third-party services need credentials, and this plan is about to add more of
 them (Feature 16's integrations, Feature 4's API tokens). Also #1: losing an operator's email
 account is not a foundation.
