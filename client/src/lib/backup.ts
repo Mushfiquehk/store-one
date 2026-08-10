@@ -1,4 +1,5 @@
 import { db, BACKUP_TABLES } from "./db";
+import { SETTINGS_TABLE, redactSettingsRows } from "@shared/backup";
 
 // Same settings shape and localStorage convention as auto-sync in ./sync.ts —
 // a separate interval, not a second scheduler design.
@@ -26,10 +27,16 @@ export function setAutoBackupIntervalMinutes(minutes: number): void {
   localStorage.setItem("cornerpos_auto_backup_interval", String(minutes));
 }
 
-/** One snapshot of every table in the Dexie schema, keyed by table name. */
+/**
+ * One snapshot of every table in the Dexie schema, keyed by table name, with stored
+ * credentials replaced by a marker — a snapshot travels between devices and stores.
+ */
 export async function buildSnapshot(): Promise<Record<string, unknown[]>> {
   const entries = await Promise.all(
-    BACKUP_TABLES.map(async name => [name, await db.table(name).toArray()] as const),
+    BACKUP_TABLES.map(async name => {
+      const rows = await db.table(name).toArray();
+      return [name, name === SETTINGS_TABLE ? redactSettingsRows(rows) : rows] as const;
+    }),
   );
   return Object.fromEntries(entries);
 }

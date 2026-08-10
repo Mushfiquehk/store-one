@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { planRestore, describeRestore } from "./backup";
+import { planRestore, describeRestore, redactSettingsRows, mergeRestoredSettings } from "./backup";
+import { SECRET_SET_MARKER } from "./schema";
 
 const TABLES = ["products", "variants", "sales", "combos", "invoices"];
 
@@ -67,4 +68,37 @@ test("the confirmation names the row counts about to be replaced", () => {
 test("the confirmation is honest when there is nothing to lose", () => {
   const plan = planRestore({ products: [] }, TABLES);
   assert.match(describeRestore(plan, { products: 0 }), /no data to replace/);
+});
+
+test("a snapshot carries no credential, and restoring one does not wipe the live value", () => {
+  const stored = [
+    { key: "emailConfig", value: { host: "smtp.example.com", user: "owner@example.com", password: "s3cret" }, updatedAt: 5 },
+    { key: "tax.ratePct", value: 8.25, updatedAt: 5 },
+  ];
+
+  const snapshot = redactSettingsRows(stored);
+  assert.ok(!JSON.stringify(snapshot).includes("s3cret"), "credential left the device");
+  // Everything else in the settings table still travels.
+  assert.equal((snapshot[1] as { value: unknown }).value, 8.25);
+  assert.deepEqual((snapshot[0] as { value: Record<string, unknown> }).value.host, "smtp.example.com");
+  assert.equal((snapshot[0] as { value: Record<string, unknown> }).value.password, SECRET_SET_MARKER);
+  assert.equal((snapshot[0] as { updatedAt: number }).updatedAt, 5, "the row is otherwise intact");
+
+  // Restoring that snapshot onto a device with a working password keeps it.
+  const merged = mergeRestoredSettings(snapshot, [
+    { key: "emailConfig", value: { host: "old.example.com", password: "device-pw" }, updatedAt: 9 },
+  ]);
+  const email = (merged[0] as { value: Record<string, unknown> }).value;
+  assert.equal(email.password, "device-pw");
+  assert.equal(email.host, "smtp.example.com", "non-secret fields are still restored");
+
+  // A device with no password stored ends up with no password, not the marker.
+  const fresh = (mergeRestoredSettings(snapshot, [])[0] as { value: Record<string, unknown> }).value;
+  assert.ok(!("password" in fresh), `marker survived restore: ${JSON.stringify(fresh)}`);
+});
+
+test("rows that are not settings rows pass through untouched", () => {
+  const junk = [null, 42, { value: "no key" }];
+  assert.deepEqual(redactSettingsRows(junk), junk);
+  assert.deepEqual(mergeRestoredSettings(junk, junk), junk);
 });

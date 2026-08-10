@@ -1,7 +1,47 @@
 // The decision half of restore, kept pure so it can be tested without a browser.
 // settings.tsx does the Dexie I/O; everything that decides what gets destroyed lives here.
 
+import { mergeSettingSecrets, redactSetting } from "./schema";
+
 export type Snapshot = Record<string, unknown[]>;
+
+/** The Dexie table the SECRET_SETTING_FIELDS map applies to. */
+export const SETTINGS_TABLE = "settings";
+
+const settingKey = (row: unknown): string | null => {
+  const key = (row as { key?: unknown } | null)?.key;
+  return typeof key === "string" ? key : null;
+};
+
+/**
+ * The `settings` rows as they may leave the device: secret fields become the marker.
+ * Field-level, so hours of operation and the tax rate still travel — only the
+ * credential does not. Called on the snapshot, below BACKUP_TABLES' derivation from
+ * `db.tables`, which stays as Feature 9 T1 built it.
+ */
+export function redactSettingsRows(rows: readonly unknown[]): unknown[] {
+  return rows.map(row => {
+    const key = settingKey(row);
+    return key === null ? row : { ...(row as object), value: redactSetting(key, (row as { value: unknown }).value) };
+  });
+}
+
+/**
+ * Restore rule for settings, the same one the API's PUT applies: a redacted secret in
+ * a snapshot keeps whatever this device has stored. Restoring a backup must not wipe a
+ * working mail configuration.
+ */
+export function mergeRestoredSettings(incoming: readonly unknown[], stored: readonly unknown[]): unknown[] {
+  const byKey = new Map(stored.flatMap(row => {
+    const key = settingKey(row);
+    return key === null ? [] : [[key, (row as { value: unknown }).value] as const];
+  }));
+  return incoming.map(row => {
+    const key = settingKey(row);
+    if (key === null) return row;
+    return { ...(row as object), value: mergeSettingSecrets(key, (row as { value: unknown }).value, byKey.get(key) ?? null) };
+  });
+}
 
 export type RestorePlan = {
   /** Tables the snapshot carries data for: clear these, then write the rows back. */

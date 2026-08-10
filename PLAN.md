@@ -1186,7 +1186,10 @@ the number means something.
 **Status:** T1 done — `SECRET_SETTING_FIELDS`, `redactSetting` and `mergeSettingSecrets` live in
 `shared/schema.ts`; both settings read handlers redact, and `PUT` merges a marker or absent secret
 over the stored value (`shared/api-handlers.ts:479-524`, tests in `shared/api-handlers.test.ts`).
-T2–T4 remain: the backup snapshot (T2) still contains the plaintext.
+T2 done — `redactSettingsRows` / `mergeRestoredSettings` in `shared/backup.ts` (tested); `buildSnapshot`
+redacts as the snapshot is built and `confirmRestore` merges a redacted secret over the device's own,
+both keyed off the same map. `BACKUP_TABLES` untouched.
+T3–T4 remain: the Settings email card still loads the password into an input.
 **Vision pillar:** #3 — third-party services need credentials, and this plan is about to add more of
 them (Feature 16's integrations, Feature 4's API tokens). Also #1: losing an operator's email
 account is not a foundation.
