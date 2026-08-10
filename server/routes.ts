@@ -661,6 +661,10 @@ async function handleViaSharedHandlers(req: Request, res: Response): Promise<boo
     method: req.method,
     path: req.path,
     params: req.params || {},
+    // ApiRequest has carried a `query` field since it was written and nobody populated it,
+    // so every handler reading one silently saw undefined. Repeated values arrive as arrays
+    // and are left for the handler to reject rather than being flattened into a wrong scalar.
+    query: req.query as Record<string, string>,
     body: req.body,
   };
   const apiRes = await apiHandlers.handle(apiReq);

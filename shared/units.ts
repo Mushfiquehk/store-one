@@ -53,8 +53,3 @@ export function formatCostPerStockUnit(cents: number): string {
     maximumFractionDigits: 4,
   }).format(cents / 100);
 }
-
-/** True when the item has a real pack size, so its cost has actually been converted. */
-export function hasConversionFactor(unitsPerPurchase: number | null | undefined): boolean {
-  return !!unitsPerPurchase && unitsPerPurchase > 1 && Number.isFinite(unitsPerPurchase);
-}

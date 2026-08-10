@@ -63,11 +63,18 @@ async function startNativeHttpServer(port: number, hostname: string): Promise<bo
         }
       }
 
-      const pathWithoutQuery = (event.path || "/").split("?")[0];
+      // The query string was split off the path and then dropped on the floor, so every
+      // ?since=/?granularity= on this server was silently ignored. Parse it instead.
+      const [pathWithoutQuery, queryString] = (event.path || "/").split("?");
+      const query: Record<string, string> = {};
+      if (queryString) {
+        new URLSearchParams(queryString).forEach((value, key) => { query[key] = value; });
+      }
       const req: ApiRequest = {
         method: event.method || "GET",
         path: pathWithoutQuery,
         params: {},
+        query,
         body: parsedBody,
       };
 

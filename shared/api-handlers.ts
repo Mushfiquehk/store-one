@@ -1,5 +1,6 @@
 import { parseMenuBlueprint, planMenuApply, type ExistingMenu, type FieldDiff, type MenuPlan } from "./menu-blueprint";
 import type { Modifier, ModifierGroup, Product, ProductModifierGroup, Variant } from "./schema";
+import { productMix, salesSeries, salesSummary, type Granularity, type ReportSale } from "./reports";
 
 export interface ApiRequest {
   method: string;
@@ -274,6 +275,16 @@ async function applyMenuPlan(store: ApiAdminStorage, plan: MenuPlan, existing: E
       }
     }
   }
+}
+
+// `?since=`/`?until=` are epoch millis. A value that is not a number is ignored rather than
+// silently windowing everything out — an unparseable filter must not read as "no sales".
+function parseWindow(req: ApiRequest): { since?: number; until?: number } {
+  const num = (raw: string | undefined) => {
+    const n = Number(raw);
+    return raw != null && raw !== "" && Number.isFinite(n) ? n : undefined;
+  };
+  return { since: num(req.query?.since), until: num(req.query?.until) };
 }
 
 export function createApiHandlers(store: ApiAdminStorage) {
@@ -682,27 +693,14 @@ export function createApiHandlers(store: ApiAdminStorage) {
   routes.push({
     method: "GET",
     pattern: "/api/reports/sales-summary",
-    handler: async () => {
+    handler: async (req) => {
       try {
-        const sales = (await store.listSales()) as Array<Record<string, unknown>>;
-        const totalSales = sales.length;
-        let totalRevenueCents = 0;
-        let totalTaxCents = 0;
-
-        for (const sale of sales) {
-          totalRevenueCents += (sale.totalCents as number) || 0;
-          totalTaxCents += (sale.taxCents as number) || 0;
-        }
-
-        return {
-          status: 200,
-          data: {
-            totalSales,
-            totalRevenueCents,
-            totalTaxCents,
-            averageOrderCents: totalSales > 0 ? Math.round(totalRevenueCents / totalSales) : 0,
-          },
-        };
+        const sales = (await store.listSales()) as ReportSale[];
+        const window = parseWindow(req);
+        const summary = salesSummary(sales, window);
+        // The series the page draws, from the same rows as the scalars above it.
+        const granularity = (req.query?.granularity as Granularity) || "daily";
+        return { status: 200, data: { ...summary, series: salesSeries(sales, { granularity, ...window }) } };
       } catch {
         return { status: 500, data: { error: "Failed to generate sales summary" } };
       }
@@ -712,34 +710,10 @@ export function createApiHandlers(store: ApiAdminStorage) {
   routes.push({
     method: "GET",
     pattern: "/api/reports/product-mix",
-    handler: async () => {
+    handler: async (req) => {
       try {
-        const sales = (await store.listSales()) as Array<Record<string, unknown>>;
-        const mix: Record<string, { productName: string; variantName: string; quantity: number; revenueCents: number }> = {};
-
-        for (const sale of sales) {
-          const lines = sale.linesJson as Array<Record<string, unknown>> | undefined;
-          if (!lines) continue;
-          for (const line of lines) {
-            const key = (line.variantId as string) || "unknown";
-            if (!mix[key]) {
-              mix[key] = {
-                productName: (line.productName as string) || "",
-                variantName: (line.variantName as string) || "",
-                quantity: 0,
-                revenueCents: 0,
-              };
-            }
-            mix[key].quantity += (line.qty as number) || 0;
-            mix[key].revenueCents += ((line.unitPrice as number) || 0) * ((line.qty as number) || 0);
-          }
-        }
-
-        const sorted = Object.entries(mix)
-          .map(([variantId, data]) => ({ variantId, ...data }))
-          .sort((a, b) => b.revenueCents - a.revenueCents);
-
-        return { status: 200, data: sorted };
+        const sales = (await store.listSales()) as ReportSale[];
+        return { status: 200, data: productMix(sales, parseWindow(req)) };
       } catch {
         return { status: 500, data: { error: "Failed to generate product mix report" } };
       }

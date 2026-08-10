@@ -22,8 +22,63 @@ function stubStore(): ApiAdminStorage {
   }) as unknown as ApiAdminStorage;
 }
 
-const call = (h: ReturnType<typeof createApiHandlers>, method: string, path: string, body?: unknown) =>
-  h.handle({ method, path, params: {}, body });
+const call = (h: ReturnType<typeof createApiHandlers>, method: string, path: string, body?: unknown, query?: Record<string, string>) =>
+  h.handle({ method, path, params: {}, query, body });
+
+// A store whose only real method is listSales, for the report endpoints.
+function salesStore(sales: unknown[]): ApiAdminStorage {
+  return new Proxy({ async listSales() { return sales; } } as Record<string, unknown>, {
+    get(target: Record<string, unknown>, prop: string) {
+      if (prop in target) return target[prop];
+      return () => { throw new Error(`unexpected storage call: ${prop}`); };
+    },
+  }) as unknown as ApiAdminStorage;
+}
+
+const line = { variantId: "v1", productId: "p1", productName: "Latte", variantName: "Small", qty: 1, unitPrice: 425 };
+const twoDays = [
+  { createdAt: new Date(2026, 2, 1, 9).getTime(), totalCents: 425, taxCents: 25, linesJson: [line] },
+  { createdAt: new Date(2026, 2, 5, 9).getTime(), totalCents: 900, taxCents: 50, linesJson: [line, line] },
+];
+
+test("?since= actually narrows sales-summary rather than being ignored", async () => {
+  const h = createApiHandlers(salesStore(twoDays));
+
+  const all = (await call(h, "GET", "/api/reports/sales-summary")).data as { totalSales: number; totalRevenueCents: number };
+  assert.deepEqual([all.totalSales, all.totalRevenueCents], [2, 1325]);
+
+  const since = String(new Date(2026, 2, 3).getTime());
+  const windowed = (await call(h, "GET", "/api/reports/sales-summary", undefined, { since })).data as { totalSales: number; totalRevenueCents: number };
+  assert.deepEqual([windowed.totalSales, windowed.totalRevenueCents], [1, 900]);
+});
+
+test("?granularity= reaches the series, and the series sums to the scalars", async () => {
+  const h = createApiHandlers(salesStore(twoDays));
+
+  const daily = (await call(h, "GET", "/api/reports/sales-summary", undefined, { granularity: "daily" })).data as { series: Array<{ revenueCents: number }> };
+  assert.equal(daily.series.length, 2);
+
+  const monthly = (await call(h, "GET", "/api/reports/sales-summary", undefined, { granularity: "monthly" })).data as { series: Array<{ revenueCents: number }>; totalRevenueCents: number };
+  assert.equal(monthly.series.length, 1);
+  assert.equal(monthly.series[0].revenueCents, monthly.totalRevenueCents);
+});
+
+test("?since= narrows product-mix too", async () => {
+  const h = createApiHandlers(salesStore(twoDays));
+
+  const all = (await call(h, "GET", "/api/reports/product-mix")).data as Array<{ quantity: number }>;
+  assert.equal(all[0].quantity, 3);
+
+  const since = String(new Date(2026, 2, 3).getTime());
+  const windowed = (await call(h, "GET", "/api/reports/product-mix", undefined, { since })).data as Array<{ quantity: number }>;
+  assert.equal(windowed[0].quantity, 2);
+});
+
+test("an unparseable window is ignored rather than reading as 'no sales'", async () => {
+  const h = createApiHandlers(salesStore(twoDays));
+  const junk = (await call(h, "GET", "/api/reports/sales-summary", undefined, { since: "yesterday" })).data as { totalSales: number };
+  assert.equal(junk.totalSales, 2);
+});
 
 test("settings round-trip: set, read, overwrite", async () => {
   const h = createApiHandlers(stubStore());
