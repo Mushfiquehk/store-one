@@ -1184,6 +1184,53 @@ router.get("/api/settings", async (req: Request, res: Response) => { await handl
 router.get("/api/settings/:key", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
 router.put("/api/settings/:key", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
 
+type EmailConfig = {
+  provider: string; host: string; port: number;
+  secure: boolean; username: string; password: string; senderEmail: string; senderName: string;
+};
+
+// The one place a mail transport is built from the stored credential. Publishing a
+// schedule and sending a test email are the same configuration; a second copy would
+// be a second thing to get wrong. Returns null when nothing is configured.
+async function mailTransport(): Promise<{ config: EmailConfig; transporter: import("nodemailer").Transporter } | null> {
+  const config = (await settingsStorage.get("emailConfig"))?.value as EmailConfig | null;
+  if (!config || !config.host || !config.senderEmail) return null;
+
+  const nodemailer = await import("nodemailer");
+  return {
+    config,
+    transporter: nodemailer.default.createTransport({
+      host: config.host,
+      port: config.port || 587,
+      secure: config.secure ?? false,
+      auth: config.username ? { user: config.username, pass: config.password } : undefined,
+    }),
+  };
+}
+
+const NOT_CONFIGURED = "Email backend not configured. Please set up email settings first.";
+
+// Verifying the configuration without ever reading the password back. Sends to the
+// sender address the operator already typed — no recipient comes off the wire.
+router.post("/api/settings/emailConfig/test", async (_req: Request, res: Response) => {
+  try {
+    const mail = await mailTransport();
+    if (!mail) return res.status(400).json({ error: NOT_CONFIGURED });
+
+    await mail.transporter.sendMail({
+      from: `"${mail.config.senderName || "CornerShop"}" <${mail.config.senderEmail}>`,
+      to: mail.config.senderEmail,
+      subject: "CornerShop email test",
+      text: "Your CornerShop email settings work. Schedules published from this store will send.",
+    });
+    res.json({ sent: true, to: mail.config.senderEmail });
+  } catch (err) {
+    // The mail server's own message is the useful part — "authentication failed" versus
+    // "connection refused" is the difference between a wrong password and a wrong host.
+    res.status(502).json({ error: err instanceof Error ? err.message : "Send failed" });
+  }
+});
+
 router.post("/api/schedule/publish", async (req: Request, res: Response) => {
   try {
     const { weekStart, shifts, employees } = req.body;
@@ -1191,25 +1238,9 @@ router.post("/api/schedule/publish", async (req: Request, res: Response) => {
       return res.status(400).json({ error: "weekStart, shifts, and employees are required" });
     }
 
-    const emailConfig = (await settingsStorage.get("emailConfig"))?.value as {
-      provider: string; host: string; port: number;
-      secure: boolean; username: string; password: string; senderEmail: string; senderName: string;
-    } | null;
-
-    if (!emailConfig || !emailConfig.host || !emailConfig.senderEmail) {
-      return res.status(400).json({ error: "Email backend not configured. Please set up email settings first." });
-    }
-
-    const nodemailer = await import("nodemailer");
-    const transporter = nodemailer.default.createTransport({
-      host: emailConfig.host,
-      port: emailConfig.port || 587,
-      secure: emailConfig.secure ?? false,
-      auth: emailConfig.username ? {
-        user: emailConfig.username,
-        pass: emailConfig.password,
-      } : undefined,
-    });
+    const mail = await mailTransport();
+    if (!mail) return res.status(400).json({ error: NOT_CONFIGURED });
+    const { config: emailConfig, transporter } = mail;
 
     const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
     const formatTime = (minutes: number) => {

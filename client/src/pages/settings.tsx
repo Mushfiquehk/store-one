@@ -32,7 +32,7 @@ import {
   setAutoSyncEnabled, getAutoSyncInterval, setAutoSyncIntervalMinutes,
   startAutoSync, stopAutoSync,
 } from "@/lib/sync";
-import type { SyncCategory } from "@shared/schema";
+import { SECRET_SET_MARKER, type SyncCategory } from "@shared/schema";
 
 type SyncStatus = "idle" | "syncing" | "success" | "error";
 
@@ -100,6 +100,10 @@ export default function SettingsPage() {
   const [hoursSaving, setHoursSaving] = useState(false);
   const [emailConfig, setEmailConfig] = useState<EmailConfig>(DEFAULT_EMAIL);
   const [emailSaving, setEmailSaving] = useState(false);
+  const [emailTesting, setEmailTesting] = useState(false);
+  // The API returns the marker, never the password, so "is one stored" is all the page knows.
+  const [passwordStored, setPasswordStored] = useState(false);
+  const [replacingPassword, setReplacingPassword] = useState(false);
 
   useEffect(() => {
     fetch("/api/settings/hoursOfOperation")
@@ -108,7 +112,12 @@ export default function SettingsPage() {
       .catch(() => {});
     fetch("/api/settings/emailConfig")
       .then(r => r.json())
-      .then(d => { if (d.value) setEmailConfig(d.value as EmailConfig); })
+      .then(d => {
+        if (!d.value) return;
+        const value = d.value as EmailConfig;
+        setPasswordStored(value.password === SECRET_SET_MARKER);
+        setEmailConfig(value);
+      })
       .catch(() => {});
   }, []);
 
@@ -131,16 +140,41 @@ export default function SettingsPage() {
   const saveEmailConfig = async () => {
     setEmailSaving(true);
     try {
+      // A Replace the operator started and left empty keeps the stored password; the
+      // server reads the marker as "keep what you have". Saving the rest of the form
+      // must never be how a working credential gets blanked.
+      const password = passwordStored && !emailConfig.password ? SECRET_SET_MARKER : emailConfig.password;
       await fetch("/api/settings/emailConfig", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ value: emailConfig }),
+        body: JSON.stringify({ value: { ...emailConfig, password } }),
       });
+      if (emailConfig.password) setPasswordStored(true);
+      setReplacingPassword(false);
+      setEmailConfig(prev => ({ ...prev, password }));
       toast({ title: "Saved", description: "Email configuration updated." });
     } catch {
       toast({ title: "Error", description: "Failed to save email config.", variant: "destructive" });
     } finally {
       setEmailSaving(false);
+    }
+  };
+
+  const sendTestEmail = async () => {
+    setEmailTesting(true);
+    try {
+      const res = await fetch("/api/settings/emailConfig/test", { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || "Send failed");
+      toast({ title: "Test email sent", description: `Check ${body.to}.` });
+    } catch (err) {
+      toast({
+        title: "Test email failed",
+        description: err instanceof Error ? err.message : "Send failed",
+        variant: "destructive",
+      });
+    } finally {
+      setEmailTesting(false);
     }
   };
 
@@ -577,14 +611,34 @@ export default function SettingsPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>Password</Label>
-                  <Input
-                    type="password"
-                    value={emailConfig.password}
-                    onChange={e => setEmailConfig(prev => ({ ...prev, password: e.target.value }))}
-                    placeholder="App password or API key"
-                    className="rounded-xl"
-                    data-testid="input-smtp-password"
-                  />
+                  {passwordStored && !replacingPassword ? (
+                    // The stored password is never sent to the browser, so there is
+                    // nothing to put in a box. State it, and make replacing deliberate.
+                    <div className="flex items-center gap-2 h-10">
+                      <span className="text-sm text-muted-foreground flex-1" data-testid="text-smtp-password-status">
+                        Configured
+                      </span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="rounded-xl"
+                        onClick={() => { setReplacingPassword(true); setEmailConfig(prev => ({ ...prev, password: "" })); }}
+                        data-testid="button-replace-smtp-password"
+                      >
+                        Replace
+                      </Button>
+                    </div>
+                  ) : (
+                    <Input
+                      type="password"
+                      value={emailConfig.password}
+                      onChange={e => setEmailConfig(prev => ({ ...prev, password: e.target.value }))}
+                      placeholder="App password or API key"
+                      className="rounded-xl"
+                      data-testid="input-smtp-password"
+                    />
+                  )}
                 </div>
               </div>
 
@@ -611,15 +665,29 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              <Button
-                onClick={saveEmailConfig}
-                disabled={emailSaving}
-                className="w-full rounded-xl"
-                data-testid="button-save-email"
-              >
-                {emailSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
-                Save Email Settings
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  onClick={saveEmailConfig}
+                  disabled={emailSaving}
+                  className="flex-1 rounded-xl"
+                  data-testid="button-save-email"
+                >
+                  {emailSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+                  Save Email Settings
+                </Button>
+                {/* The only way to find out whether these settings work used to be
+                    publishing a schedule to real staff. */}
+                <Button
+                  onClick={sendTestEmail}
+                  disabled={emailTesting}
+                  variant="outline"
+                  className="rounded-xl"
+                  data-testid="button-test-email"
+                >
+                  {emailTesting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Mail className="h-4 w-4 mr-2" />}
+                  Send test email
+                </Button>
+              </div>
             </CardContent>
           </Card>
 
