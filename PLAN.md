@@ -34,6 +34,7 @@ its section. They are ordered by what they cost if left alone.
 | **15** | Stock adjustments clamp at zero and record nothing | `local-storage.ts:257`, `dexie-admin-storage.ts:266`; no ledger table in `db.ts:194-211` | Over-sales vanish; no answer to "where did it go" |
 | **21** | The Settings tax-rate field is bound to `useState` and written nowhere; the till charges a hardcoded 8.25% in every store | `settings.tsx:89, 411-412` (only three mentions of `taxRate` in the file); `pos.tsx:38` — `setTaxRatePct` is never called | Every operator charges the wrong tax and cannot change it |
 | **22** | Nothing ever asks how much cash is in the drawer — no float, no count, no over/short, no trading day | `grep -rin "drawer\|openingFloat\|cashCount\|endOfDay"` returns nothing | Every other defect in this table is undetectable in daily operation |
+| **25** | A product with no tags is unreachable on the till — the "show everything" branch is dead once any tagged product exists | `pos.tsx:98-116`; `activeTag` auto-sets at `:109` (during render), and `:114` filters by it | An operator adds an item, cannot find it, cannot tell whether it saved |
 | **5** | Combos are ignored by the live order path | `bom-engine.ts` is imported only by `routes.ts:16` for test orders; `/api/orders/simulate` prices inline with a hardcoded 8% tax | Combos charge full price; three different tax rates in the codebase |
 
 ~~**Suggested first session**~~ — **done.** Features 7, 9 and 11 have all landed, which clears the
@@ -146,6 +147,130 @@ All four tasks complete, every `Check:` passing, `npm run check` (tsc) clean, an
 stated "Definition of done" demonstrably true. A feature with three of four tasks done is not
 partially shipped — it is unshipped, and several of these leave the system in a worse state
 half-built than not started (Feature 3 T3 in particular).
+
+---
+
+## Feature 25 — The menu grid: a product you add can currently become unreachable
+
+**Status:** planned
+**Vision pillar:** #1 — "the easiest path". Setting up a menu is the first thing an operator does and
+the till layout is what they live in afterwards.
+**Depends on:** nothing. **T1 is a bug fix and should be taken on its own** regardless of the rest.
+**Added:** 2026-08-10
+
+### The finding
+
+Three defects in twenty lines of `client/src/pages/pos.tsx`, and the first one loses products.
+
+**1. A product with no tags cannot be displayed on the till.**
+
+```ts
+// pos.tsx:98-116
+const tags = useMemo(() => { /* every distinct tag across all products */ }, [products]);
+const [activeTag, setActiveTag] = useState<string | null>(null);
+if (!activeTag && tags.length > 0) { setActiveTag(tags[0]); }      // <-- during render
+const filteredProducts = useMemo(() => {
+  if (!activeTag) return products;                                  // the only path showing everything
+  return products.filter(p => (p.attributes?.tags || []).includes(activeTag));
+}, [products, activeTag]);
+```
+
+`activeTag` is null only until any tagged product exists. Every real store has one, so `activeTag` is
+always set, so the "return everything" branch is dead — and **a product with an empty `tags` array
+appears under no category and is reachable only by search.** An operator adds an item, cannot find it
+on the till, and has no way to tell whether it saved. The product wizard does not require a tag, so
+this is reachable by the ordinary path.
+
+**2. `setActiveTag` is called during render**, not in an effect or an event handler (`:109`). React
+re-renders on the spot; it is the kind of thing that works until a concurrent-render change or a
+`StrictMode` double-invoke makes it not.
+
+**3. Category order is arbitrary and unchangeable.** The category bar is
+`Array.from(new Set(...))` over the products array, so the order is the order products happen to come
+back in — and the default selected category is whichever that puts first. An operator cannot put
+Drinks before Bakery, and the bar can silently reorder itself when a product is edited.
+
+Underneath all three: **categories are not a thing.** They are free-text strings inside
+`ProductAttributes.tags` (`shared/schema.ts:2`), a JSON blob on the product. Nothing registers them,
+nothing orders them, nothing catches a typo — "Drinks" and "drinks" are two categories, and a
+rename means editing every product that carries the old string.
+
+There is also no ordering *within* a category: products render in whatever order the store returns
+them, so the best-seller cannot be put first.
+
+### The shape
+
+Promote the category to a real, ordered thing; keep tags for what tags are good at.
+
+- `category` — one nullable string per product, the till's grouping.
+- `menu.categories` — one ordered array in store settings (Feature 7 T3's API, already shipped),
+  which is what makes ordering and renaming a single write rather than a migration over products.
+- `sortOrder` — a number per product, for arranging the grid.
+- `tags` stays exactly as it is, for search and for anything cross-cutting ("vegan", "seasonal").
+
+```
+ponytail: a category is a string on the product plus an ordered array in
+settings. No categories table, no join, no per-category images or colours, no
+nesting. Sub-categories are the upgrade if a menu ever gets big enough to need
+them, and most never do.
+```
+
+### Tasks
+
+**T1 — Nothing disappears** (~15 min, and worth shipping alone)
+- Add an "All" option to the category bar and make it the default, so the "show everything" path is
+  reachable instead of dead. Any product with no category appears under **Uncategorised** as well —
+  visible, and visibly needing a home.
+- Move the `setActiveTag` call out of the render body (`pos.tsx:109`) — derive the active category
+  instead, or set it in an effect. Same behaviour, without the render-phase write.
+- Check: create a product with no tags and confirm it appears on the till without searching; confirm
+  the category bar still defaults sensibly when every product is categorised.
+
+**T2 — A category that is a category** (~15 min)
+- Add `category: text` (nullable) to products in all three schema locations, and a `menu.categories`
+  ordered array setting. Migrate existing data by taking each product's **first tag** as its
+  category and leaving `tags` untouched — no data is lost and nothing needs re-tagging.
+- Build the category bar from the setting, in its order, not from a `Set` over products. A category
+  in the list with no products still shows (empty, so the operator can see where things should go);
+  a product whose category is absent from the list falls into Uncategorised rather than vanishing.
+- Renaming a category is a write to the setting plus one pass over products carrying the old value —
+  do it in one place, and say in a comment that this is why the list is a setting rather than derived.
+- Check: reorder the categories and confirm the till bar follows; rename one and confirm no product
+  becomes uncategorised.
+
+**T3 — Arrange the grid** (~15 min)
+- Add `sortOrder: integer` to products, defaulting so existing rows keep their current relative order
+  rather than jumping to alphabetical on upgrade.
+- Let an operator drag products into position within a category. **Reuse the drag-and-drop already
+  built in `client/src/pages/schedule.tsx`** rather than adding a second library or a second
+  interaction pattern.
+- Persist on drop, not on a separate save. A layout editor with an unsaved state is a layout an
+  operator will lose.
+- Check: reorder three products, reload, and confirm the order holds; add a fourth and confirm it
+  lands at the end rather than in the middle.
+
+**T4 — Categories travel with the menu** (~15 min)
+- Add `category` and `sortOrder` to Feature 1's menu blueprint and to Feature 2 T1's export, keeping
+  that pair's round-trip invariant: export → apply is still entirely `noop`. Add the `menu.categories`
+  order to the blueprint too, or an agent can create a category it cannot position.
+- This is what lets an operator say "put the pastries first" to an agent, which is pillar #2's
+  promise applied to the thing they look at all day.
+- Check: export a categorised menu, re-apply it, and confirm every change is `noop` — including
+  category and order.
+
+### Non-goals
+
+Sub-categories and nesting, per-category colours or images, multiple layouts per device, a separate
+customer-facing menu ordering, drag-and-drop of categories on the till itself (arranging belongs in
+admin; the till is for selling), and per-location layouts (Feature 3). Tags are deliberately kept as
+they are — this feature does not replace them, and a product may be in one category and carry any
+number of tags.
+
+### Definition of done
+
+Every product an operator creates is visible on the till without searching for it, categories appear
+in the order they chose, products sit where they dragged them, and an agent applying a menu can set
+all of it.
 
 ---
 
