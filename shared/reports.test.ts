@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { productMix, salesSeries, salesSummary, type ReportSale } from "./reports";
 
 // Local time on purpose — the functions bucket by the operator's trading day, so the
@@ -80,6 +81,14 @@ test("an empty store reports nothing, not zeros dressed as data", () => {
     totalTaxCents: 0,
     averageOrderCents: 0,
   });
+});
+
+// One line, and it is what stops this regressing the next time someone needs a chart to
+// look good in a screenshot. The Reports page fabricated two of its three tabs for as long
+// as it existed, and nothing on screen said so.
+test("the Reports page contains no random numbers", () => {
+  const page = readFileSync(new URL("../client/src/pages/reports.tsx", import.meta.url), "utf8");
+  assert.ok(!page.includes("Math.random"), "Math.random is back in reports.tsx");
 });
 
 test("averageOrderCents does not divide by zero", () => {
