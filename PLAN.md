@@ -29,6 +29,7 @@ its section. They are ordered by what they cost if left alone.
 | **17** | The stored SMTP password is returned by `GET /api/settings`, pre-filled into a form, and included in every backup | `api-handlers.ts:467-472`; `settings.tsx:109, 580`; `db.ts:462` → `backup.ts:32` | An operator's real mail credential leaks to anyone who can reach the server or fetch a backup |
 | **16** | Whether the till can record a card sale depends on ephemeral React state | `pos.tsx:133` reads `integrations`, which is `useState([])` at `store.tsx:129` | Every reload puts the store back to cash-only |
 | **16** | "Integration Connected — Successfully linked to provider" is a toast over a no-op | `store.tsx:236-241` — no network call, no persistence | Pillar #3's only surface is a prop |
+| **19** | No sale, price change, or adjustment records who made it; the only "current employee" is dialog state cleared on submit | `Sale` has no `employeeId` (`db.ts:142-156`); `app-shell.tsx:57, 85` | Feature 12's void attribution and Feature 15's ledger actor have nothing to record |
 | **15** | Recipe depletion is implemented twice — `pos.tsx:373-436` duplicates `bom-engine.ts:203-293`, and only the POS copy runs on real sales | the two already differ at `pos.tsx:367` vs `bom-engine.ts:224` | Pillar #4's accuracy claim rests on a copy nothing tests |
 | **15** | Stock adjustments clamp at zero and record nothing | `local-storage.ts:257`, `dexie-admin-storage.ts:266`; no ledger table in `db.ts:194-211` | Over-sales vanish; no answer to "where did it go" |
 | **5** | Combos are ignored by the live order path | `bom-engine.ts` is imported only by `routes.ts:16` for test orders; `/api/orders/simulate` prices inline with a hardcoded 8% tax | Combos charge full price; three different tax rates in the codebase |
@@ -143,6 +144,142 @@ All four tasks complete, every `Check:` passing, `npm run check` (tsc) clean, an
 stated "Definition of done" demonstrably true. A feature with three of four tasks done is not
 partially shipped — it is unshipped, and several of these leave the system in a worse state
 half-built than not started (Feature 3 T3 in particular).
+
+---
+
+## Feature 19 — Who did that: attribution, and the log every autopsy needs
+
+**Status:** planned
+**Vision pillar:** #6 — *"an autopilot mode where an AI agent takes over… With enough logging, it
+produces autopsies of its decisions taken in the past **and even taken by the operator** to
+self-improve its decision making."* This is the only pillar with no coverage anywhere in the plan,
+and the logging that sentence rests on does not exist.
+**Depends on:** T1–T3 depend on nothing and are shippable today. T4 needs Feature 2 (the agent
+bridge).
+**Unblocks:** Feature 12 T3 (voids require an employee to attribute them to — there is currently no
+such thing), Feature 14 (per-cashier numbers), Feature 15 T2 (the ledger's `employeeId`)
+**Added:** 2026-08-10
+
+### The finding
+
+**Nothing in this system records who did anything.**
+
+`employeeId` appears on exactly two entities — time punches (`client/src/lib/db.ts:135`) and
+schedule shifts (`shared/schema.ts:227`). Not on sales (`db.ts:142-156` — `Sale` has
+`customerName` and no cashier), not on inventory adjustments, not on price changes, not on anything
+the generic CRUD layer writes. `grep -rin "auditLog\|actorId\|createdBy\|changedBy"` across
+`client/src`, `server` and `shared` returns nothing at all.
+
+**There is not even a current user to attribute to.** The only notion of one is
+`selectedEmployeeId` in `client/src/components/app-shell.tsx:57` — React state, scoped to the time
+clock dialog, and **cleared to `""` on submit** (`:85`). It exists for the length of one clock-in and
+is then gone. Nothing else in the app can ask who is at the till, because at no point is the answer
+stored.
+
+The consequences are already written into this plan as assumptions that do not hold:
+
+- **Feature 12 T3** requires a void to record "who and why", calling an unattributed void
+  "indistinguishable from a cashier pocketing cash". There is no actor to record.
+- **Feature 15 T2** puts `employeeId` on every ledger row. Nothing can supply it.
+- **Feature 14** costs labour per employee while every sale that employee rang is anonymous, so
+  "which shifts are productive" is unanswerable from data the system already holds.
+- **Pillar #6's autopsy** is a review of decisions and their outcomes. The system currently retains
+  the outcome (a price is now $6.50) and discards the decision (who changed it, from what, when,
+  why) — which is precisely the half an autopsy is made of.
+
+And the thing that looks like identity is not. `pin-protection.tsx:16` defaults `requiredPin` to
+`"1234"`, compares it in the browser, and prints the PIN on its own dialog. It gates a screen; it
+identifies nobody. Feature 4 already names this as its own problem — **this feature must not try to
+fix it**, and must not pretend the actor it records is authenticated. An attributed action log on a
+trusted device is a shift-log, not a security control, and it is still the thing that makes an
+autopsy possible.
+
+### The seam with Feature 15
+
+Feature 15's ledger answers *how much of what moved and why*. This feature answers *who decided*.
+Do not build a second ledger: **inventory movements stay in F15's `inventoryLedger` and simply carry
+the actor this feature defines.** The action log covers the decisions that are not stock movements —
+a price edited, a menu applied, a void, a discount, a restore, a setting changed. If a task here
+finds itself logging quantities, the seam was cut in the wrong place.
+
+```
+ponytail: one append-only table, written at a handful of existing choke points,
+with a free-text summary rather than a structured diff. No event bus, no
+interceptor layer, no per-field change tracking. A structured before/after is
+the upgrade when something actually queries it — today nothing does, and a diff
+nobody reads is a schema to maintain for free.
+```
+
+### Tasks
+
+**T1 — A current employee that outlives a dialog** (~15 min)
+- Move the active employee out of `app-shell.tsx:57` into the store, persisted the way the app
+  already persists device-local state (the `cornerpos_` `localStorage` convention `sync.ts` uses).
+  The till is a shared device; who is on it is device state, not component state.
+- Show it where the operator can see and change it — the app shell header already renders the time
+  clock, so the same place. Clearing it on clock-out is correct; clearing it on submit
+  (`app-shell.tsx:85`) is the bug.
+- Keep working with no employee set. A single-operator store that never created an employee record
+  must still be able to sell; attribution is `null`, and `null` is an honest answer that the reports
+  in T4 must render as "unattributed" rather than dropping.
+- Check: select an employee, reload the page, and confirm they are still the active one; clock out
+  and confirm they are not.
+
+**T2 — Sales carry the cashier** (~15 min)
+- Add `employeeId` (nullable) to `Sale` in `shared/schema.ts`, `client/src/lib/db.ts` (Dexie version
+  bump) and `server/schema.ts`, and set it from T1's active employee in all three places a sale is
+  created — `pos.tsx:446`, `shared/api-handlers.ts:464`, `server/bom-engine.ts:440`. Existing rows
+  stay null; do not backfill a guess.
+- This is what Feature 12 T3's void attribution and Feature 14's per-employee view both need. It is
+  four lines and it unblocks two features.
+- Check: a sale rung with an employee selected reads back with their id; one rung with none reads
+  back null rather than an empty string, and both render.
+
+**T3 — The action log** (~15 min)
+- Add an append-only `actionLog` table: `id`, `at`, `actorKind` (`EMPLOYEE` | `AGENT` | `SYSTEM`),
+  `actorId`, `action` (a short constant, e.g. `PRICE_CHANGED`, `MENU_APPLIED`, `SALE_VOIDED`,
+  `SETTING_CHANGED`, `BACKUP_RESTORED`, `DEMO_CLEARED`), `targetType`, `targetId`, `summary` (human
+  readable, e.g. "Latte / Large $5.00 → $5.50"), and `detail` (nullable JSON).
+- Write it at the choke points that already exist rather than adding an interception layer: the
+  variant update path, `menu/apply` (Feature 1, one entry per apply with its change count — not one
+  per change, or a 60-product menu buries the log), the settings `PUT` handler, and the restore path
+  in `settings.tsx`. Inventory movements are **not** here; they are Feature 15's ledger rows.
+- Append-only in the same sense Feature 12 uses: no update, no delete, no soft-delete field. A log
+  the app can edit is a log that proves nothing. Say so in a comment on the table.
+- Check: changing one variant's price writes exactly one row whose `summary` contains both the old
+  and the new price; restoring a backup writes exactly one row; and nothing in the codebase updates
+  or deletes a row in this table.
+
+**T4 — Agent actions in the same log, and somewhere to read it** (~15 min)
+- Feature 2's MCP endpoint sets `actorKind: "AGENT"` with an actor id identifying the connection, so
+  an operator can see what the agent did next to what their staff did, in one list, in order. **That
+  single list is what pillar #6's autopsy reads** — a separate agent log would make "what happened
+  Tuesday" a join the operator has to perform in their head.
+- Show it on the Settings page (or a Reports tab): most recent first, filterable by actor. Pair each
+  `MENU_APPLIED` row with its change count so an operator can see "the agent changed 14 prices" and
+  go look.
+- Document in `docs/agent-setup.md` that every agent write is logged and attributed — an operator
+  deciding whether to trust an agent with their menu should be told where to check what it did.
+- **Not in this feature:** acting on the log. Autopilot, recommendations derived from past decisions,
+  and any self-improvement loop are pillar #6's later half; this is the record they would need to
+  exist first.
+- Check: an `apply_menu` through the MCP endpoint appears in the log as an agent action with the
+  number of changes, and a price changed by hand in the same minute appears beside it as an employee
+  action.
+
+### Non-goals
+
+Authentication and real identity (Feature 4 — and the hardcoded `1234` in `pin-protection.tsx` is
+its problem, not this one), per-field change diffs, log retention or rotation, tamper-evidence
+(hash chaining a log an operator's own device writes is theatre), permissions and roles, undo from
+the log, and the autopilot itself. Also out: logging reads. Who *looked* at a report is a
+surveillance feature, not an operational one, and it would bury the writes that matter.
+
+### Definition of done
+
+A sale records who rang it, the decisions that change money or the menu leave an append-only row
+naming who made them — staff or agent — and an operator can open one list and see what happened to
+their store yesterday and who did it.
 
 ---
 
