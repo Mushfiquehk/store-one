@@ -1189,7 +1189,11 @@ over the stored value (`shared/api-handlers.ts:479-524`, tests in `shared/api-ha
 T2 done — `redactSettingsRows` / `mergeRestoredSettings` in `shared/backup.ts` (tested); `buildSnapshot`
 redacts as the snapshot is built and `confirmRestore` merges a redacted secret over the device's own,
 both keyed off the same map. `BACKUP_TABLES` untouched.
-T3–T4 remain: the Settings email card still loads the password into an input.
+T3 done — the email card shows "Configured" with a **Replace** action instead of an input, an
+abandoned Replace re-sends the marker rather than blanking the credential, and **Send test email**
+(`POST /api/settings/emailConfig/test`) verifies the configuration without reading it back. Both it
+and `/api/schedule/publish` build their transport from one `mailTransport()` in `server/routes.ts`.
+T4 remains: the docs note, and pointing Features 16 and 4 at the same map.
 **Vision pillar:** #3 — third-party services need credentials, and this plan is about to add more of
 them (Feature 16's integrations, Feature 4's API tokens). Also #1: losing an operator's email
 account is not a foundation.
