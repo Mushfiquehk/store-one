@@ -26,6 +26,10 @@ its section. They are ordered by what they cost if left alone.
 | ~~**11**~~ | ~~`lastPurchasePrice` stores price per *purchased* unit; recipes consume *stocking* units~~ **Fixed** — `shared/units.ts` | ~~`storage.ts:910`~~ | — |
 | **8** | Sync compares Drizzle rows to Dexie records via `JSON.stringify`, so they never match | `storage.ts:~270` vs `sync.ts:97` — differing key order and field set | Every menu record re-pushed to every client on every sync, forever |
 | **8** | Conflict resolution reads `adminUpdatedAt` but never compares it | `storage.ts:215+` | Newer POS edits silently discarded |
+| **17** | The stored SMTP password is returned by `GET /api/settings`, pre-filled into a form, and included in every backup | `api-handlers.ts:467-472`; `settings.tsx:109, 580`; `db.ts:462` → `backup.ts:32` | An operator's real mail credential leaks to anyone who can reach the server or fetch a backup |
+| **16** | Whether the till can record a card sale depends on ephemeral React state | `pos.tsx:133` reads `integrations`, which is `useState([])` at `store.tsx:129` | Every reload puts the store back to cash-only |
+| **16** | "Integration Connected — Successfully linked to provider" is a toast over a no-op | `store.tsx:236-241` — no network call, no persistence | Pillar #3's only surface is a prop |
+| **19** | No sale, price change, or adjustment records who made it; the only "current employee" is dialog state cleared on submit | `Sale` has no `employeeId` (`db.ts:142-156`); `app-shell.tsx:57, 85` | Feature 12's void attribution and Feature 15's ledger actor have nothing to record |
 | **15** | Recipe depletion is implemented twice — `pos.tsx:373-436` duplicates `bom-engine.ts:203-293`, and only the POS copy runs on real sales | the two already differ at `pos.tsx:367` vs `bom-engine.ts:224` | Pillar #4's accuracy claim rests on a copy nothing tests |
 | **15** | Stock adjustments clamp at zero and record nothing | `local-storage.ts:257`, `dexie-admin-storage.ts:266`; no ledger table in `db.ts:194-211` | Over-sales vanish; no answer to "where did it go" |
 | **5** | Combos are ignored by the live order path | `bom-engine.ts` is imported only by `routes.ts:16` for test orders; `/api/orders/simulate` prices inline with a hardcoded 8% tax | Combos charge full price; three different tax rates in the codebase |
@@ -34,16 +38,21 @@ its section. They are ordered by what they cost if left alone.
 three defects that cost the most: silently discarded sales, a backup that could wipe a device, and
 costs wrong by orders of magnitude.
 
-**Next**, in this order: **Feature 13** (real reports — it blocks both 10 and 14, and two of its
+**Start with the three that are cheap and depend on nothing:** **Feature 17 T1** (stop returning the
+stored SMTP password from `GET /api/settings` — a credential leak, and the whole task is a redaction
+map and two handlers), **Feature 16 T1** (the till drops to cash-only on every reload), and
+**Feature 15 T1** (delete one of the two copies of the depletion walk before either drifts further).
+
+**Then**, in this order: **Feature 13** (real reports — it blocks both 10 and 14, and two of its
 three tabs are `Math.random()` today), then **Feature 10** (margins, now that 11 has made its
 inputs true), then **Feature 8** (sync convergence). **Feature 4 (auth) still has the deadline** —
 nothing authenticates, and there is a Dockerfile.
 
-The remaining seven features are genuine enhancements and can wait: **1** (menu blueprint), **2**
-(agent bridge), **3** (locations), **4** (auth), **6** (setup status), **10** (margins), **12**
-(voids and refunds). Of those, **4 (auth) is the one with a deadline** — there is no authentication
-of any kind, and the repo now has a Dockerfile and compose file, so it must land before this is
-deployed anywhere public.
+Everything else is a genuine enhancement and can wait: **1** (menu blueprint, done), **2** (agent
+bridge), **3** (locations), **6** (setup status), **12** (voids and refunds), **18** (profit and
+loss, whose T3 needs 13, 10 and 14 first). Of the lot, **4 (auth) is the one with a deadline** —
+there is no authentication of any kind, and the repo has a Dockerfile and compose file, so it must
+land before this is deployed anywhere public.
 
 ---
 
@@ -94,7 +103,8 @@ there. Either land features serially, or expect to resolve that file on every me
 | `server/storage.ts` | 3 (~40 methods), 11 (the invoice-receive path) |
 | `server/routes.ts` | 3, 4, 6 (moves the demo-clear handler out), 7 (the adapter stubs) |
 | `server/bom-engine.ts` | 5 (pricing, `:295-335`), 15 (depletion, `:203-293`) — different regions |
-| `client/src/pages/pos.tsx` | 15 (deletes the duplicated depletion walk) |
+| `client/src/pages/pos.tsx` | 15 (deletes the duplicated depletion walk), 16 (payment dialog, `:900-960`) |
+| `client/src/lib/store.tsx` | 16 (deletes the `integrations` state and its toggle) |
 | `client/src/lib/db.ts` | 9 (backup list), 11 (two columns), 12 (reversal fields), 15 (ledger table) |
 | `client/src/lib/local-storage.ts` | 11 (two copies of the same receive path) |
 | `client/src/components/product-wizard.tsx` | 11 (deletes the duplicated cost arithmetic) |
@@ -134,6 +144,547 @@ All four tasks complete, every `Check:` passing, `npm run check` (tsc) clean, an
 stated "Definition of done" demonstrably true. A feature with three of four tasks done is not
 partially shipped — it is unshipped, and several of these leave the system in a worse state
 half-built than not started (Feature 3 T3 in particular).
+
+---
+
+## Feature 19 — Who did that: attribution, and the log every autopsy needs
+
+**Status:** planned
+**Vision pillar:** #6 — *"an autopilot mode where an AI agent takes over… With enough logging, it
+produces autopsies of its decisions taken in the past **and even taken by the operator** to
+self-improve its decision making."* This is the only pillar with no coverage anywhere in the plan,
+and the logging that sentence rests on does not exist.
+**Depends on:** T1–T3 depend on nothing and are shippable today. T4 needs Feature 2 (the agent
+bridge).
+**Unblocks:** Feature 12 T3 (voids require an employee to attribute them to — there is currently no
+such thing), Feature 14 (per-cashier numbers), Feature 15 T2 (the ledger's `employeeId`)
+**Added:** 2026-08-10
+
+### The finding
+
+**Nothing in this system records who did anything.**
+
+`employeeId` appears on exactly two entities — time punches (`client/src/lib/db.ts:135`) and
+schedule shifts (`shared/schema.ts:227`). Not on sales (`db.ts:142-156` — `Sale` has
+`customerName` and no cashier), not on inventory adjustments, not on price changes, not on anything
+the generic CRUD layer writes. `grep -rin "auditLog\|actorId\|createdBy\|changedBy"` across
+`client/src`, `server` and `shared` returns nothing at all.
+
+**There is not even a current user to attribute to.** The only notion of one is
+`selectedEmployeeId` in `client/src/components/app-shell.tsx:57` — React state, scoped to the time
+clock dialog, and **cleared to `""` on submit** (`:85`). It exists for the length of one clock-in and
+is then gone. Nothing else in the app can ask who is at the till, because at no point is the answer
+stored.
+
+The consequences are already written into this plan as assumptions that do not hold:
+
+- **Feature 12 T3** requires a void to record "who and why", calling an unattributed void
+  "indistinguishable from a cashier pocketing cash". There is no actor to record.
+- **Feature 15 T2** puts `employeeId` on every ledger row. Nothing can supply it.
+- **Feature 14** costs labour per employee while every sale that employee rang is anonymous, so
+  "which shifts are productive" is unanswerable from data the system already holds.
+- **Pillar #6's autopsy** is a review of decisions and their outcomes. The system currently retains
+  the outcome (a price is now $6.50) and discards the decision (who changed it, from what, when,
+  why) — which is precisely the half an autopsy is made of.
+
+And the thing that looks like identity is not. `pin-protection.tsx:16` defaults `requiredPin` to
+`"1234"`, compares it in the browser, and prints the PIN on its own dialog. It gates a screen; it
+identifies nobody. Feature 4 already names this as its own problem — **this feature must not try to
+fix it**, and must not pretend the actor it records is authenticated. An attributed action log on a
+trusted device is a shift-log, not a security control, and it is still the thing that makes an
+autopsy possible.
+
+### The seam with Feature 15
+
+Feature 15's ledger answers *how much of what moved and why*. This feature answers *who decided*.
+Do not build a second ledger: **inventory movements stay in F15's `inventoryLedger` and simply carry
+the actor this feature defines.** The action log covers the decisions that are not stock movements —
+a price edited, a menu applied, a void, a discount, a restore, a setting changed. If a task here
+finds itself logging quantities, the seam was cut in the wrong place.
+
+```
+ponytail: one append-only table, written at a handful of existing choke points,
+with a free-text summary rather than a structured diff. No event bus, no
+interceptor layer, no per-field change tracking. A structured before/after is
+the upgrade when something actually queries it — today nothing does, and a diff
+nobody reads is a schema to maintain for free.
+```
+
+### Tasks
+
+**T1 — A current employee that outlives a dialog** (~15 min)
+- Move the active employee out of `app-shell.tsx:57` into the store, persisted the way the app
+  already persists device-local state (the `cornerpos_` `localStorage` convention `sync.ts` uses).
+  The till is a shared device; who is on it is device state, not component state.
+- Show it where the operator can see and change it — the app shell header already renders the time
+  clock, so the same place. Clearing it on clock-out is correct; clearing it on submit
+  (`app-shell.tsx:85`) is the bug.
+- Keep working with no employee set. A single-operator store that never created an employee record
+  must still be able to sell; attribution is `null`, and `null` is an honest answer that the reports
+  in T4 must render as "unattributed" rather than dropping.
+- Check: select an employee, reload the page, and confirm they are still the active one; clock out
+  and confirm they are not.
+
+**T2 — Sales carry the cashier** (~15 min)
+- Add `employeeId` (nullable) to `Sale` in `shared/schema.ts`, `client/src/lib/db.ts` (Dexie version
+  bump) and `server/schema.ts`, and set it from T1's active employee in all three places a sale is
+  created — `pos.tsx:446`, `shared/api-handlers.ts:464`, `server/bom-engine.ts:440`. Existing rows
+  stay null; do not backfill a guess.
+- This is what Feature 12 T3's void attribution and Feature 14's per-employee view both need. It is
+  four lines and it unblocks two features.
+- Check: a sale rung with an employee selected reads back with their id; one rung with none reads
+  back null rather than an empty string, and both render.
+
+**T3 — The action log** (~15 min)
+- Add an append-only `actionLog` table: `id`, `at`, `actorKind` (`EMPLOYEE` | `AGENT` | `SYSTEM`),
+  `actorId`, `action` (a short constant, e.g. `PRICE_CHANGED`, `MENU_APPLIED`, `SALE_VOIDED`,
+  `SETTING_CHANGED`, `BACKUP_RESTORED`, `DEMO_CLEARED`), `targetType`, `targetId`, `summary` (human
+  readable, e.g. "Latte / Large $5.00 → $5.50"), and `detail` (nullable JSON).
+- Write it at the choke points that already exist rather than adding an interception layer: the
+  variant update path, `menu/apply` (Feature 1, one entry per apply with its change count — not one
+  per change, or a 60-product menu buries the log), the settings `PUT` handler, and the restore path
+  in `settings.tsx`. Inventory movements are **not** here; they are Feature 15's ledger rows.
+- Append-only in the same sense Feature 12 uses: no update, no delete, no soft-delete field. A log
+  the app can edit is a log that proves nothing. Say so in a comment on the table.
+- Check: changing one variant's price writes exactly one row whose `summary` contains both the old
+  and the new price; restoring a backup writes exactly one row; and nothing in the codebase updates
+  or deletes a row in this table.
+
+**T4 — Agent actions in the same log, and somewhere to read it** (~15 min)
+- Feature 2's MCP endpoint sets `actorKind: "AGENT"` with an actor id identifying the connection, so
+  an operator can see what the agent did next to what their staff did, in one list, in order. **That
+  single list is what pillar #6's autopsy reads** — a separate agent log would make "what happened
+  Tuesday" a join the operator has to perform in their head.
+- Show it on the Settings page (or a Reports tab): most recent first, filterable by actor. Pair each
+  `MENU_APPLIED` row with its change count so an operator can see "the agent changed 14 prices" and
+  go look.
+- Document in `docs/agent-setup.md` that every agent write is logged and attributed — an operator
+  deciding whether to trust an agent with their menu should be told where to check what it did.
+- **Not in this feature:** acting on the log. Autopilot, recommendations derived from past decisions,
+  and any self-improvement loop are pillar #6's later half; this is the record they would need to
+  exist first.
+- Check: an `apply_menu` through the MCP endpoint appears in the log as an agent action with the
+  number of changes, and a price changed by hand in the same minute appears beside it as an employee
+  action.
+
+### Non-goals
+
+Authentication and real identity (Feature 4 — and the hardcoded `1234` in `pin-protection.tsx` is
+its problem, not this one), per-field change diffs, log retention or rotation, tamper-evidence
+(hash chaining a log an operator's own device writes is theatre), permissions and roles, undo from
+the log, and the autopilot itself. Also out: logging reads. Who *looked* at a report is a
+surveillance feature, not an operational one, and it would bury the writes that matter.
+
+### Definition of done
+
+A sale records who rang it, the decisions that change money or the menu leave an append-only row
+naming who made them — staff or agent — and an operator can open one list and see what happened to
+their store yesterday and who did it.
+
+---
+
+## Feature 18 — Profitability: the vision pillar with no expenses to subtract
+
+**Status:** planned
+**Vision pillar:** #5 — *"The store operator can view profitability over any period of time which
+Store-One calculates by tracking **all revenues and expenses**. The platform offers AI overviews of
+what affected profitability during that period and a few recommendations to improve."* Nothing in the
+plan has claimed this pillar; Features 10, 13 and 14 build three of its inputs and stop there.
+**Depends on:** T1 and T2 depend on nothing and are shippable today. T3 needs Feature 13 (real
+revenue), Feature 10 + 11 (honest COGS) and Feature 14 (labour); T4 needs Feature 2 (the agent
+bridge).
+**Added:** 2026-08-10
+
+### The finding
+
+**The system cannot record a single expense that is not an ingredient.** `grep -rin
+"expense\|overhead\|rent\|utilit"` across `client/src`, `server` and `shared` returns nothing. The
+only money-out record in the schema is `invoices` + `invoiceLineItems`
+(`client/src/lib/db.ts:87-105`), and every line item is tied to an `inventoryItemId` — a supplier
+delivery, nothing else.
+
+So rent, utilities, insurance, card processing fees, equipment repairs, licences, marketing, the
+accountant's bill — none of them can be entered anywhere. Pillar #5's "all revenues and expenses" is,
+today, "some revenues and the food."
+
+That matters more than a missing form. Features 10, 13 and 14 are each building one line of a P&L
+without anywhere for the lines to meet: F13 makes revenue real, F10 makes COGS real, F14 makes labour
+real. Prime cost — F14 names it as "the obvious next step" and deliberately does not build it — is
+those last two over the first. **Profit is that, minus everything this feature is about.** Ship
+prime cost alone and an operator reads a healthy number while the rent quietly eats it.
+
+### The trap: purchases are not COGS
+
+The one modelling decision that makes or breaks this feature, and the easiest one to get backwards.
+
+Supplier invoices are **inventory purchases**. Recipe depletion is **consumption**. They are
+different numbers over any period shorter than forever: a store that buys a pallet of flour in March
+has a large March invoice and a small March flour cost.
+
+- COGS on the P&L is **consumption** — the recipe cost of what was actually sold (Feature 10),
+  reconciled against what actually left the shelf (Feature 15's ledger).
+- Invoices are a balance-sheet movement: cash out, inventory up. **They must not also appear as an
+  expense line**, or every pallet is counted twice — once when bought, once when sold.
+
+State this in the module and in the docs. A P&L that double-counts purchases is not slightly wrong;
+it swings between wildly profitable and wildly unprofitable with the delivery schedule, and it looks
+plausible in both directions.
+
+```
+ponytail: one flat expenses table and a P&L computed on the fly from the four
+sources. No chart of accounts, no double-entry, no journals, no accounting
+periods to close. The upgrade when an accountant is actually involved is an
+export to their software, not a general ledger in this repo.
+```
+
+### Tasks
+
+**T1 — Somewhere to put the rent** (~15 min)
+- Add an `expenses` table (`shared/schema.ts`, `client/src/lib/db.ts` with a Dexie version bump, and
+  the `crudEntities` array in `shared/api-handlers.ts` — each entry there is one line and generates
+  full CRUD, so do not hand-write routes): `id`, `date`, `amountCents`, `category`, `vendor`, `note`,
+  plus the standard `updatedAt` / `deletedAt`.
+- Categories as one exported constant, not string literals: rent, utilities, insurance, fees
+  (payment processing and bank), repairs and maintenance, marketing, professional services, supplies,
+  other. Short and fixed — an operator picking from nine buttons will categorise; one typing free
+  text will not, and then the report cannot group.
+- **Do not model recurrence.** Monthly rent is twelve rows a year, entered in seconds. A recurrence
+  engine is a scheduler, a generator, and an edit-the-series problem, for a saving of eleven clicks.
+- Check: create, list by date window, and soft-delete an expense; assert a deleted expense is absent
+  from the window.
+
+**T2 — Enter one where the operator already is** (~15 min)
+- Add an expenses view beside the existing invoice intake (`client/src/components/admin-invoice-
+  intake.tsx` is the money-out screen operators already know) — date, amount, category, vendor, note.
+  Amount edits in dollars and stores cents, like the rest of the app.
+- Show the current month's total by category as it is entered. An operator who cannot see the running
+  total has no way to notice they entered $4,500 rent as $45.00.
+- **Put the purchases-are-not-expenses rule on the screen**, one line: supplier invoices are recorded
+  under Invoices and appear as cost of goods when the stock is sold. Otherwise the first thing an
+  operator does is enter their Sysco invoice here as well, and every number downstream doubles.
+- Check: entering an expense updates the category total immediately, and the invoice screen is
+  unchanged by it.
+
+**T3 — `GET /api/reports/profit-and-loss?since=&until=`** (~15 min)
+- In `shared/api-handlers.ts`, composing what the other features built: revenue from `salesSeries`
+  (Feature 13 T1), COGS from `costVariant` over the period's product mix (Feature 10 T1), labour from
+  `laborCostCents` (Feature 14 T2), expenses by category from T1. Return the lines, the totals, prime
+  cost, and net profit — plus each as a percentage of revenue, which is the form operators manage
+  against.
+- **Reuse, do not re-derive.** If this task computes revenue or cost by walking sales itself, the
+  earlier features were built wrong and that is worth knowing before this one lands.
+- Honesty, the same rule the whole plan runs on: return `unknowns` — variants with no known cost
+  (F10), employees with no pay rate (F14), unclosed punches (F14), windows containing over-drawn
+  stock (F15) — and never fold an unknown into a zero. A net profit computed with three unpriced
+  ingredients must say so next to the number.
+- Include the **previous equivalent period** and the delta per line. "What affected profitability"
+  is a comparison; a single column cannot answer it.
+- Check: a window with one sale, one expense and one shift returns revenue, COGS, labour and expense
+  lines that reconcile to the net figure exactly; and a variant with no cost appears in `unknowns`
+  rather than raising the margin.
+
+**T4 — The overview, written by the agent rather than by a new dependency** (~15 min)
+- Add the P&L to `client/src/pages/reports.tsx` as its own tab, worst deltas first, with the unknowns
+  visible rather than swept up.
+- Add `profit_and_loss` to the Feature 2 MCP tool table. **That is where pillar #5's "AI overview and
+  a few recommendations" comes from** — the endpoint returns the facts and the period-over-period
+  deltas, the agent already connected to the store narrates them. Do not add an LLM dependency to
+  this repo to generate prose about numbers an agent can already read; this codebase's job is to make
+  the numbers true.
+- Describe the tool so the agent knows the trap: purchases are not expenses, and unknowns are not
+  zeros. A tool description that omits both invites a confident wrong summary of someone's business.
+- Check: after adding an expense, `profit_and_loss` reflects it in the category line and in net
+  profit with no other call, and the previous-period delta moves by the same amount.
+
+### Non-goals
+
+Double-entry bookkeeping, a chart of accounts, accounts payable and receivable, cash-flow statements,
+balance sheets, depreciation, tax filing, payroll runs (Feature 14's non-goal and still one),
+multi-location consolidation (needs Feature 3), recurring-expense scheduling, receipt capture or OCR,
+and export to accounting software — that last one is the natural next feature and is what makes the
+"accounting add-on" of pillar #3 real, but it is an integration, not a report.
+
+Also explicitly not here: **the autopilot of pillar #6.** An agent that acts on these numbers needs
+them trusted first, and the decision log that pillar's "autopsies" require is its own feature.
+
+### Definition of done
+
+An operator enters their rent, opens Reports, and sees for any window what came in, what the food
+cost, what the labour cost, what everything else cost, and what was left — with anything the system
+cannot compute honestly named rather than counted as zero, and with the previous period beside it so
+the number means something.
+
+---
+
+## Feature 17 — The SMTP password is in the backup, and in every settings response
+
+**Status:** planned
+**Vision pillar:** #3 — third-party services need credentials, and this plan is about to add more of
+them (Feature 16's integrations, Feature 4's API tokens). Also #1: losing an operator's email
+account is not a foundation.
+**Depends on:** nothing. Feature 7 T3's settings API is shipped and is where the problem lives.
+**Relationship to Feature 4:** complementary, not covered by it. Feature 4 stops strangers reaching
+the server; this stops the credential being handed out, copied into backups, and typed into a form
+field in the first place.
+**Added:** 2026-08-09
+
+### The finding
+
+The app stores SMTP credentials so it can email published schedules
+(`server/routes.ts:1183-1210` builds a `nodemailer` transport from the `emailConfig` setting). The
+credential is real and it is handled as if it were a display preference.
+
+**1. Every settings response contains the password.** `GET /api/settings`
+(`shared/api-handlers.ts:467-472`) returns
+
+```ts
+{ settings: Object.fromEntries(rows.map(r => [r.key, r.value])) }
+```
+
+— every key, every value, `emailConfig.password` among them. `GET /api/settings/:key` returns the
+same for a single key. There is no redaction of any kind, and (until Feature 4) no authentication in
+front of it: anyone who can reach the server can read the operator's mail password with one
+unauthenticated `GET`.
+
+**2. The Settings page fetches the password back into a form field.** `settings.tsx:109` loads
+`emailConfig` into React state, `:580` binds `emailConfig.password` to an input, and `saveEmailConfig`
+(`:134-137`) posts the whole object back. The secret round-trips through the browser on every visit
+to the page, whether or not anyone intends to change it.
+
+**3. It is in every backup.** `BACKUP_TABLES` is derived from `db.tables` (`client/src/lib/db.ts:462`)
+— which is exactly the property that makes Feature 9 correct, and it means the `settings` table, and
+therefore the password, is inside every snapshot uploaded by `client/src/lib/backup.ts:32`. Feature 9
+T3 already noted that a mistyped client code can pull *another* store's backup; that path now also
+moves a live SMTP credential between stores.
+
+**4. What is *not* wrong** — worth stating so nobody fixes the wrong thing: `settings` is absent from
+`SYNC_CATEGORY_TABLES` (`shared/schema.ts:31-36`), so the credential does not travel over sync. One
+channel, not three.
+
+This is not a hypothetical exposure. A mail password is reusable, is often the operator's real
+business account, and is the kind of loss a small restaurant does not detect for months.
+
+### The shape
+
+A secret is **write-only through the API**: it can be set and replaced, never read back. That single
+rule fixes all three paths at once — a value the API will not emit cannot appear in a list response,
+cannot be pre-filled into a form, and cannot be copied into a snapshot.
+
+```
+ponytail: one exported map of key -> secret field paths, and redaction at the
+two exits (settings responses, backup snapshots). No secrets manager, no
+envelope encryption, no KMS. Encrypting at rest is the upgrade if the database
+itself becomes the threat model — today the leak is that we hand it out.
+```
+
+### Tasks
+
+**T1 — Redact on the way out, preserve on the way in** (~15 min)
+- Add `SECRET_SETTING_FIELDS` to `shared/schema.ts` (or beside the settings handlers): a map of
+  setting key → field paths that must never be returned. Today: `emailConfig` → `["password"]`.
+- Redact in **both** settings read handlers (`shared/api-handlers.ts:467`, `:478`). Return the field
+  as an explicit marker — `"__SET__"` when a value exists, `null`/absent when it does not — never the
+  value and never a fake string of asterisks that a client might save back verbatim.
+- On `PUT`, a secret field arriving as the marker or absent means **keep what is stored**; any other
+  value replaces it. Without that merge the first save from a redacted form blanks the password, and
+  the operator finds out when the schedule email silently stops going out.
+- Check: set a password, `GET /api/settings` and `GET /api/settings/emailConfig`, and assert the
+  plaintext appears in neither body; then `PUT` the redacted object back unchanged and assert
+  `POST /api/schedule/publish` still authenticates against the mail server.
+
+**T2 — Keep secrets out of the snapshot** (~15 min)
+- Strip the same fields in `client/src/lib/backup.ts:32` as the snapshot is built, using the map from
+  T1 — **do not hand-maintain a second list**, and do not exclude the `settings` table wholesale:
+  hours of operation and the tax rate belong in a backup, the password does not.
+- Do not touch `BACKUP_TABLES`' derivation from `db.tables`. That property is what Feature 9 T1
+  deliberately chose so a new table cannot fall out of backups; redaction belongs at the field level,
+  below it.
+- On restore, a redacted secret means **leave the stored value alone** — the same rule as T1's `PUT`,
+  and the same rule Feature 9 T2 already applies to absent tables. Restoring a backup must not wipe
+  the mail configuration on a working device.
+- Check: back up a database with a configured password, read the uploaded snapshot, and assert the
+  plaintext is absent; restore it onto a device that has a password set and assert that password
+  still works afterwards.
+
+**T3 — A credential field that is not a text box holding a secret** (~15 min)
+- Rework the email card in `client/src/pages/settings.tsx:505-610`: when a password is stored, show
+  "Configured" with a **Replace** action rather than loading the value into an input. An empty box
+  the operator must not clear is a trap; a stated status with a deliberate replace is not.
+- Add a **Send test email** action so configuration can be verified without ever reading the secret
+  back. Right now the only way to find out whether the settings work is to publish a schedule to real
+  staff. Reuse the transport built at `server/routes.ts:1196` rather than constructing a second one.
+- Check: with a password stored, the rendered page contains the marker and not the plaintext (view
+  source, not just the input's masking — `type="password"` hides a value it still ships to the
+  browser); the test email sends; and saving the form without touching the field leaves it working.
+
+**T4 — Make the rule outlive this feature** (~15 min)
+- One assertion in the settings tests: for every key in `SECRET_SETTING_FIELDS`, no read handler
+  response contains the stored value. That is what stops the next credential — a Stripe key, a
+  supplier API token — from being added as an ordinary setting and re-opening this exact hole.
+- Point the neighbouring features at the same mechanism rather than inventing their own: Feature 16
+  T3 stores integration connection state under `integrations.<id>` and any credential it grows
+  belongs in this map; Feature 4 T1 stores token *hashes* and shows the plaintext once, which is the
+  same rule applied to a value the server never needs back.
+- Document it in `docs/local-setup.md`: what is stored, what a backup contains, and — plainly — that
+  until Feature 4 lands the settings API is unauthenticated, so an operator should not put a
+  credential they care about on a server reachable from anything but their own network.
+- Check: adding a fake secret key to the map and a matching setting makes the assertion fail until
+  redaction covers it.
+
+### Non-goals
+
+Encryption at rest, a secrets manager or vault, OAuth flows in place of stored passwords, per-user
+credentials, rotation policy, and audit logging of who read what. Also out of scope: moving
+`emailConfig` to environment variables — the operator configures it from the Settings page, and an
+env var is not something a restaurant owner can edit.
+
+### Definition of done
+
+No API response and no backup snapshot contains a stored credential, an operator can verify their
+email configuration without reading the password back, and a test fails if the next secret is added
+as a plain setting.
+
+---
+
+## Feature 16 — Taking money: a card button that survives a reload, and an integrations page that does not lie
+
+**Status:** planned
+**Vision pillar:** #3 — *"optional add-on features that the operator can setup and pay for later. The
+operator can optionally integrate 3rd party vendors."* This pillar has a page, a nav entry, and no
+implementation. Also #1: "setup **and operate**" — operating a till means taking the money.
+**Depends on:** nothing unshipped. Feature 7 T3 already landed store settings on both servers, which
+is where T1's configuration belongs. **This feature is implementable today.**
+**Added:** 2026-08-09
+
+### The finding
+
+**The Integrations page is a prop.** `client/src/pages/integrations.tsx` renders six provider cards
+defined as object literals inside the component body (`:13-23`) — Sysco Connect, US Foods, Local
+Farms API, Stripe Terminal, Square Reader, Toast Connect. Connecting one calls `toggleIntegration`,
+which is:
+
+```ts
+// client/src/lib/store.tsx:236-241
+const toggleIntegration = useCallback((id: string) => {
+  setIntegrations(prev => {
+    if (prev.includes(id)) return prev.filter(i => i !== id);
+    toast({ title: "Integration Connected", description: "Successfully linked to provider." });
+```
+
+`setIntegrations` is React `useState<string[]>([])` (`store.tsx:129`). No network call, no
+persistence, no credential, no provider on the other end. The toast says *"Successfully linked to
+provider"* about a provider that was never contacted, and the whole thing **evaporates on reload**.
+On the admin path it is worse: `admin-store.tsx:129` declares the same field with no setter at all,
+so it is permanently `[]`.
+
+This is the Feature 7 failure again — reporting success for something that did not happen — except
+here it is the one page the product points at for pillar #3.
+
+**And it is load-bearing.** `pos.tsx:133` computes
+`hasPaymentIntegration = integrations.some(id => id.startsWith('pay_'))`, and that flag gates the
+**Card** button in the payment dialog (`pos.tsx:922-928`, `disabled={!hasPaymentIntegration}`, with
+the label *"(Setup Integration)"*), while `handleConfirmOrder` forces `Cash` when it is false
+(`:350`). So:
+
+- Every reload puts the till back to **cash only**. A store that takes cards has to re-click a fake
+  toggle each time the tablet restarts, and nothing on screen explains that.
+- The gate protects nothing. "Connecting" Stripe Terminal starts no payment flow, charges no card,
+  and returns no authorisation — it only unlocks the ability to *label* a sale as Card.
+
+The two facts together are the real defect: **whether a store can record a card sale depends on
+ephemeral React state**, and the honest version of that decision — "this store accepts cards" — is
+not stored anywhere.
+
+**Cash is not recorded either.** A grep for `tender`, `changeDue`, `amountPaid` or `cashGiven`
+across `client/src`, `server` and `shared` returns nothing. The payment dialog shows Total Due and
+two buttons (`pos.tsx:900-960`); it never asks what the customer handed over, so there is no change
+due to hand back and no expected drawer figure at close. A cash sale records the total and nothing
+about the money.
+
+**A second, dead copy of all of this exists.** `client/src/pages/home.tsx` is 1,141 lines with its
+own cart, its own `paymentMethod` state (`:97`), and its own sale-recording path (`:274`). It is
+imported by nothing — `App.tsx` routes `/` to `pos.tsx` and never mentions `home`. Any fix to the
+payment path has a coin-flip chance of being applied to the file that does not run.
+
+### The shape
+
+What a store accepts is **configuration**, not an integration status. Most small operators take cards
+on a standalone terminal from their bank and want the POS to record the tender — that is a supported
+setup, not a missing feature, and the current design has no way to express it.
+
+```
+ponytail: accepted tender types are a store setting and a string on the sale.
+No processor SDK, no payment state machine, no auth/capture, no webhooks. The
+upgrade when a real terminal lands is one integration whose status flips to
+'available' — the setting and the sale field do not change shape.
+```
+
+### Tasks
+
+**T1 — Accepted tender types become a store setting** (~15 min)
+- Store `payments.methods` (default `["Cash", "Card"]`) through the settings API Feature 7 T3 put on
+  both servers (`GET`/`PUT /api/settings/:key`). Add it to the Settings page beside the other store
+  configuration, not to the Integrations page — this is a property of the business, not of a vendor.
+- Replace `hasPaymentIntegration` (`pos.tsx:133`) with a read of that setting. Render one button per
+  accepted method rather than a hardcoded Card/Cash pair, and delete the `(Setup Integration)`
+  label — it points at a page that cannot deliver what it promises.
+- A store must be left with at least one method. Saving an empty list is the one input here that can
+  brick a till, so reject it rather than trusting the UI to prevent it.
+- Check: enable Card, reload the page, and confirm Card is still selectable — that single assertion
+  is the whole bug. Then set the store to cash-only and confirm Card cannot be chosen.
+
+**T2 — Cash tender and change due** (~15 min)
+- Add `tenderedCents` and `changeCents` to `Sale` (`shared/schema.ts`, `client/src/lib/db.ts`, and
+  the Dexie version bump), both nullable so existing rows stay readable.
+- In the payment dialog, a Cash sale asks for the amount tendered — with quick buttons for the exact
+  total and the next round notes — and shows the change due before the sale is recorded. Change is
+  `tendered - total`, computed in one place and never negative: an under-tender is a blocked
+  confirm, not a negative change.
+- A non-cash sale records `tenderedCents = totalCents` and `changeCents = 0`. Not null — the day's
+  cash expectation is a sum over this column, and a null in the middle of it is a hole nobody can
+  distinguish from a zero.
+- Check: $20.00 against a $13.75 total shows $6.25 and stores both numbers; $10.00 against $13.75
+  cannot be confirmed; a card sale stores tendered equal to the total.
+
+**T3 — An integrations page that states what is true** (~15 min)
+- Move the six provider literals out of the component into `shared/integrations.ts`, each with a
+  `status: "available" | "planned"`. **Every one of them is `planned` today** — none has an
+  implementation — so each card says so plainly and offers no toggle. A disabled card that says
+  "not available yet" is honest; a working toggle that persists nothing is not.
+- Delete `toggleIntegration` and the `integrations` state from both stores (`store.tsx:129, 236-241`,
+  `admin-store.tsx:129`) once nothing reads them. Leaving a fake toggle behind because it is "only
+  a demo" is how `hasPaymentIntegration` came to gate real money.
+- When an integration does become `available`, its connected-state lives in store settings under
+  `integrations.<id>`, the same mechanism as T1 — **no credentials in `localStorage`**, and no new
+  table for a list that is currently six rows long.
+- Keep the page and its nav entry. Pillar #3 is a real promise and the page is where an operator will
+  look for it; the fix is for it to describe a roadmap rather than simulate a product.
+- Check: no click anywhere on the page produces a "Successfully linked" toast, and a reload changes
+  nothing about what the page shows.
+
+**T4 — Delete the dead second POS** (~15 min)
+- Remove `client/src/pages/home.tsx`. Confirm it first — `grep -rn "pages/home" client/src` returns
+  nothing and `App.tsx` routes `/` to `pos.tsx` — then delete it rather than leaving 1,141 lines of
+  parallel cart, pricing and payment code for the next reader to fix by mistake.
+- If any of it is genuinely wanted, take that part into `pos.tsx` in this task and delete the rest.
+  What must not happen is the file surviving as a reference copy; that is how the two depletion
+  copies in Feature 15 came about.
+- Check: `npm run check` is clean and the app builds with the file gone.
+
+### Non-goals
+
+Real processor integration (Stripe/Square terminal handshakes, auth/capture, webhooks, refunds to a
+card), tips and tip-outs, split tender across two methods on one sale, gift cards, and offline card
+queuing. **Cash-drawer reconciliation — an opening float, a shift close, and an over/short figure —
+is the obvious next feature** and is why T2 stores the tender rather than only the change: without
+that column there is nothing to reconcile against. Feature 12 lists it as a non-goal too; whichever
+of these lands first, the drawer is its own entry, not a fifth task here.
+
+### Definition of done
+
+A store configures which payment methods it accepts, that survives a reload, a cash sale shows the
+change the customer is owed and records what they handed over, the Integrations page says truthfully
+that nothing is connected yet, and there is exactly one POS page in the codebase.
 
 ---
 
