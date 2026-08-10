@@ -32,6 +32,9 @@ its section. They are ordered by what they cost if left alone.
 | **19** | No sale, price change, or adjustment records who made it; the only "current employee" is dialog state cleared on submit | `Sale` has no `employeeId` (`db.ts:142-156`); `app-shell.tsx:57, 85` | Feature 12's void attribution and Feature 15's ledger actor have nothing to record |
 | **15** | Recipe depletion is implemented twice — `pos.tsx:373-436` duplicates `bom-engine.ts:203-293`, and only the POS copy runs on real sales | the two already differ at `pos.tsx:367` vs `bom-engine.ts:224` | Pillar #4's accuracy claim rests on a copy nothing tests |
 | **15** | Stock adjustments clamp at zero and record nothing | `local-storage.ts:257`, `dexie-admin-storage.ts:266`; no ledger table in `db.ts:194-211` | Over-sales vanish; no answer to "where did it go" |
+| **21** | The Settings tax-rate field is bound to `useState` and written nowhere; the till charges a hardcoded 8.25% in every store | `settings.tsx:89, 411-412` (only three mentions of `taxRate` in the file); `pos.tsx:38` — `setTaxRatePct` is never called | Every operator charges the wrong tax and cannot change it |
+| **22** | Nothing ever asks how much cash is in the drawer — no float, no count, no over/short, no trading day | `grep -rin "drawer\|openingFloat\|cashCount\|endOfDay"` returns nothing | Every other defect in this table is undetectable in daily operation |
+| **25** | A product with no tags is unreachable on the till — the "show everything" branch is dead once any tagged product exists | `pos.tsx:98-116`; `activeTag` auto-sets at `:109` (during render), and `:114` filters by it | An operator adds an item, cannot find it, cannot tell whether it saved |
 | **5** | Combos are ignored by the live order path | `bom-engine.ts` is imported only by `routes.ts:16` for test orders; `/api/orders/simulate` prices inline with a hardcoded 8% tax | Combos charge full price; three different tax rates in the codebase |
 
 ~~**Suggested first session**~~ — **done.** Features 7, 9 and 11 have all landed, which clears the
@@ -146,6 +149,766 @@ All four tasks complete, every `Check:` passing, `npm run check` (tsc) clean, an
 stated "Definition of done" demonstrably true. A feature with three of four tasks done is not
 partially shipped — it is unshipped, and several of these leave the system in a worse state
 half-built than not started (Feature 3 T3 in particular).
+
+---
+
+## Feature 25 — The menu grid: a product you add can currently become unreachable
+
+**Status:** planned
+**Vision pillar:** #1 — "the easiest path". Setting up a menu is the first thing an operator does and
+the till layout is what they live in afterwards.
+**Depends on:** nothing. **T1 is a bug fix and should be taken on its own** regardless of the rest.
+**Added:** 2026-08-10
+
+### The finding
+
+Three defects in twenty lines of `client/src/pages/pos.tsx`, and the first one loses products.
+
+**1. A product with no tags cannot be displayed on the till.**
+
+```ts
+// pos.tsx:98-116
+const tags = useMemo(() => { /* every distinct tag across all products */ }, [products]);
+const [activeTag, setActiveTag] = useState<string | null>(null);
+if (!activeTag && tags.length > 0) { setActiveTag(tags[0]); }      // <-- during render
+const filteredProducts = useMemo(() => {
+  if (!activeTag) return products;                                  // the only path showing everything
+  return products.filter(p => (p.attributes?.tags || []).includes(activeTag));
+}, [products, activeTag]);
+```
+
+`activeTag` is null only until any tagged product exists. Every real store has one, so `activeTag` is
+always set, so the "return everything" branch is dead — and **a product with an empty `tags` array
+appears under no category and is reachable only by search.** An operator adds an item, cannot find it
+on the till, and has no way to tell whether it saved. The product wizard does not require a tag, so
+this is reachable by the ordinary path.
+
+**2. `setActiveTag` is called during render**, not in an effect or an event handler (`:109`). React
+re-renders on the spot; it is the kind of thing that works until a concurrent-render change or a
+`StrictMode` double-invoke makes it not.
+
+**3. Category order is arbitrary and unchangeable.** The category bar is
+`Array.from(new Set(...))` over the products array, so the order is the order products happen to come
+back in — and the default selected category is whichever that puts first. An operator cannot put
+Drinks before Bakery, and the bar can silently reorder itself when a product is edited.
+
+Underneath all three: **categories are not a thing.** They are free-text strings inside
+`ProductAttributes.tags` (`shared/schema.ts:2`), a JSON blob on the product. Nothing registers them,
+nothing orders them, nothing catches a typo — "Drinks" and "drinks" are two categories, and a
+rename means editing every product that carries the old string.
+
+There is also no ordering *within* a category: products render in whatever order the store returns
+them, so the best-seller cannot be put first.
+
+### The shape
+
+Promote the category to a real, ordered thing; keep tags for what tags are good at.
+
+- `category` — one nullable string per product, the till's grouping.
+- `menu.categories` — one ordered array in store settings (Feature 7 T3's API, already shipped),
+  which is what makes ordering and renaming a single write rather than a migration over products.
+- `sortOrder` — a number per product, for arranging the grid.
+- `tags` stays exactly as it is, for search and for anything cross-cutting ("vegan", "seasonal").
+
+```
+ponytail: a category is a string on the product plus an ordered array in
+settings. No categories table, no join, no per-category images or colours, no
+nesting. Sub-categories are the upgrade if a menu ever gets big enough to need
+them, and most never do.
+```
+
+### Tasks
+
+**T1 — Nothing disappears** (~15 min, and worth shipping alone)
+- Add an "All" option to the category bar and make it the default, so the "show everything" path is
+  reachable instead of dead. Any product with no category appears under **Uncategorised** as well —
+  visible, and visibly needing a home.
+- Move the `setActiveTag` call out of the render body (`pos.tsx:109`) — derive the active category
+  instead, or set it in an effect. Same behaviour, without the render-phase write.
+- Check: create a product with no tags and confirm it appears on the till without searching; confirm
+  the category bar still defaults sensibly when every product is categorised.
+
+**T2 — A category that is a category** (~15 min)
+- Add `category: text` (nullable) to products in all three schema locations, and a `menu.categories`
+  ordered array setting. Migrate existing data by taking each product's **first tag** as its
+  category and leaving `tags` untouched — no data is lost and nothing needs re-tagging.
+- Build the category bar from the setting, in its order, not from a `Set` over products. A category
+  in the list with no products still shows (empty, so the operator can see where things should go);
+  a product whose category is absent from the list falls into Uncategorised rather than vanishing.
+- Renaming a category is a write to the setting plus one pass over products carrying the old value —
+  do it in one place, and say in a comment that this is why the list is a setting rather than derived.
+- Check: reorder the categories and confirm the till bar follows; rename one and confirm no product
+  becomes uncategorised.
+
+**T3 — Arrange the grid** (~15 min)
+- Add `sortOrder: integer` to products, defaulting so existing rows keep their current relative order
+  rather than jumping to alphabetical on upgrade.
+- Let an operator drag products into position within a category. **Reuse the drag-and-drop already
+  built in `client/src/pages/schedule.tsx`** rather than adding a second library or a second
+  interaction pattern.
+- Persist on drop, not on a separate save. A layout editor with an unsaved state is a layout an
+  operator will lose.
+- Check: reorder three products, reload, and confirm the order holds; add a fourth and confirm it
+  lands at the end rather than in the middle.
+
+**T4 — Categories travel with the menu** (~15 min)
+- Add `category` and `sortOrder` to Feature 1's menu blueprint and to Feature 2 T1's export, keeping
+  that pair's round-trip invariant: export → apply is still entirely `noop`. Add the `menu.categories`
+  order to the blueprint too, or an agent can create a category it cannot position.
+- This is what lets an operator say "put the pastries first" to an agent, which is pillar #2's
+  promise applied to the thing they look at all day.
+- Check: export a categorised menu, re-apply it, and confirm every change is `noop` — including
+  category and order.
+
+### Non-goals
+
+Sub-categories and nesting, per-category colours or images, multiple layouts per device, a separate
+customer-facing menu ordering, drag-and-drop of categories on the till itself (arranging belongs in
+admin; the till is for selling), and per-location layouts (Feature 3). Tags are deliberately kept as
+they are — this feature does not replace them, and a product may be in one category and carry any
+number of tags.
+
+### Definition of done
+
+Every product an operator creates is visible on the till without searching for it, categories appear
+in the order they chose, products sit where they dragged them, and an agent applying a menu can set
+all of it.
+
+---
+
+## Feature 24 — What is for sale right now: 86-ing, and a menu that knows the time
+
+**Status:** planned
+**Vision pillar:** #2 — *"creating products, combos, discounts, promotions etc."* is the agent's job,
+and "86 the salmon" is the single most common thing an operator would say to one during service.
+Also #1: a menu that offers what the kitchen cannot make is a menu that generates refunds.
+**Depends on:** nothing. Composes with Feature 15 (over-drawn stock suggests what to 86), Feature 22
+(the business-day boundary), and Feature 2 (the agent tool).
+**Added:** 2026-08-10
+
+### The finding
+
+**There is no way to stop selling something without deleting it.**
+
+`Product`, `Variant` and `Modifier` (`client/src/lib/db.ts:14-60`) carry `updatedAt` and `deletedAt`
+and nothing else about whether they can be sold. `availableAsIngredient` on the product is about
+whether a recipe may consume it, not whether a customer may buy it. The POS filters products by name
+and tag (`pos.tsx:95, 114`) and by soft-deletion; there is no other gate. Every product that exists
+is on sale, always.
+
+So an operator who runs out of salmon at 7pm has two options: leave it on the menu and disappoint
+whoever orders it, or delete it. **Deleting it is worse than it looks:**
+
+- It is the same mechanism used for "this item is gone forever", so the two intents become
+  indistinguishable in the data.
+- Re-creating it tomorrow produces a **new `id`**. Feature 13's product mix aggregates by
+  `productId`, so a dish 86'd and restored twice a week splits its own sales history into three
+  products, none of which shows what it actually sells. Feature 10's margins inherit the same split.
+- Feature 1's blueprint matcher ignores soft-deleted rows by design, so an agent re-applying the menu
+  quietly creates a duplicate rather than reviving the original.
+
+**And nothing knows the time.** A `hoursOfOperation` setting exists and is read by the schedule page
+(`schedule.tsx:97`) and the settings page — the store knows when it is open and the menu does not use
+it at all. Breakfast served until 11, a lunch special, a bar menu after 4: none of them are
+expressible, so every item is offered at every hour the till is on.
+
+### The distinction the whole feature rests on
+
+**Unavailable is not deleted.** Deleted means "this is not part of my menu"; unavailable means "not
+right now". They differ in reversibility, in what reports should do with them, and in what an agent
+is allowed to do unprompted. Keeping them as one field is what produces the fragmented history above.
+
+```
+ponytail: one boolean and one optional time window per product. No availability
+calendar, no seasonal schedules, no per-location availability (that is Feature
+3's), no auto-86 from stock levels. The upgrade when an operator runs two
+genuinely different menus is a menu-per-daypart, not a rules engine on this
+boolean.
+```
+
+### Tasks
+
+**T1 — Available, as its own fact** (~15 min)
+- Add `available: boolean NOT NULL DEFAULT true` to products and variants (`shared/schema.ts`,
+  `client/src/lib/db.ts` with a version bump, `server/schema.ts`). Default `true` means every
+  existing row behaves exactly as today.
+- The POS shows unavailable items **greyed out and unselectable, not hidden**. Hidden items generate
+  "do you still have the muffins?" at the counter; a visibly crossed-out item answers it before it is
+  asked. Hiding is also how staff conclude the POS is broken.
+- Put the comment next to the field: `available` is temporary and reversible, `deletedAt` is
+  permanent, and 86-ing must never be implemented as a delete. That sentence is the feature.
+- Check: an unavailable variant cannot be added to a cart, still appears on the menu, and still shows
+  in reports for periods when it did sell.
+
+**T2 — 86 it from where you find out** (~15 min)
+- One long-press or one tap-and-confirm on the POS tile marks an item unavailable. The person who
+  discovers the salmon is gone is holding the till or standing at the pass, not sitting in an admin
+  page — Feature 6's whole thesis is that the operator should not have to become an administrator.
+- **86 persists until someone clears it.** Do not auto-restore overnight: an item that is out on
+  Tuesday night is usually still out on Wednesday morning, and silently re-enabling it sells
+  something nobody has. Instead, show a banner at the start of each business day (Feature 22 T1's
+  boundary) listing what is currently 86'd, so restoring is a deliberate morning decision.
+- Record it in Feature 19's action log with the actor — 86-ing is the fastest way to make an item's
+  sales vanish, and it should be as attributable as a void.
+- Check: 86 an item, confirm it cannot be sold, reload, confirm it is still 86'd, and confirm the
+  next business day opens with a banner naming it rather than quietly restoring it.
+
+**T3 — Items that are only for sale at certain times** (~15 min)
+- Add an optional availability window to the product: `availableFromMinutes`, `availableToMinutes`
+  and a day-of-week mask. Empty means always, which is what every existing row gets.
+- The POS applies it against local time. A window crossing midnight (a late-night menu) must work —
+  test it, because `from > to` is the case that gets written last and breaks first.
+- **Never hard-block.** An out-of-window item is dimmed with its window stated ("Breakfast — until
+  11:00") and can still be rung with a confirm. The same principle as Feature 15 T3: record the
+  truth, do not enforce it. A till that refuses to sell a breakfast burrito at 11:02 is a till the
+  staff will route around, and then nothing is accurate.
+- Check: an item with an 06:00–11:00 window is dimmed at 11:01 and normal at 10:59; an item with a
+  22:00–02:00 window is available at midnight.
+
+**T4 — Let the agent do it, and let stock suggest it** (~15 min)
+- Add `set_availability` to Feature 2's MCP tool table. "86 the salmon" and "put the breakfast menu
+  back on" are the two sentences an operator most wants to say rather than tap, and both are one
+  call.
+- Where Feature 15's ledger shows an ingredient over-drawn, **suggest** the menu items that depend on
+  it as 86 candidates — with the item, the ingredient, and how far negative it is. Suggest, never
+  act: stock counts drift and an auto-86 that removes the top seller at 8am on a bad count is worse
+  than the count being wrong.
+- The agent tool description must say the same thing: propose, show the operator, apply on approval —
+  the read-propose-preview-apply loop this plan keeps converging on.
+- Check: an over-drawn ingredient produces a suggestion naming the dishes that use it and does not
+  change their availability; the agent tool flips a flag and the POS reflects it without a reload.
+
+### Non-goals
+
+Per-location availability (Feature 3 once locations exist), separate menus per daypart, seasonal or
+calendar-based scheduling, automatic 86 from stock levels, quantity-limited items ("only 12 specials
+left" — a real feature and a different one, since it needs a counter that decrements per sale),
+customer-facing availability on any online channel, and availability on modifiers (worth doing, but
+the plumbing is the same and the demand is lower — add it once the product-level version is in use).
+
+### Definition of done
+
+An operator marks something unavailable in one tap from the till, it stays that way until they say
+otherwise, the breakfast items dim themselves at 11, and none of it deletes a product or splits its
+sales history.
+
+---
+
+## Feature 23 — The kitchen: an order that reaches the people making it
+
+**Status:** planned
+**Vision pillar:** #1 — "setup **and operate**", and #4 indirectly: a half-and-half pizza with
+unlimited toppings is a recipe-costing triumph and a kitchen disaster if the toppings never reach the
+person building it.
+**Depends on:** nothing. **Coordinates with Feature 12** — see the status collision below, which must
+be resolved whichever of the two lands first.
+**Added:** 2026-08-10
+
+### The finding
+
+**Nothing in this system tells anyone to make anything.**
+
+The only view of an in-flight order is `client/src/components/order-receipts.tsx`, rendered inside
+the POS page on the cashier's own device. It filters
+`closedAt === null && customerName !== undefined && status === "completed"` (`:142`) and offers one
+action: **Close Order** (`:123`). That is the entire order lifecycle — a sale is born closed-ready and
+someone eventually clicks a button on the till.
+
+Three consequences, in order of how much they hurt on a busy morning:
+
+1. **There is no kitchen-facing view at all.** No route, no second screen, no station. The person on
+   bar or on the line reads the cashier's tablet over their shoulder, or the cashier calls the order
+   out loud. `grep -rin "kitchen\|prepStatus\|fired\|readyAt\|station"` across `client/src`, `server`
+   and `shared` returns one hit — a menu label in `products.tsx:22`.
+2. **An order rung without a customer name never appears anywhere.** That `customerName !== undefined`
+   filter (already flagged in Feature 20) means the rail silently omits it. On the till it is a
+   missing row; for the kitchen it would be a drink nobody makes.
+3. **There is no order number.** `customerName` is the only human-sayable identifier a sale has, and
+   it is optional. Two customers called Sarah, or one who declined to give a name, and the counter
+   has no way to hand the right cup to the right person.
+
+And the modifiers — the thing pillar #4 is built around — are stored on `linesJson` and displayed
+only in that one rail. The system can cost a half-and-half pizza to the gram and cannot tell the
+kitchen which half.
+
+### The status collision — resolve this before either feature is built
+
+`adminSales.status` (`server/schema.ts:145`) is `"completed"` everywhere and nothing else; Feature 12
+T1 claims that field for the vocabulary `"completed" | "void" | "refund"`.
+
+**Preparation state must therefore be its own field, not another value in `status`.** A voided order
+and a ready order are orthogonal facts — an order can be refunded *because* it was never made — and
+collapsing them into one enum means the first refund of an in-progress ticket has no representable
+state. Add `prepState` (`NEW` | `IN_PROGRESS` | `READY` | `SERVED`) alongside `status`, and note it
+in Feature 12 T1 so whichever lands second does not "tidy up" by merging them.
+
+### The shape
+
+No second application. The app already runs on the device; the kitchen is a route in it — `/kitchen`
+— reading the same store, showing tickets big enough to read from two feet away. A tablet propped on
+the pass is the deployment.
+
+```
+ponytail: /kitchen is a route in the same app over the same Dexie store, polling
+like every other page here. No WebSocket, no push, no separate KDS app, no
+station routing. Cross-device tickets need Feature 8's sync to converge first —
+that is a real dependency, not a nice-to-have, and it is why this cut is
+same-device.
+```
+
+Cross-device is deliberately out. Today the kitchen tablet would need `syncRecords` to carry sales
+reliably, and Feature 8 says plainly that sync does not converge. Shipping a two-device kitchen on
+top of that would produce tickets that appear late, twice, or not at all — worse than the shouting it
+replaces.
+
+### Tasks
+
+**T1 — A preparation state that is not `status`** (~15 min)
+- Add `prepState` to `Sale` (`shared/schema.ts`, `client/src/lib/db.ts` with a version bump,
+  `server/schema.ts`), defaulting to `NEW`, and the transitions `NEW → IN_PROGRESS → READY → SERVED`.
+  Existing rows read as `NEW`; a sale with `closedAt` set reads as `SERVED` so history is not
+  suddenly full of unmade orders.
+- Keep `status` untouched for Feature 12. Add the comment there explaining why the two are separate —
+  that comment is the deliverable, because the merge is what a later reader will otherwise attempt.
+- Record transitions through Feature 19's action log if it has landed, and leave the call site
+  obvious if it has not.
+- Check: an existing seeded sale reads `SERVED` rather than `NEW`; a new sale starts `NEW`; and the
+  type refuses an unknown state.
+
+**T2 — `/kitchen`: the tickets** (~15 min)
+- Add the route and a ticket board: oldest first, each ticket showing its order number, every line
+  with its **modifiers spelled out**, and the elapsed time since it was rung. Type large — this is
+  read at arm's length by someone with their hands full.
+- Removals must not look like additions. "No onions" and "Add onions" differing only by a word is how
+  an allergy incident happens; render them differently enough to be unmistakable at a glance.
+- One action per ticket: **Ready**. One per line if a ticket is partly done. Nothing else — a kitchen
+  screen with a settings menu is a kitchen screen someone taps by accident mid-service.
+- Check: an order with a modifier appears within one refresh of being rung, shows the modifier, and
+  moves off the active board when marked ready.
+
+**T3 — An order number, and no silently dropped tickets** (~15 min)
+- Give every sale a short daily order number — resets with the business day from Feature 22 T1, so
+  the counter calls "84" rather than a UUID or a name that may not exist.
+- Delete the `customerName !== undefined` filter (`order-receipts.tsx:142`). Every open order belongs
+  on both the rail and the board; a nameless order is the common case, not an exception.
+- Show the number on Feature 20's receipt, so a customer's paper and the counter's shout agree.
+- Check: three orders rung with no names get 1, 2 and 3 and all appear on the board; the numbers reset
+  the next business day rather than climbing forever.
+
+**T4 — How long things actually take** (~15 min)
+- Store `readyAt` and report ticket time — rung to ready — for the period: median and worst, and the
+  items that are slowest. An operator guessing at their ticket times is guessing at their staffing,
+  and Feature 14 is about to give them the labour cost of that guess.
+- Show the current board's oldest ticket age prominently. The single most useful number during
+  service is "the oldest thing waiting", and it is the one a queue of cards buries.
+- **Do not build alerting or escalation.** A colour change past a threshold is enough; a POS that
+  starts paging people is a product decision nobody asked for.
+- Check: a ticket marked ready five minutes after it was rung reports five minutes; a period with no
+  tickets reports no median rather than zero.
+
+### Non-goals
+
+Multi-device and cross-tablet tickets (needs Feature 8 to converge — stated above and meant), station
+routing and multi-station tickets, course firing and coursing, table and seat management, printed
+kitchen chits (Feature 20 already declines the printer stack), bump bars, recall of a bumped ticket
+beyond an undo, prep-time prediction, delivery and online-order intake, and any alerting. Table
+service — tabs, seats, transfers — is a genuinely different product shape and would be its own
+feature, not an extension of this one.
+
+### Definition of done
+
+Every order rung appears on a kitchen screen within seconds, with its modifiers legible and its
+number visible, someone marks it ready, and the operator can see afterwards how long the morning's
+tickets actually took.
+
+---
+
+## Feature 22 — Close of day: what should be in the drawer, and what is
+
+**Status:** planned
+**Vision pillar:** #1 — "setup **and operate**". Counting the drawer is the one thing a cash business
+does every single day, and it is the only routine check that catches theft, mis-rings and
+mis-configuration at all.
+**Depends on:** Feature 16 T2 for `tenderedCents` / `changeCents` (T2 below degrades honestly
+without them), Feature 19 T1 for who counted. Named as "the obvious next feature" in both Feature 12's
+and Feature 16's non-goals — this is that entry.
+**Added:** 2026-08-10
+
+### The finding
+
+`grep -rin "drawer\|shiftStart\|openingFloat\|cashCount\|zreport\|endOfDay\|closeout"` across
+`client/src`, `server` and `shared` returns **nothing**. There is no shift, no session, no opening
+float, no cash count, no over/short, and no notion of a trading day closing at all.
+
+What exists is `paymentMethod` on the sale (`db.ts:148`) — a string, `"Cash"` or `"Card"`. So the
+system knows how much cash it *should* have taken and has never once been asked how much is actually
+in the till. Nothing compares the two, because there is nothing to compare against: no starting
+amount, no ending count.
+
+The consequence is that **every failure this plan has documented is undetectable in practice**. A
+mis-configured tax rate (Feature 21), a void that walked out with the cash (Feature 12), a sale rung
+on the wrong item, a cashier taking a twenty — the drawer count is how a small operator finds out
+any of them happened, usually the same evening. Without it, the first signal is the accountant, months
+later, and by then the pattern is unrecoverable.
+
+This is also the feature that makes the others' numbers checkable. Feature 13 makes revenue real, but
+"real" there means "correctly summed from what was rung". A drawer count is the only place the system
+touches physical reality and can be wrong out loud.
+
+### The design points that matter
+
+**Count blind.** The expected figure must not be shown until the count is entered. A count taken with
+the target on screen is not a count — anyone skimming can simply enter the expected number, and the
+one control the operator has evaporates. This is the whole feature's integrity in one UI decision.
+
+**A trading day is not a calendar day.** A store closing at 1am must have those sales in the day that
+began the previous morning. Feature 13 T1 already establishes local-time bucketing for reports;
+this feature needs a business-day boundary (a `day.startHour` setting, default 4am) and the two must
+use the same rule or the day's sales report and the day's drawer will disagree by exactly the
+after-midnight trade.
+
+**Over/short is not revenue.** A $12 shortage did not reduce sales; it is a separate line. Feature 18
+must show it as its own item, not folded into either revenue or expenses — the same double-counting
+care that feature applies to purchases versus COGS.
+
+```
+ponytail: one session row per drawer per day, opened with a float and closed
+with a single counted total. No denomination breakdown, no blind-recount
+workflow, no mid-shift skims, no multi-drawer assignment. Per-denomination
+counting is the upgrade the first time an operator asks why the count is off by
+a roll of quarters.
+```
+
+### Tasks
+
+**T1 — The drawer session** (~15 min)
+- Add a `drawerSessions` table (`shared/schema.ts`, `client/src/lib/db.ts` with a version bump, and
+  the `crudEntities` line in `shared/api-handlers.ts`): `id`, `openedAt`, `openedByEmployeeId`,
+  `openingFloatCents`, `closedAt`, `closedByEmployeeId`, `countedCents`, `expectedCents`,
+  `varianceCents`, `note`.
+- One open session at a time on a device. Opening while one is open is an error, not a second row —
+  two overlapping sessions make every sale ambiguous about which drawer it belongs to.
+- Add a `day.startHour` setting (default 4) and derive the session's sales window from it rather than
+  from midnight.
+- Do **not** block selling when no session is open. A till that refuses to sell because nobody
+  clicked "open drawer" is a till that gets worked around; an unattached sale is attributed to the
+  session that covers its timestamp when one is opened later.
+- Check: opening a session and closing it produces one row with both timestamps; a second open while
+  one is live is rejected; a sale rung at 1am belongs to the session that opened the previous
+  morning.
+
+**T2 — What should be in there** (~15 min)
+- Add `shared/drawer.ts` with a pure `expectedCash(session, sales, movements)`:
+  `openingFloat + cash tendered − change given + paid in − paid out`. Pure over the existing types,
+  the same shape as `shared/labor.ts` and `shared/reports.ts`.
+- **Degrade honestly without Feature 16 T2.** Until tender and change are recorded, cash taken is
+  approximated by the totals of cash sales, which is right whenever change came from the drawer and
+  cannot see a cash sale settled from a pocket. Return the figure with a flag saying which basis was
+  used; do not present an approximation as a count.
+- Add paid-in / paid-out movements — a supplier COD, a till float top-up, petty cash — as rows with
+  a required reason. Cash leaving a drawer with no record is exactly the hole this feature exists to
+  close, and Feature 18's expense categories are where a paid-out lands on the P&L.
+- Check: a session with a $200 float, three cash sales totalling $47.50, $12 tendered against a
+  $10.75 sale, and a $30 paid-out expects $217.50 — and the same computation over the same rows twice
+  returns the same number.
+
+**T3 — Count it blind, and record who** (~15 min)
+- Closing asks for the counted total **before** showing anything else. Only after it is entered does
+  the screen show expected, counted, and the variance. Do not preview the expected figure, do not
+  pre-fill the field, and do not allow "use expected" as a shortcut.
+- Record who counted (Feature 19 T1's active employee) and write one Feature 19 `actionLog` row —
+  `DRAWER_CLOSED` with the variance in its summary. A closed drawer is a decision with money
+  attached; it belongs in the same list as the voids.
+- A variance beyond a configurable threshold (default $5) requires a note before the session can
+  close. Not a block — a note. An operator who is $40 short at 11pm needs to record what they think
+  happened while they still remember it.
+- Check: the expected figure is absent from the DOM until the count is submitted; closing $8 short
+  demands a note; the action log row names the employee and the variance.
+
+**T4 — The pattern, not just the day** (~15 min)
+- Add a close-of-day view: today's session, and the last 30 sessions with their variances. **One bad
+  night is noise; the same cashier short every Thursday is the finding**, and a single-day screen can
+  never show it — which is why this task is part of the feature rather than a later nicety.
+- Show cumulative variance for the period and put it on Feature 18's P&L as its own line, never
+  inside revenue or expenses.
+- Surface the approximation flag from T2 wherever a variance is shown. A variance computed without
+  tender data has a known error bar and must not be presented as if it were exact.
+- Check: three sessions with variances of −$2, +$1 and −$40 show a cumulative −$41 and the −$40 is
+  visibly distinguishable from the noise, not averaged into it.
+
+### Non-goals
+
+Per-denomination counting, mid-shift skims and drops, safe and deposit tracking, multiple drawers per
+device, drawer assignment per cashier, a physical cash-drawer kick (that is a hardware feature, and
+Feature 20 already declines the printer it would hang off), card settlement and batch reconciliation
+against a processor, and tip declaration. Also out: any automatic accusation. The system reports a
+variance and who was on; deciding what it means is the operator's job, and a POS that flags a
+cashier as a suspect is a product that gets someone fired over a rounding error.
+
+### Definition of done
+
+An operator opens the drawer with a float in the morning, counts it at night without being shown the
+answer first, and sees what the difference was — with a month of those differences behind it so a
+pattern is visible before it becomes a habit.
+
+---
+
+## Feature 21 — Tax: the rate the operator typed, on the items that are actually taxable
+
+**Status:** planned
+**Vision pillar:** #1 — a POS a new business can operate. Charging the wrong tax is not a rough edge;
+it is the operator's liability at the end of the quarter.
+**Depends on:** nothing. Feature 7 T3 shipped `GET`/`PUT /api/settings/:key`, which is where the rate
+belongs. **Coordinate with Feature 5 T2**, which kills the server order path's hardcoded `0.08` and
+reads the same `tax.ratePct` key — that task owns the server half, this feature owns the client half
+and the model. Neither is a substitute for the other.
+**Added:** 2026-08-10
+
+### The finding
+
+**Every store using this POS charges 8.25%, and the Settings field that appears to change it is not
+connected to anything.**
+
+`client/src/pages/settings.tsx:89` declares `const [taxRate, setTaxRate] = useState(8.25)`. The
+input at `:411` binds to it and `:412` sets it. Those are the **only three occurrences of `taxRate`
+in the file** — no `fetch`, no `PUT`, no store write. The label above it reads *"The default tax rate
+applied to all taxable items."* An operator types their real rate, navigates away, and it is gone.
+The same page persists hours of operation and email settings through `/api/settings` twenty lines
+above, so the mechanism is present and this one field simply does not use it.
+
+Meanwhile the till has its own copy: `pos.tsx:38` is `useState(8.25)`, `:337` computes
+`taxCents = round(subtotal × taxRatePct / 100)`, and `:845` prints **"Tax (8.25%)"** on the summary
+the customer is shown. `setTaxRatePct` is **never called anywhere** — line 38 is its only mention. The
+rate is a constant wearing a state hook.
+
+The plan's triage says there are three tax rates in the codebase. Counted properly there are six
+sites:
+
+| Where | Value |
+|---|---|
+| `client/src/pages/pos.tsx:38` | `8.25` — what customers are actually charged |
+| `client/src/pages/settings.tsx:89` | `8.25` — the field that saves nowhere |
+| `client/src/components/app-shell.tsx:51` | `8.25` — declared, never read, dead |
+| `client/src/pages/home.tsx:79` | `8.25` — in the dead POS Feature 16 T4 deletes |
+| `shared/api-handlers.ts:451` | `0.08` — the server order path (Feature 5 T2) |
+| `client/src/lib/seed-data.ts:353` | `0.0825` — demo sales |
+
+**And everything is taxable.** There is no per-item tax flag anywhere in the live schema — the only
+`taxable` field in the repo is in `home.tsx:27`, the dead page. In most US states prepared food and
+grocery are taxed differently, and gift cards and many packaged goods are not taxed at all; a POS
+that taxes every line at one rate cannot be operated legally in a lot of places it would otherwise
+be a good fit for.
+
+### The shape
+
+The rate is one store setting, read in one place, and **stamped onto the sale**. That last part is
+the piece that is easy to skip and impossible to retrofit: when a jurisdiction changes its rate,
+every historical receipt must still reprint with the rate that was charged, and every prior period
+must still reconcile. A sale that stores only `taxCents` cannot explain itself; one that stores the
+rate can.
+
+```
+ponytail: one rate, one boolean per product, one inclusive/exclusive switch. No
+tax jurisdictions, no rate tables, no Avalara, no address-based lookup. The
+upgrade when an operator opens across a state line is a rate per location
+(Feature 3), not a tax engine.
+```
+
+### Tasks
+
+**T1 — One rate, set by the operator, actually charged** (~15 min)
+- Persist the Settings field to the `tax.ratePct` store setting through the API Feature 7 T3 shipped,
+  and read it in the POS in place of `pos.tsx:38`'s constant. Same key Feature 5 T2 uses — if the two
+  land in either order they must agree on the name, or the server and the till will charge different
+  amounts.
+- Delete the dead copies: `app-shell.tsx:51` (declared and never read) and, once Feature 16 T4
+  removes `home.tsx`, that one goes with the file.
+- **Default to `0`, not `8.25`.** A store with no configured rate charging 8.25% is the same class of
+  error as Feature 10's zero-cost-means-100%-margin: a plausible wrong number that nobody checks.
+  Zero is visibly unconfigured, and Feature 5 T2 already chose zero for the same reason.
+- Surface an unconfigured rate on the Feature 6 setup checklist rather than silently charging nothing
+  forever.
+- Check: set 6.5%, reload, ring a $10.00 item, and confirm $0.65 of tax and a "Tax (6.5%)" label —
+  today both read 8.25% no matter what was typed.
+
+**T2 — Items that are not taxed** (~15 min)
+- Add `taxable: boolean` (default `true`) to products in `shared/schema.ts`, `client/src/lib/db.ts`
+  (Dexie bump) and `server/schema.ts`, editable in the product editor. Default `true` keeps every
+  existing row behaving exactly as it does today.
+- Compute tax over the taxable subtotal only, in **one** place — the pricing module Feature 5 T1
+  creates (`shared/pricing.ts`) — so the till, the server order path and any future channel agree.
+  Do not add a second tax calculation to the POS page.
+- A discount reduces the taxable base proportionally: tax applies to the discounted subtotal, which
+  is the order of operations Feature 5 T3 already fixes. Do not re-decide it here.
+- Check: a cart with one taxable $10 item and one exempt $10 item at 10% produces $1.00 of tax, not
+  $2.00; and an order-level discount reduces the taxable base rather than the tax being taken on the
+  pre-discount total.
+
+**T3 — Tax-inclusive pricing** (~15 min)
+- Add a `tax.inclusive` boolean setting. When true, the menu price already contains the tax and the
+  tax line is *extracted* — `tax = round(total × rate / (100 + rate))` — rather than added. This is
+  how VAT and GST jurisdictions price, and a POS that cannot express it is unusable outside North
+  America.
+- Implement it as one branch in the same pricing function as T2, not as a second path. The receipt
+  must say which mode it was — "Tax included" versus a separate line — because those are different
+  claims about what the customer paid.
+- Check: a $10.00 inclusive price at 10% yields a $10.00 total with $0.91 of tax; the same price
+  exclusive yields $11.00 with $1.00; and rounding across a three-line cart still sums exactly to the
+  order total with no stray cent.
+
+**T4 — Stamp the rate on the sale, and report what was collected** (~15 min)
+- Add `taxRatePct` and `taxInclusive` to the `Sale` row, written at every place a sale is created
+  (`pos.tsx:446`, `shared/api-handlers.ts:464`, `server/bom-engine.ts:440`). Nullable for existing
+  rows; do not backfill a guess about what an old sale was charged.
+- Feature 20's receipt reads them rather than the current setting, so a reprint after a rate change
+  still shows what the customer actually paid. Without this, every historical receipt silently
+  rewrites itself the day the rate changes.
+- Add tax collected for the period to the reports page — operators file this monthly or quarterly and
+  currently have to derive it by hand. It is a sum of `taxCents` over Feature 13's window; do not
+  recompute it from rates.
+- Check: change the store rate after ringing a sale, then reprint that sale and confirm it still
+  shows the old rate and the same tax; and confirm the period's tax total equals the sum of the
+  stored `taxCents`, not a rate applied to revenue.
+
+### Non-goals
+
+Multiple tax jurisdictions and rate tables, address- or location-based rate lookup (a rate per
+location is Feature 3's shape once locations exist), tax categories beyond one taxable flag, tax
+holidays, exemption certificates and tax-exempt customers, filing or remittance, and integration with
+any tax service. **Rounding is per order, not per line**, matching what the code does today — this
+feature must not quietly change it, and if a jurisdiction requires per-line rounding that is a
+separate, deliberate change with its own tests.
+
+### Definition of done
+
+The rate an operator types is the rate their customers are charged, exempt items are not taxed,
+inclusive pricing works, and every sale carries the rate it was rung at so old receipts and old
+periods still tell the truth after the rate changes.
+
+---
+
+## Feature 20 — The receipt: what the customer gets, and finding a sale after it closed
+
+**Status:** planned
+**Vision pillar:** #1 — "setup **and operate**". A customer asking for a receipt is not an edge case,
+and neither is a manager asking what was in yesterday's $84 order.
+**Depends on:** nothing. Composes with Feature 12 (a reversal prints its own receipt) and Feature 16
+(tender and change appear as lines) without requiring either.
+**Unblocks:** Feature 12 T3, which voids "from the recent-sales view the POS already renders" — that
+view currently cannot show what is in a sale.
+**Added:** 2026-08-10
+
+### The finding
+
+**Two gaps that are the same gap.**
+
+**1. The customer gets nothing.** A grep across `client/src`, `server` and `shared` for
+`window.print`, `Printer`, `escpos`, `bluetooth`, `sendReceipt` or `customerEmail` returns **no hits
+of any kind**. There is no printed receipt, no emailed receipt, no PDF, and nowhere to type a
+customer's address. The sale is recorded and the transaction ends silently. In most jurisdictions a
+receipt on request is not optional, and for the customer it is the only evidence the sale happened.
+
+**2. A closed sale's contents are unreachable.** `linesJson` is rendered in exactly one place in the
+entire client — `order-receipts.tsx:97`, inside the open-orders rail, which filters
+`closedAt === null && customerName !== undefined && status === "completed"` (`:142`). The moment an
+order is closed it drops out of that rail and its items become invisible. The Recent tab
+(`pos.tsx:873-886`) shows total, time and payment method and nothing else; there is no tap target, no
+detail view, and no search.
+
+So the data is all there and none of it can be looked at. That is why these are one feature: the
+thing a customer needs handed to them and the thing a manager needs to look up are **the same
+rendering of the same sale**, and building either one separately produces two formatters that
+disagree about what a receipt says.
+
+Two smaller things worth fixing while in there: `sales.slice(0, 20)` (`pos.tsx:873`) silently
+truncates — the same dishonesty Feature 13 T3 calls out for reports — and the rail's
+`customerName !== undefined` filter means a sale rung without a name never appears as an open order
+at all.
+
+### The shape
+
+One pure formatter, three exits.
+
+```
+shared/receipt.ts  →  on-screen detail  |  browser print  |  email body
+```
+
+Printing is `window.print()` against a receipt-width print stylesheet. That reaches any AirPrint or
+network printer the tablet can already see, needs no dependency, no driver, and no native plugin.
+
+```
+ponytail: window.print() and an HTML email. No ESC/POS, no Bluetooth pairing, no
+cash-drawer kick, no PDF library. A thermal printer needs a Capacitor plugin and
+a paired device — that is a hardware feature, and it is worth building only once
+an operator with one in front of them asks for it.
+```
+
+### Tasks
+
+**T1 — A sale you can open** (~15 min)
+- Make the Recent tab rows tappable, opening a detail view of the sale: every line with its
+  modifiers and line total, the subtotal, discounts, tax, total, payment method, time, and — once
+  Feature 19 T2 lands — who rang it. Read `linesJson`; do not recompute anything from products,
+  because a sale must render as it was rung even if the menu has changed since.
+- Replace `slice(0, 20)` with either a real "load more" or an explicit "showing the last 20 of N"
+  label. A list that ends without saying it ended is a list an operator will trust wrongly.
+- Add a search over the day's sales by amount, time or customer name. Finding a specific sale is the
+  precondition for every correction workflow, including Feature 12's voids.
+- Check: a sale rung with two items and a modifier opens and shows both lines, the modifier, and
+  totals that match the stored `totalCents` exactly — not a recomputation that happens to agree.
+
+**T2 — One formatter, and a receipt that prints** (~15 min)
+- Add `shared/receipt.ts`: a pure function from a `Sale` (plus store name, address and any footer
+  from store settings) to the receipt's ordered lines. No DOM, no formatting decisions duplicated in
+  the page — the on-screen detail from T1 renders the same structure the print and email paths use.
+- Take the money numbers **from the sale row**, never re-derive them. A receipt that recomputes tax
+  is a receipt that will one day disagree with what the customer was charged, and the sale row is the
+  record of what actually happened.
+- Add a Print action on the detail view using a print stylesheet at receipt width (`@media print`,
+  ~80mm). Everything else on the page is hidden in that stylesheet; that is the whole implementation.
+- Check: printing to PDF from the browser produces a receipt whose total equals `sale.totalCents`,
+  and the same sale rendered on screen and in the print preview shows identical lines.
+
+**T3 — Email it, without collecting a customer database** (~15 min)
+- Add an Email action taking an address at send time. **Do not store it on the sale and do not create
+  a customers table** — a receipt address is a one-time delivery detail, and the moment it is
+  persisted it is personal data this app has no policy for, no deletion path for, and (until
+  Feature 17) no safe place to keep.
+- Reuse the transport already built at `server/routes.ts:1196` for schedule publishing rather than
+  constructing a second one, and reuse T2's formatter for the body. **Feature 17 applies**: the SMTP
+  password stays write-only, and this path must not read it back to send.
+- Fail honestly. If email is not configured the action says so — the same 400 the publish route
+  already returns (`routes.ts:1195`) — rather than reporting a receipt sent to nobody. That is the
+  Feature 7 rule, and this is a customer-facing promise.
+- Check: with email configured, sending delivers a receipt whose total matches; with it
+  unconfigured, the action reports that clearly and no sale record is modified either way.
+
+**T4 — A reprint is marked as one** (~15 min)
+- Every copy after the first prints **DUPLICATE**. An indistinguishable second original is a
+  refund-fraud instrument in any store that accepts a printed receipt as proof of purchase, and this
+  is one line in the formatter.
+- Make the composition explicit rather than deferring it: Feature 16's `tenderedCents` /
+  `changeCents` render as "Cash tendered / Change" lines when present, and Feature 12's reversals
+  render as their own receipt showing the original sale id and the word VOID or REFUND. Both are
+  `if present` branches in `shared/receipt.ts` — write them now so neither feature has to reopen this
+  file, and both are inert until those features land.
+- Note in the module that the receipt is a rendering, never a record: it reads a sale and writes
+  nothing. If a task here starts mutating the sale, the seam is wrong.
+- Check: the second print of the same sale carries the duplicate marking and the first does not; a
+  sale with no tender data renders with no tender lines rather than blank ones.
+
+### Non-goals
+
+Thermal and ESC/POS printers, Bluetooth pairing, cash-drawer kick, kitchen tickets and any kitchen
+display (a real feature, and a different one — what the kitchen needs is not what the customer gets),
+PDF generation, receipt templating or branding beyond a store name and footer, SMS delivery, digital
+receipt QR codes, customer accounts and loyalty, and storing customer contact details. Also out:
+reprinting from anywhere other than the sale itself.
+
+### Definition of done
+
+A cashier can find any sale from the till, see exactly what was in it, hand the customer a printed or
+emailed copy that matches what they were charged to the cent, and every copy after the first says so.
 
 ---
 
