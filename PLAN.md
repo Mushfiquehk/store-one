@@ -37,16 +37,21 @@ its section. They are ordered by what they cost if left alone.
 three defects that cost the most: silently discarded sales, a backup that could wipe a device, and
 costs wrong by orders of magnitude.
 
-**Next**, in this order: **Feature 13** (real reports — it blocks both 10 and 14, and two of its
+**Start with the three that are cheap and depend on nothing:** **Feature 17 T1** (stop returning the
+stored SMTP password from `GET /api/settings` — a credential leak, and the whole task is a redaction
+map and two handlers), **Feature 16 T1** (the till drops to cash-only on every reload), and
+**Feature 15 T1** (delete one of the two copies of the depletion walk before either drifts further).
+
+**Then**, in this order: **Feature 13** (real reports — it blocks both 10 and 14, and two of its
 three tabs are `Math.random()` today), then **Feature 10** (margins, now that 11 has made its
 inputs true), then **Feature 8** (sync convergence). **Feature 4 (auth) still has the deadline** —
 nothing authenticates, and there is a Dockerfile.
 
-The remaining seven features are genuine enhancements and can wait: **1** (menu blueprint), **2**
-(agent bridge), **3** (locations), **4** (auth), **6** (setup status), **10** (margins), **12**
-(voids and refunds). Of those, **4 (auth) is the one with a deadline** — there is no authentication
-of any kind, and the repo now has a Dockerfile and compose file, so it must land before this is
-deployed anywhere public.
+Everything else is a genuine enhancement and can wait: **1** (menu blueprint, done), **2** (agent
+bridge), **3** (locations), **6** (setup status), **12** (voids and refunds), **18** (profit and
+loss, whose T3 needs 13, 10 and 14 first). Of the lot, **4 (auth) is the one with a deadline** —
+there is no authentication of any kind, and the repo has a Dockerfile and compose file, so it must
+land before this is deployed anywhere public.
 
 ---
 
@@ -138,6 +143,139 @@ All four tasks complete, every `Check:` passing, `npm run check` (tsc) clean, an
 stated "Definition of done" demonstrably true. A feature with three of four tasks done is not
 partially shipped — it is unshipped, and several of these leave the system in a worse state
 half-built than not started (Feature 3 T3 in particular).
+
+---
+
+## Feature 18 — Profitability: the vision pillar with no expenses to subtract
+
+**Status:** planned
+**Vision pillar:** #5 — *"The store operator can view profitability over any period of time which
+Store-One calculates by tracking **all revenues and expenses**. The platform offers AI overviews of
+what affected profitability during that period and a few recommendations to improve."* Nothing in the
+plan has claimed this pillar; Features 10, 13 and 14 build three of its inputs and stop there.
+**Depends on:** T1 and T2 depend on nothing and are shippable today. T3 needs Feature 13 (real
+revenue), Feature 10 + 11 (honest COGS) and Feature 14 (labour); T4 needs Feature 2 (the agent
+bridge).
+**Added:** 2026-08-10
+
+### The finding
+
+**The system cannot record a single expense that is not an ingredient.** `grep -rin
+"expense\|overhead\|rent\|utilit"` across `client/src`, `server` and `shared` returns nothing. The
+only money-out record in the schema is `invoices` + `invoiceLineItems`
+(`client/src/lib/db.ts:87-105`), and every line item is tied to an `inventoryItemId` — a supplier
+delivery, nothing else.
+
+So rent, utilities, insurance, card processing fees, equipment repairs, licences, marketing, the
+accountant's bill — none of them can be entered anywhere. Pillar #5's "all revenues and expenses" is,
+today, "some revenues and the food."
+
+That matters more than a missing form. Features 10, 13 and 14 are each building one line of a P&L
+without anywhere for the lines to meet: F13 makes revenue real, F10 makes COGS real, F14 makes labour
+real. Prime cost — F14 names it as "the obvious next step" and deliberately does not build it — is
+those last two over the first. **Profit is that, minus everything this feature is about.** Ship
+prime cost alone and an operator reads a healthy number while the rent quietly eats it.
+
+### The trap: purchases are not COGS
+
+The one modelling decision that makes or breaks this feature, and the easiest one to get backwards.
+
+Supplier invoices are **inventory purchases**. Recipe depletion is **consumption**. They are
+different numbers over any period shorter than forever: a store that buys a pallet of flour in March
+has a large March invoice and a small March flour cost.
+
+- COGS on the P&L is **consumption** — the recipe cost of what was actually sold (Feature 10),
+  reconciled against what actually left the shelf (Feature 15's ledger).
+- Invoices are a balance-sheet movement: cash out, inventory up. **They must not also appear as an
+  expense line**, or every pallet is counted twice — once when bought, once when sold.
+
+State this in the module and in the docs. A P&L that double-counts purchases is not slightly wrong;
+it swings between wildly profitable and wildly unprofitable with the delivery schedule, and it looks
+plausible in both directions.
+
+```
+ponytail: one flat expenses table and a P&L computed on the fly from the four
+sources. No chart of accounts, no double-entry, no journals, no accounting
+periods to close. The upgrade when an accountant is actually involved is an
+export to their software, not a general ledger in this repo.
+```
+
+### Tasks
+
+**T1 — Somewhere to put the rent** (~15 min)
+- Add an `expenses` table (`shared/schema.ts`, `client/src/lib/db.ts` with a Dexie version bump, and
+  the `crudEntities` array in `shared/api-handlers.ts` — each entry there is one line and generates
+  full CRUD, so do not hand-write routes): `id`, `date`, `amountCents`, `category`, `vendor`, `note`,
+  plus the standard `updatedAt` / `deletedAt`.
+- Categories as one exported constant, not string literals: rent, utilities, insurance, fees
+  (payment processing and bank), repairs and maintenance, marketing, professional services, supplies,
+  other. Short and fixed — an operator picking from nine buttons will categorise; one typing free
+  text will not, and then the report cannot group.
+- **Do not model recurrence.** Monthly rent is twelve rows a year, entered in seconds. A recurrence
+  engine is a scheduler, a generator, and an edit-the-series problem, for a saving of eleven clicks.
+- Check: create, list by date window, and soft-delete an expense; assert a deleted expense is absent
+  from the window.
+
+**T2 — Enter one where the operator already is** (~15 min)
+- Add an expenses view beside the existing invoice intake (`client/src/components/admin-invoice-
+  intake.tsx` is the money-out screen operators already know) — date, amount, category, vendor, note.
+  Amount edits in dollars and stores cents, like the rest of the app.
+- Show the current month's total by category as it is entered. An operator who cannot see the running
+  total has no way to notice they entered $4,500 rent as $45.00.
+- **Put the purchases-are-not-expenses rule on the screen**, one line: supplier invoices are recorded
+  under Invoices and appear as cost of goods when the stock is sold. Otherwise the first thing an
+  operator does is enter their Sysco invoice here as well, and every number downstream doubles.
+- Check: entering an expense updates the category total immediately, and the invoice screen is
+  unchanged by it.
+
+**T3 — `GET /api/reports/profit-and-loss?since=&until=`** (~15 min)
+- In `shared/api-handlers.ts`, composing what the other features built: revenue from `salesSeries`
+  (Feature 13 T1), COGS from `costVariant` over the period's product mix (Feature 10 T1), labour from
+  `laborCostCents` (Feature 14 T2), expenses by category from T1. Return the lines, the totals, prime
+  cost, and net profit — plus each as a percentage of revenue, which is the form operators manage
+  against.
+- **Reuse, do not re-derive.** If this task computes revenue or cost by walking sales itself, the
+  earlier features were built wrong and that is worth knowing before this one lands.
+- Honesty, the same rule the whole plan runs on: return `unknowns` — variants with no known cost
+  (F10), employees with no pay rate (F14), unclosed punches (F14), windows containing over-drawn
+  stock (F15) — and never fold an unknown into a zero. A net profit computed with three unpriced
+  ingredients must say so next to the number.
+- Include the **previous equivalent period** and the delta per line. "What affected profitability"
+  is a comparison; a single column cannot answer it.
+- Check: a window with one sale, one expense and one shift returns revenue, COGS, labour and expense
+  lines that reconcile to the net figure exactly; and a variant with no cost appears in `unknowns`
+  rather than raising the margin.
+
+**T4 — The overview, written by the agent rather than by a new dependency** (~15 min)
+- Add the P&L to `client/src/pages/reports.tsx` as its own tab, worst deltas first, with the unknowns
+  visible rather than swept up.
+- Add `profit_and_loss` to the Feature 2 MCP tool table. **That is where pillar #5's "AI overview and
+  a few recommendations" comes from** — the endpoint returns the facts and the period-over-period
+  deltas, the agent already connected to the store narrates them. Do not add an LLM dependency to
+  this repo to generate prose about numbers an agent can already read; this codebase's job is to make
+  the numbers true.
+- Describe the tool so the agent knows the trap: purchases are not expenses, and unknowns are not
+  zeros. A tool description that omits both invites a confident wrong summary of someone's business.
+- Check: after adding an expense, `profit_and_loss` reflects it in the category line and in net
+  profit with no other call, and the previous-period delta moves by the same amount.
+
+### Non-goals
+
+Double-entry bookkeeping, a chart of accounts, accounts payable and receivable, cash-flow statements,
+balance sheets, depreciation, tax filing, payroll runs (Feature 14's non-goal and still one),
+multi-location consolidation (needs Feature 3), recurring-expense scheduling, receipt capture or OCR,
+and export to accounting software — that last one is the natural next feature and is what makes the
+"accounting add-on" of pillar #3 real, but it is an integration, not a report.
+
+Also explicitly not here: **the autopilot of pillar #6.** An agent that acts on these numbers needs
+them trusted first, and the decision log that pillar's "autopsies" require is its own feature.
+
+### Definition of done
+
+An operator enters their rent, opens Reports, and sees for any window what came in, what the food
+cost, what the labour cost, what everything else cost, and what was left — with anything the system
+cannot compute honestly named rather than counted as zero, and with the previous period beside it so
+the number means something.
 
 ---
 
