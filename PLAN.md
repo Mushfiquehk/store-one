@@ -26,6 +26,7 @@ its section. They are ordered by what they cost if left alone.
 | ~~**11**~~ | ~~`lastPurchasePrice` stores price per *purchased* unit; recipes consume *stocking* units~~ **Fixed** — `shared/units.ts` | ~~`storage.ts:910`~~ | — |
 | **8** | Sync compares Drizzle rows to Dexie records via `JSON.stringify`, so they never match | `storage.ts:~270` vs `sync.ts:97` — differing key order and field set | Every menu record re-pushed to every client on every sync, forever |
 | **8** | Conflict resolution reads `adminUpdatedAt` but never compares it | `storage.ts:215+` | Newer POS edits silently discarded |
+| **17** | The stored SMTP password is returned by `GET /api/settings`, pre-filled into a form, and included in every backup | `api-handlers.ts:467-472`; `settings.tsx:109, 580`; `db.ts:462` → `backup.ts:32` | An operator's real mail credential leaks to anyone who can reach the server or fetch a backup |
 | **16** | Whether the till can record a card sale depends on ephemeral React state | `pos.tsx:133` reads `integrations`, which is `useState([])` at `store.tsx:129` | Every reload puts the store back to cash-only |
 | **16** | "Integration Connected — Successfully linked to provider" is a toast over a no-op | `store.tsx:236-241` — no network call, no persistence | Pillar #3's only surface is a prop |
 | **15** | Recipe depletion is implemented twice — `pos.tsx:373-436` duplicates `bom-engine.ts:203-293`, and only the POS copy runs on real sales | the two already differ at `pos.tsx:367` vs `bom-engine.ts:224` | Pillar #4's accuracy claim rests on a copy nothing tests |
@@ -137,6 +138,136 @@ All four tasks complete, every `Check:` passing, `npm run check` (tsc) clean, an
 stated "Definition of done" demonstrably true. A feature with three of four tasks done is not
 partially shipped — it is unshipped, and several of these leave the system in a worse state
 half-built than not started (Feature 3 T3 in particular).
+
+---
+
+## Feature 17 — The SMTP password is in the backup, and in every settings response
+
+**Status:** planned
+**Vision pillar:** #3 — third-party services need credentials, and this plan is about to add more of
+them (Feature 16's integrations, Feature 4's API tokens). Also #1: losing an operator's email
+account is not a foundation.
+**Depends on:** nothing. Feature 7 T3's settings API is shipped and is where the problem lives.
+**Relationship to Feature 4:** complementary, not covered by it. Feature 4 stops strangers reaching
+the server; this stops the credential being handed out, copied into backups, and typed into a form
+field in the first place.
+**Added:** 2026-08-09
+
+### The finding
+
+The app stores SMTP credentials so it can email published schedules
+(`server/routes.ts:1183-1210` builds a `nodemailer` transport from the `emailConfig` setting). The
+credential is real and it is handled as if it were a display preference.
+
+**1. Every settings response contains the password.** `GET /api/settings`
+(`shared/api-handlers.ts:467-472`) returns
+
+```ts
+{ settings: Object.fromEntries(rows.map(r => [r.key, r.value])) }
+```
+
+— every key, every value, `emailConfig.password` among them. `GET /api/settings/:key` returns the
+same for a single key. There is no redaction of any kind, and (until Feature 4) no authentication in
+front of it: anyone who can reach the server can read the operator's mail password with one
+unauthenticated `GET`.
+
+**2. The Settings page fetches the password back into a form field.** `settings.tsx:109` loads
+`emailConfig` into React state, `:580` binds `emailConfig.password` to an input, and `saveEmailConfig`
+(`:134-137`) posts the whole object back. The secret round-trips through the browser on every visit
+to the page, whether or not anyone intends to change it.
+
+**3. It is in every backup.** `BACKUP_TABLES` is derived from `db.tables` (`client/src/lib/db.ts:462`)
+— which is exactly the property that makes Feature 9 correct, and it means the `settings` table, and
+therefore the password, is inside every snapshot uploaded by `client/src/lib/backup.ts:32`. Feature 9
+T3 already noted that a mistyped client code can pull *another* store's backup; that path now also
+moves a live SMTP credential between stores.
+
+**4. What is *not* wrong** — worth stating so nobody fixes the wrong thing: `settings` is absent from
+`SYNC_CATEGORY_TABLES` (`shared/schema.ts:31-36`), so the credential does not travel over sync. One
+channel, not three.
+
+This is not a hypothetical exposure. A mail password is reusable, is often the operator's real
+business account, and is the kind of loss a small restaurant does not detect for months.
+
+### The shape
+
+A secret is **write-only through the API**: it can be set and replaced, never read back. That single
+rule fixes all three paths at once — a value the API will not emit cannot appear in a list response,
+cannot be pre-filled into a form, and cannot be copied into a snapshot.
+
+```
+ponytail: one exported map of key -> secret field paths, and redaction at the
+two exits (settings responses, backup snapshots). No secrets manager, no
+envelope encryption, no KMS. Encrypting at rest is the upgrade if the database
+itself becomes the threat model — today the leak is that we hand it out.
+```
+
+### Tasks
+
+**T1 — Redact on the way out, preserve on the way in** (~15 min)
+- Add `SECRET_SETTING_FIELDS` to `shared/schema.ts` (or beside the settings handlers): a map of
+  setting key → field paths that must never be returned. Today: `emailConfig` → `["password"]`.
+- Redact in **both** settings read handlers (`shared/api-handlers.ts:467`, `:478`). Return the field
+  as an explicit marker — `"__SET__"` when a value exists, `null`/absent when it does not — never the
+  value and never a fake string of asterisks that a client might save back verbatim.
+- On `PUT`, a secret field arriving as the marker or absent means **keep what is stored**; any other
+  value replaces it. Without that merge the first save from a redacted form blanks the password, and
+  the operator finds out when the schedule email silently stops going out.
+- Check: set a password, `GET /api/settings` and `GET /api/settings/emailConfig`, and assert the
+  plaintext appears in neither body; then `PUT` the redacted object back unchanged and assert
+  `POST /api/schedule/publish` still authenticates against the mail server.
+
+**T2 — Keep secrets out of the snapshot** (~15 min)
+- Strip the same fields in `client/src/lib/backup.ts:32` as the snapshot is built, using the map from
+  T1 — **do not hand-maintain a second list**, and do not exclude the `settings` table wholesale:
+  hours of operation and the tax rate belong in a backup, the password does not.
+- Do not touch `BACKUP_TABLES`' derivation from `db.tables`. That property is what Feature 9 T1
+  deliberately chose so a new table cannot fall out of backups; redaction belongs at the field level,
+  below it.
+- On restore, a redacted secret means **leave the stored value alone** — the same rule as T1's `PUT`,
+  and the same rule Feature 9 T2 already applies to absent tables. Restoring a backup must not wipe
+  the mail configuration on a working device.
+- Check: back up a database with a configured password, read the uploaded snapshot, and assert the
+  plaintext is absent; restore it onto a device that has a password set and assert that password
+  still works afterwards.
+
+**T3 — A credential field that is not a text box holding a secret** (~15 min)
+- Rework the email card in `client/src/pages/settings.tsx:505-610`: when a password is stored, show
+  "Configured" with a **Replace** action rather than loading the value into an input. An empty box
+  the operator must not clear is a trap; a stated status with a deliberate replace is not.
+- Add a **Send test email** action so configuration can be verified without ever reading the secret
+  back. Right now the only way to find out whether the settings work is to publish a schedule to real
+  staff. Reuse the transport built at `server/routes.ts:1196` rather than constructing a second one.
+- Check: with a password stored, the rendered page contains the marker and not the plaintext (view
+  source, not just the input's masking — `type="password"` hides a value it still ships to the
+  browser); the test email sends; and saving the form without touching the field leaves it working.
+
+**T4 — Make the rule outlive this feature** (~15 min)
+- One assertion in the settings tests: for every key in `SECRET_SETTING_FIELDS`, no read handler
+  response contains the stored value. That is what stops the next credential — a Stripe key, a
+  supplier API token — from being added as an ordinary setting and re-opening this exact hole.
+- Point the neighbouring features at the same mechanism rather than inventing their own: Feature 16
+  T3 stores integration connection state under `integrations.<id>` and any credential it grows
+  belongs in this map; Feature 4 T1 stores token *hashes* and shows the plaintext once, which is the
+  same rule applied to a value the server never needs back.
+- Document it in `docs/local-setup.md`: what is stored, what a backup contains, and — plainly — that
+  until Feature 4 lands the settings API is unauthenticated, so an operator should not put a
+  credential they care about on a server reachable from anything but their own network.
+- Check: adding a fake secret key to the map and a matching setting makes the assertion fail until
+  redaction covers it.
+
+### Non-goals
+
+Encryption at rest, a secrets manager or vault, OAuth flows in place of stored passwords, per-user
+credentials, rotation policy, and audit logging of who read what. Also out of scope: moving
+`emailConfig` to environment variables — the operator configures it from the Settings page, and an
+env var is not something a restaurant owner can edit.
+
+### Definition of done
+
+No API response and no backup snapshot contains a stored credential, an operator can verify their
+email configuration without reading the password back, and a test fails if the next secret is added
+as a plain setting.
 
 ---
 
