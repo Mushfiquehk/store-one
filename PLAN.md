@@ -147,6 +147,131 @@ half-built than not started (Feature 3 T3 in particular).
 
 ---
 
+## Feature 20 — The receipt: what the customer gets, and finding a sale after it closed
+
+**Status:** planned
+**Vision pillar:** #1 — "setup **and operate**". A customer asking for a receipt is not an edge case,
+and neither is a manager asking what was in yesterday's $84 order.
+**Depends on:** nothing. Composes with Feature 12 (a reversal prints its own receipt) and Feature 16
+(tender and change appear as lines) without requiring either.
+**Unblocks:** Feature 12 T3, which voids "from the recent-sales view the POS already renders" — that
+view currently cannot show what is in a sale.
+**Added:** 2026-08-10
+
+### The finding
+
+**Two gaps that are the same gap.**
+
+**1. The customer gets nothing.** A grep across `client/src`, `server` and `shared` for
+`window.print`, `Printer`, `escpos`, `bluetooth`, `sendReceipt` or `customerEmail` returns **no hits
+of any kind**. There is no printed receipt, no emailed receipt, no PDF, and nowhere to type a
+customer's address. The sale is recorded and the transaction ends silently. In most jurisdictions a
+receipt on request is not optional, and for the customer it is the only evidence the sale happened.
+
+**2. A closed sale's contents are unreachable.** `linesJson` is rendered in exactly one place in the
+entire client — `order-receipts.tsx:97`, inside the open-orders rail, which filters
+`closedAt === null && customerName !== undefined && status === "completed"` (`:142`). The moment an
+order is closed it drops out of that rail and its items become invisible. The Recent tab
+(`pos.tsx:873-886`) shows total, time and payment method and nothing else; there is no tap target, no
+detail view, and no search.
+
+So the data is all there and none of it can be looked at. That is why these are one feature: the
+thing a customer needs handed to them and the thing a manager needs to look up are **the same
+rendering of the same sale**, and building either one separately produces two formatters that
+disagree about what a receipt says.
+
+Two smaller things worth fixing while in there: `sales.slice(0, 20)` (`pos.tsx:873`) silently
+truncates — the same dishonesty Feature 13 T3 calls out for reports — and the rail's
+`customerName !== undefined` filter means a sale rung without a name never appears as an open order
+at all.
+
+### The shape
+
+One pure formatter, three exits.
+
+```
+shared/receipt.ts  →  on-screen detail  |  browser print  |  email body
+```
+
+Printing is `window.print()` against a receipt-width print stylesheet. That reaches any AirPrint or
+network printer the tablet can already see, needs no dependency, no driver, and no native plugin.
+
+```
+ponytail: window.print() and an HTML email. No ESC/POS, no Bluetooth pairing, no
+cash-drawer kick, no PDF library. A thermal printer needs a Capacitor plugin and
+a paired device — that is a hardware feature, and it is worth building only once
+an operator with one in front of them asks for it.
+```
+
+### Tasks
+
+**T1 — A sale you can open** (~15 min)
+- Make the Recent tab rows tappable, opening a detail view of the sale: every line with its
+  modifiers and line total, the subtotal, discounts, tax, total, payment method, time, and — once
+  Feature 19 T2 lands — who rang it. Read `linesJson`; do not recompute anything from products,
+  because a sale must render as it was rung even if the menu has changed since.
+- Replace `slice(0, 20)` with either a real "load more" or an explicit "showing the last 20 of N"
+  label. A list that ends without saying it ended is a list an operator will trust wrongly.
+- Add a search over the day's sales by amount, time or customer name. Finding a specific sale is the
+  precondition for every correction workflow, including Feature 12's voids.
+- Check: a sale rung with two items and a modifier opens and shows both lines, the modifier, and
+  totals that match the stored `totalCents` exactly — not a recomputation that happens to agree.
+
+**T2 — One formatter, and a receipt that prints** (~15 min)
+- Add `shared/receipt.ts`: a pure function from a `Sale` (plus store name, address and any footer
+  from store settings) to the receipt's ordered lines. No DOM, no formatting decisions duplicated in
+  the page — the on-screen detail from T1 renders the same structure the print and email paths use.
+- Take the money numbers **from the sale row**, never re-derive them. A receipt that recomputes tax
+  is a receipt that will one day disagree with what the customer was charged, and the sale row is the
+  record of what actually happened.
+- Add a Print action on the detail view using a print stylesheet at receipt width (`@media print`,
+  ~80mm). Everything else on the page is hidden in that stylesheet; that is the whole implementation.
+- Check: printing to PDF from the browser produces a receipt whose total equals `sale.totalCents`,
+  and the same sale rendered on screen and in the print preview shows identical lines.
+
+**T3 — Email it, without collecting a customer database** (~15 min)
+- Add an Email action taking an address at send time. **Do not store it on the sale and do not create
+  a customers table** — a receipt address is a one-time delivery detail, and the moment it is
+  persisted it is personal data this app has no policy for, no deletion path for, and (until
+  Feature 17) no safe place to keep.
+- Reuse the transport already built at `server/routes.ts:1196` for schedule publishing rather than
+  constructing a second one, and reuse T2's formatter for the body. **Feature 17 applies**: the SMTP
+  password stays write-only, and this path must not read it back to send.
+- Fail honestly. If email is not configured the action says so — the same 400 the publish route
+  already returns (`routes.ts:1195`) — rather than reporting a receipt sent to nobody. That is the
+  Feature 7 rule, and this is a customer-facing promise.
+- Check: with email configured, sending delivers a receipt whose total matches; with it
+  unconfigured, the action reports that clearly and no sale record is modified either way.
+
+**T4 — A reprint is marked as one** (~15 min)
+- Every copy after the first prints **DUPLICATE**. An indistinguishable second original is a
+  refund-fraud instrument in any store that accepts a printed receipt as proof of purchase, and this
+  is one line in the formatter.
+- Make the composition explicit rather than deferring it: Feature 16's `tenderedCents` /
+  `changeCents` render as "Cash tendered / Change" lines when present, and Feature 12's reversals
+  render as their own receipt showing the original sale id and the word VOID or REFUND. Both are
+  `if present` branches in `shared/receipt.ts` — write them now so neither feature has to reopen this
+  file, and both are inert until those features land.
+- Note in the module that the receipt is a rendering, never a record: it reads a sale and writes
+  nothing. If a task here starts mutating the sale, the seam is wrong.
+- Check: the second print of the same sale carries the duplicate marking and the first does not; a
+  sale with no tender data renders with no tender lines rather than blank ones.
+
+### Non-goals
+
+Thermal and ESC/POS printers, Bluetooth pairing, cash-drawer kick, kitchen tickets and any kitchen
+display (a real feature, and a different one — what the kitchen needs is not what the customer gets),
+PDF generation, receipt templating or branding beyond a store name and footer, SMS delivery, digital
+receipt QR codes, customer accounts and loyalty, and storing customer contact details. Also out:
+reprinting from anywhere other than the sale itself.
+
+### Definition of done
+
+A cashier can find any sale from the till, see exactly what was in it, hand the customer a printed or
+emailed copy that matches what they were charged to the cent, and every copy after the first says so.
+
+---
+
 ## Feature 19 — Who did that: attribution, and the log every autopsy needs
 
 **Status:** planned
