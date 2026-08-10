@@ -23,23 +23,24 @@ its section. They are ordered by what they cost if left alone.
 | **7** | `POST /api/admin/sales` returns 200 with the sale echoed back and persists nothing | `server/routes.ts:622-632` — `createSale(d) { return d; }`, shadowing a working `storage.ts:860` | Sales silently lost; caller cannot tell success from discard |
 | **9** | Backup omits 6 of 16 tables while the UI calls it a "full snapshot" | `settings.tsx:256` lists ten tables; `db.ts:194-199` defines combos, invoices and more | Restore loses every combo and supplier invoice |
 | **9** | Restore clears tables it may not repopulate, with no confirmation | `settings.tsx:316-340` — unconditional `.clear()`, then `bulkPut` only `if (snapshot.X?.length)` | A partial snapshot or mistyped store code wipes the device |
-| **11** | `lastPurchasePrice` stores price per *purchased* unit; recipes consume *stocking* units | `storage.ts:910`; seed data implies $4.50/oz milk, $12/oz espresso beans | Every cost and margin wrong by orders of magnitude |
+| ~~**11**~~ | ~~`lastPurchasePrice` stores price per *purchased* unit; recipes consume *stocking* units~~ **Fixed** — `shared/units.ts` | ~~`storage.ts:910`~~ | — |
 | **8** | Sync compares Drizzle rows to Dexie records via `JSON.stringify`, so they never match | `storage.ts:~270` vs `sync.ts:97` — differing key order and field set | Every menu record re-pushed to every client on every sync, forever |
 | **8** | Conflict resolution reads `adminUpdatedAt` but never compares it | `storage.ts:215+` | Newer POS edits silently discarded |
+| **17** | The stored SMTP password is returned by `GET /api/settings`, pre-filled into a form, and included in every backup | `api-handlers.ts:467-472`; `settings.tsx:109, 580`; `db.ts:462` → `backup.ts:32` | An operator's real mail credential leaks to anyone who can reach the server or fetch a backup |
 | **16** | Whether the till can record a card sale depends on ephemeral React state | `pos.tsx:133` reads `integrations`, which is `useState([])` at `store.tsx:129` | Every reload puts the store back to cash-only |
 | **16** | "Integration Connected — Successfully linked to provider" is a toast over a no-op | `store.tsx:236-241` — no network call, no persistence | Pillar #3's only surface is a prop |
 | **15** | Recipe depletion is implemented twice — `pos.tsx:373-436` duplicates `bom-engine.ts:203-293`, and only the POS copy runs on real sales | the two already differ at `pos.tsx:367` vs `bom-engine.ts:224` | Pillar #4's accuracy claim rests on a copy nothing tests |
 | **15** | Stock adjustments clamp at zero and record nothing | `local-storage.ts:257`, `dexie-admin-storage.ts:266`; no ledger table in `db.ts:194-211` | Over-sales vanish; no answer to "where did it go" |
 | **5** | Combos are ignored by the live order path | `bom-engine.ts` is imported only by `routes.ts:16` for test orders; `/api/orders/simulate` prices inline with a hardcoded 8% tax | Combos charge full price; three different tax rates in the codebase |
 
-**Suggested first session**, highest value per unit of risk — all small, all independently shippable:
+~~**Suggested first session**~~ — **done.** Features 7, 9 and 11 have all landed, which clears the
+three defects that cost the most: silently discarded sales, a backup that could wipe a device, and
+costs wrong by orders of magnitude.
 
-1. **Feature 7 T1** — convert the fake-success stubs to 501s. Few lines, obviously correct, stops
-   silent data loss immediately. Nothing else in this plan should be built on a server that reports
-   success for writes it discarded.
-2. **Feature 9 T1–T3** — complete backups, non-destructive restore, confirmation prompt.
-3. **Feature 11 T1–T2** — the unit conversion, defaulting to `1` so nothing changes until an
-   operator supplies a real factor.
+**Next**, in this order: **Feature 13** (real reports — it blocks both 10 and 14, and two of its
+three tabs are `Math.random()` today), then **Feature 10** (margins, now that 11 has made its
+inputs true), then **Feature 8** (sync convergence). **Feature 4 (auth) still has the deadline** —
+nothing authenticates, and there is a Dockerfile.
 
 The remaining seven features are genuine enhancements and can wait: **1** (menu blueprint), **2**
 (agent bridge), **3** (locations), **4** (auth), **6** (setup status), **10** (margins), **12**
@@ -137,6 +138,136 @@ All four tasks complete, every `Check:` passing, `npm run check` (tsc) clean, an
 stated "Definition of done" demonstrably true. A feature with three of four tasks done is not
 partially shipped — it is unshipped, and several of these leave the system in a worse state
 half-built than not started (Feature 3 T3 in particular).
+
+---
+
+## Feature 17 — The SMTP password is in the backup, and in every settings response
+
+**Status:** planned
+**Vision pillar:** #3 — third-party services need credentials, and this plan is about to add more of
+them (Feature 16's integrations, Feature 4's API tokens). Also #1: losing an operator's email
+account is not a foundation.
+**Depends on:** nothing. Feature 7 T3's settings API is shipped and is where the problem lives.
+**Relationship to Feature 4:** complementary, not covered by it. Feature 4 stops strangers reaching
+the server; this stops the credential being handed out, copied into backups, and typed into a form
+field in the first place.
+**Added:** 2026-08-09
+
+### The finding
+
+The app stores SMTP credentials so it can email published schedules
+(`server/routes.ts:1183-1210` builds a `nodemailer` transport from the `emailConfig` setting). The
+credential is real and it is handled as if it were a display preference.
+
+**1. Every settings response contains the password.** `GET /api/settings`
+(`shared/api-handlers.ts:467-472`) returns
+
+```ts
+{ settings: Object.fromEntries(rows.map(r => [r.key, r.value])) }
+```
+
+— every key, every value, `emailConfig.password` among them. `GET /api/settings/:key` returns the
+same for a single key. There is no redaction of any kind, and (until Feature 4) no authentication in
+front of it: anyone who can reach the server can read the operator's mail password with one
+unauthenticated `GET`.
+
+**2. The Settings page fetches the password back into a form field.** `settings.tsx:109` loads
+`emailConfig` into React state, `:580` binds `emailConfig.password` to an input, and `saveEmailConfig`
+(`:134-137`) posts the whole object back. The secret round-trips through the browser on every visit
+to the page, whether or not anyone intends to change it.
+
+**3. It is in every backup.** `BACKUP_TABLES` is derived from `db.tables` (`client/src/lib/db.ts:462`)
+— which is exactly the property that makes Feature 9 correct, and it means the `settings` table, and
+therefore the password, is inside every snapshot uploaded by `client/src/lib/backup.ts:32`. Feature 9
+T3 already noted that a mistyped client code can pull *another* store's backup; that path now also
+moves a live SMTP credential between stores.
+
+**4. What is *not* wrong** — worth stating so nobody fixes the wrong thing: `settings` is absent from
+`SYNC_CATEGORY_TABLES` (`shared/schema.ts:31-36`), so the credential does not travel over sync. One
+channel, not three.
+
+This is not a hypothetical exposure. A mail password is reusable, is often the operator's real
+business account, and is the kind of loss a small restaurant does not detect for months.
+
+### The shape
+
+A secret is **write-only through the API**: it can be set and replaced, never read back. That single
+rule fixes all three paths at once — a value the API will not emit cannot appear in a list response,
+cannot be pre-filled into a form, and cannot be copied into a snapshot.
+
+```
+ponytail: one exported map of key -> secret field paths, and redaction at the
+two exits (settings responses, backup snapshots). No secrets manager, no
+envelope encryption, no KMS. Encrypting at rest is the upgrade if the database
+itself becomes the threat model — today the leak is that we hand it out.
+```
+
+### Tasks
+
+**T1 — Redact on the way out, preserve on the way in** (~15 min)
+- Add `SECRET_SETTING_FIELDS` to `shared/schema.ts` (or beside the settings handlers): a map of
+  setting key → field paths that must never be returned. Today: `emailConfig` → `["password"]`.
+- Redact in **both** settings read handlers (`shared/api-handlers.ts:467`, `:478`). Return the field
+  as an explicit marker — `"__SET__"` when a value exists, `null`/absent when it does not — never the
+  value and never a fake string of asterisks that a client might save back verbatim.
+- On `PUT`, a secret field arriving as the marker or absent means **keep what is stored**; any other
+  value replaces it. Without that merge the first save from a redacted form blanks the password, and
+  the operator finds out when the schedule email silently stops going out.
+- Check: set a password, `GET /api/settings` and `GET /api/settings/emailConfig`, and assert the
+  plaintext appears in neither body; then `PUT` the redacted object back unchanged and assert
+  `POST /api/schedule/publish` still authenticates against the mail server.
+
+**T2 — Keep secrets out of the snapshot** (~15 min)
+- Strip the same fields in `client/src/lib/backup.ts:32` as the snapshot is built, using the map from
+  T1 — **do not hand-maintain a second list**, and do not exclude the `settings` table wholesale:
+  hours of operation and the tax rate belong in a backup, the password does not.
+- Do not touch `BACKUP_TABLES`' derivation from `db.tables`. That property is what Feature 9 T1
+  deliberately chose so a new table cannot fall out of backups; redaction belongs at the field level,
+  below it.
+- On restore, a redacted secret means **leave the stored value alone** — the same rule as T1's `PUT`,
+  and the same rule Feature 9 T2 already applies to absent tables. Restoring a backup must not wipe
+  the mail configuration on a working device.
+- Check: back up a database with a configured password, read the uploaded snapshot, and assert the
+  plaintext is absent; restore it onto a device that has a password set and assert that password
+  still works afterwards.
+
+**T3 — A credential field that is not a text box holding a secret** (~15 min)
+- Rework the email card in `client/src/pages/settings.tsx:505-610`: when a password is stored, show
+  "Configured" with a **Replace** action rather than loading the value into an input. An empty box
+  the operator must not clear is a trap; a stated status with a deliberate replace is not.
+- Add a **Send test email** action so configuration can be verified without ever reading the secret
+  back. Right now the only way to find out whether the settings work is to publish a schedule to real
+  staff. Reuse the transport built at `server/routes.ts:1196` rather than constructing a second one.
+- Check: with a password stored, the rendered page contains the marker and not the plaintext (view
+  source, not just the input's masking — `type="password"` hides a value it still ships to the
+  browser); the test email sends; and saving the form without touching the field leaves it working.
+
+**T4 — Make the rule outlive this feature** (~15 min)
+- One assertion in the settings tests: for every key in `SECRET_SETTING_FIELDS`, no read handler
+  response contains the stored value. That is what stops the next credential — a Stripe key, a
+  supplier API token — from being added as an ordinary setting and re-opening this exact hole.
+- Point the neighbouring features at the same mechanism rather than inventing their own: Feature 16
+  T3 stores integration connection state under `integrations.<id>` and any credential it grows
+  belongs in this map; Feature 4 T1 stores token *hashes* and shows the plaintext once, which is the
+  same rule applied to a value the server never needs back.
+- Document it in `docs/local-setup.md`: what is stored, what a backup contains, and — plainly — that
+  until Feature 4 lands the settings API is unauthenticated, so an operator should not put a
+  credential they care about on a server reachable from anything but their own network.
+- Check: adding a fake secret key to the map and a matching setting makes the assertion fail until
+  redaction covers it.
+
+### Non-goals
+
+Encryption at rest, a secrets manager or vault, OAuth flows in place of stored passwords, per-user
+credentials, rotation policy, and audit logging of who read what. Also out of scope: moving
+`emailConfig` to environment variables — the operator configures it from the Settings page, and an
+env var is not something a restaurant owner can edit.
+
+### Definition of done
+
+No API response and no backup snapshot contains a stored credential, an operator can verify their
+email configuration without reading the password back, and a test fails if the next secret is added
+as a plain setting.
 
 ---
 
@@ -438,11 +569,8 @@ unexplained.
 
 ## Feature 14 — Labour: the second-biggest number, and nobody can even type a wage
 
-**Status:** in progress — T1 done (`purchaseUnit` / `unitsPerPurchase` columns, default 1
-everywhere), T2–T4 unstarted. Note for T2/T3: the client-side `InventoryItem`
-(`client/src/lib/db.ts`) declares `unitsPerPurchase` **optional** because rows written before the
-Dexie v10 upgrade genuinely lack it — read it as `?? 1`, do not assume it is present. The
-server-side type and column are non-null.
+**Status:** planned. (The note that stood here described Feature 11 T1, not this feature — it has
+moved to Feature 11, which is now done.)
 **Vision pillar:** #1 — "the best foundation". Feature 10 is the growth feature; this is the feature
 that makes Feature 10's numbers true.
 **Blocks:** Feature 10 (do this first, or ship a margin report that is confidently wrong)
@@ -771,7 +899,29 @@ inventory comes back, and the day's totals are correct without anything having b
 
 ## Feature 11 — Purchase units vs stocking units: the bug that makes every cost wrong
 
-**Status:** planned
+**Status:** done — T1–T4 complete. `shared/units.ts` (the one conversion, tested), both copies
+of the receive path, the pack-size question in `admin-invoice-intake.tsx` and the inventory
+editor, corrected seed data in both copies, and `server/seed-data.test.ts` as the plausibility
+check.
+
+Three things differed from the plan as written:
+
+- **Quantity had the same bug as price, and the plan only named price.** With a factor set,
+  receiving one gallon added `1` to an on-hand count measured in ounces. `stockUnitsReceived`
+  sits beside `costPerStockUnit` and both receive paths call it. Fixing the price alone would
+  have left a sibling of this exact bug, newly reachable *because* the factor now exists.
+- **T4's plausibility flag went into a test, not a report.** Feature 10 does not exist yet, so
+  there is no margin report to flag anything in. `server/seed-data.test.ts` asserts no demo item
+  costs more in ingredients than it sells for and that food cost stays under 60%; all three of
+  its checks fail against the pre-correction data. **Feature 10 T3 still owes the operator-facing
+  version of that flag**, with the link to the item.
+- **The factor is written on invoice save, not per keystroke**, via a new
+  `updateInventoryItemAsync` on the store. It must land before `createInvoiceWithLineItems`
+  runs, because the receive path reads the factor off the item to convert the price it stores —
+  the existing fire-and-forget `updateInventoryItem` would have raced it.
+
+Seed prices are written as their derivation (`450 / 128` for milk by the gallon) so the number
+and its reasoning cannot drift apart.
 **Vision pillar:** #1 — Feature 10 is unusable without this
 **Blocks:** Feature 10 (margins computed on today's data are off by orders of magnitude)
 **Added:** 2026-08-09

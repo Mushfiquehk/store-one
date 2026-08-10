@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useStore, type InventoryItem } from "@/lib/store";
+import { formatCostPerStockUnit } from "@shared/units";
 
 function uid(prefix: string) {
   return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`;
@@ -29,7 +30,7 @@ export default function InventoryPage({ isTab = false }: { isTab?: boolean }) {
 
   const [editOpen, setEditOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
-  const [editForm, setEditForm] = useState({ name: "", unitOfMeasure: "", lowStockAlert: "" });
+  const [editForm, setEditForm] = useState({ name: "", unitOfMeasure: "", lowStockAlert: "", purchaseUnit: "", unitsPerPurchase: "" });
 
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string; deps: string[] } | null>(null);
 
@@ -64,7 +65,13 @@ export default function InventoryPage({ isTab = false }: { isTab?: boolean }) {
 
   function openEditItem(item: InventoryItem) {
     setEditingItem(item);
-    setEditForm({ name: item.name, unitOfMeasure: item.unitOfMeasure, lowStockAlert: String(item.lowStockThreshold ?? 10) });
+    setEditForm({
+      name: item.name,
+      unitOfMeasure: item.unitOfMeasure,
+      lowStockAlert: String(item.lowStockThreshold ?? 10),
+      purchaseUnit: item.purchaseUnit ?? "",
+      unitsPerPurchase: String(item.unitsPerPurchase ?? 1),
+    });
     setEditOpen(true);
   }
 
@@ -73,10 +80,15 @@ export default function InventoryPage({ isTab = false }: { isTab?: boolean }) {
     const name = editForm.name.trim();
     if (!name) { toast({ title: "Name required" }); return; }
     const lowAlert = Number(editForm.lowStockAlert);
+    // A blank or nonsense pack size falls back to 1 — bought and stocked the same way,
+    // which is what every row means today. Never 0: it would divide costing to Infinity.
+    const factor = Number(editForm.unitsPerPurchase);
     updateInventoryItem(editingItem.id, {
       name,
       unitOfMeasure: editForm.unitOfMeasure.trim() || "each",
       lowStockThreshold: Number.isFinite(lowAlert) ? lowAlert : 10,
+      purchaseUnit: editForm.purchaseUnit.trim() || null,
+      unitsPerPurchase: Number.isFinite(factor) && factor > 0 ? factor : 1,
     });
     toast({ title: "Item updated" });
     setEditOpen(false);
@@ -221,6 +233,23 @@ export default function InventoryPage({ isTab = false }: { isTab?: boolean }) {
               <Label htmlFor="edit-inv-low">Low Stock Alert</Label>
               <Input id="edit-inv-low" type="number" min="0" value={editForm.lowStockAlert} onChange={e => setEditForm(f => ({ ...f, lowStockAlert: e.target.value }))} data-testid="input-edit-inventory-low" />
             </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <Label htmlFor="edit-inv-purchase-unit">You buy it by the</Label>
+                <Input id="edit-inv-purchase-unit" value={editForm.purchaseUnit} onChange={e => setEditForm(f => ({ ...f, purchaseUnit: e.target.value }))} placeholder="gallon, case of 24" data-testid="input-edit-inventory-purchase-unit" />
+              </div>
+              <div>
+                <Label htmlFor="edit-inv-units-per-purchase">How many {editForm.unitOfMeasure || "units"} is that?</Label>
+                <Input id="edit-inv-units-per-purchase" type="number" min="0" step="any" value={editForm.unitsPerPurchase} onChange={e => setEditForm(f => ({ ...f, unitsPerPurchase: e.target.value }))} data-testid="input-edit-inventory-units-per-purchase" />
+              </div>
+            </div>
+            {editingItem && (
+              <p className="text-xs text-muted-foreground" data-testid="text-edit-inventory-cost">
+                {editingItem.lastPurchasePrice == null
+                  ? "No purchase price recorded yet — record an invoice to cost this item."
+                  : `Last cost: ${formatCostPerStockUnit(editingItem.lastPurchasePrice)} per ${editingItem.unitOfMeasure}. Changing the pack size applies to the next invoice, not to this figure.`}
+              </p>
+            )}
           </div>
           <DialogFooter className="flex justify-between items-center sm:justify-between">
             <Button variant="destructive" onClick={() => { setEditOpen(false); requestDelete(editingItem!); }} data-testid="button-delete-inventory-from-edit">

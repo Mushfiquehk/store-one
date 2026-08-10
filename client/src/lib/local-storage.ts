@@ -1,4 +1,5 @@
 import { db } from "./db";
+import { costPerStockUnit, stockUnitsReceived } from "@shared/units";
 import type {
   Product,
   Variant,
@@ -441,11 +442,15 @@ export const storage = {
         const existingItem = await db.inventoryItems.get(lineItem.inventoryItemId);
         if (existingItem) {
           await db.inventoryItems.update(existingItem.id, {
-            lastPurchasePrice: lineItem.unitPriceCents,
-            currentQuantity: existingItem.currentQuantity + lineItem.quantity,
+            // The invoice quotes a price per purchase unit; lastPurchasePrice is per stocking unit.
+            lastPurchasePrice: costPerStockUnit(lineItem.unitPriceCents, existingItem.unitsPerPurchase),
+            // One gallon received is 128 oz on hand, not 1.
+            currentQuantity: existingItem.currentQuantity + stockUnitsReceived(lineItem.quantity, existingItem.unitsPerPurchase),
             updatedAt: now,
           });
         } else {
+          // A brand new item has no pack size yet, so it is stocked in whatever it was
+          // bought in — unitsPerPurchase 1, price unconverted.
           const newItem: InventoryItem = {
             id: lineItem.inventoryItemId,
             name: lineItem.description || "Unknown Item",
@@ -453,6 +458,8 @@ export const storage = {
             currentQuantity: lineItem.quantity,
             lowStockThreshold: null,
             lastPurchasePrice: lineItem.unitPriceCents,
+            purchaseUnit: null,
+            unitsPerPurchase: 1,
             updatedAt: now,
             deletedAt: null,
           };
@@ -483,8 +490,10 @@ export const storage = {
       const existingItem = await db.inventoryItems.get(lineItem.inventoryItemId);
       if (existingItem) {
         await db.inventoryItems.update(existingItem.id, {
-          lastPurchasePrice: lineItem.unitPriceCents,
-          currentQuantity: existingItem.currentQuantity + lineItem.quantity,
+          // The invoice quotes a price per purchase unit; lastPurchasePrice is per stocking unit.
+          lastPurchasePrice: costPerStockUnit(lineItem.unitPriceCents, existingItem.unitsPerPurchase),
+          // One gallon received is 128 oz on hand, not 1.
+          currentQuantity: existingItem.currentQuantity + stockUnitsReceived(lineItem.quantity, existingItem.unitsPerPurchase),
           updatedAt: now,
         });
       } else {
@@ -495,6 +504,8 @@ export const storage = {
           currentQuantity: lineItem.quantity,
           lowStockThreshold: null,
           lastPurchasePrice: lineItem.unitPriceCents,
+          purchaseUnit: null,
+          unitsPerPurchase: 1,
           updatedAt: now,
           deletedAt: null,
         };

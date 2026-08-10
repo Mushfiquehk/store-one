@@ -85,6 +85,7 @@ type StoreContextType = {
   addInventoryItem: (data: Partial<InventoryItem>) => void;
   addInventoryItemAsync: (data: Partial<InventoryItem>) => Promise<any>;
   updateInventoryItem: (id: string, data: Partial<InventoryItem>) => void;
+  updateInventoryItemAsync: (id: string, data: Partial<InventoryItem>) => Promise<any>;
   adjustInventory: (id: string, delta: number) => void;
   deleteInventoryItem: (id: string) => void;
 
@@ -198,6 +199,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const addInventoryItem = useCallback((data: Partial<InventoryItem>) => { storage.createInventoryItem(data); }, []);
   const addInventoryItemAsync = useCallback((data: Partial<InventoryItem>) => storage.createInventoryItem(data), []);
   const updateInventoryItem = useCallback((id: string, data: Partial<InventoryItem>) => { storage.updateInventoryItem(id, data); }, []);
+  const updateInventoryItemAsync = useCallback((id: string, data: Partial<InventoryItem>) => storage.updateInventoryItem(id, data), []);
   const adjustInventory = useCallback((id: string, delta: number) => { storage.adjustInventoryQuantity(id, delta); }, []);
   const deleteInventoryItem = useCallback((id: string) => { storage.deleteInventoryItem(id); }, []);
 
@@ -289,6 +291,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     addInventoryItem,
     addInventoryItemAsync,
     updateInventoryItem,
+    updateInventoryItemAsync,
     adjustInventory,
     deleteInventoryItem,
 
