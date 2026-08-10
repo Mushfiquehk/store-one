@@ -35,6 +35,53 @@ export const SYNC_CATEGORY_TABLES: Record<SyncCategory, string[]> = {
   invoices: ["invoices", "invoiceLineItems"],
 };
 
+// A secret is write-only through the API: settable, never readable back. One map,
+// applied at every exit (settings responses, backup snapshots), so a new credential
+// is one line here rather than a new leak.
+// ponytail: no secrets manager, no encryption at rest — today's leak is that we hand
+// the value out. Encrypt at rest when the database itself becomes the threat model.
+export const SECRET_SETTING_FIELDS: Record<string, string[]> = {
+  emailConfig: ["password"],
+};
+
+// Deliberately not a run of asterisks: a client must not be able to save the marker
+// back as if it were the value.
+export const SECRET_SET_MARKER = "__SET__";
+
+const asRecord = (v: unknown): Record<string, unknown> | null =>
+  v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+
+/** Replace a setting's secret fields with the marker, or null when nothing is stored. */
+export function redactSetting(key: string, value: unknown): unknown {
+  const fields = SECRET_SETTING_FIELDS[key];
+  const obj = fields ? asRecord(value) : null;
+  if (!obj) return value;
+  const out = { ...obj };
+  for (const f of fields) {
+    if (f in out) out[f] = out[f] ? SECRET_SET_MARKER : null;
+  }
+  return out;
+}
+
+/**
+ * Merge an incoming setting over what is stored: a secret field that arrives as the
+ * marker — or not at all — keeps the stored value. Without this the first save from a
+ * redacted form blanks the credential.
+ */
+export function mergeSettingSecrets(key: string, incoming: unknown, stored: unknown): unknown {
+  const fields = SECRET_SETTING_FIELDS[key];
+  const obj = fields ? asRecord(incoming) : null;
+  if (!obj) return incoming;
+  const prev = asRecord(stored) ?? {};
+  const out = { ...obj };
+  for (const f of fields) {
+    if (out[f] !== undefined && out[f] !== SECRET_SET_MARKER) continue;
+    if (prev[f] !== undefined) out[f] = prev[f];
+    else delete out[f];
+  }
+  return out;
+}
+
 export type SyncRecord = {
   tableName: string;
   recordId: string;

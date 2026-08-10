@@ -1,4 +1,5 @@
 import { parseMenuBlueprint, planMenuApply, type ExistingMenu, type FieldDiff, type MenuPlan } from "./menu-blueprint";
+import { mergeSettingSecrets, redactSetting } from "./schema";
 import type { Modifier, ModifierGroup, Product, ProductModifierGroup, Variant } from "./schema";
 import { productMix, salesSeries, salesSummary, type Granularity, type ReportSale } from "./reports";
 
@@ -479,7 +480,7 @@ export function createApiHandlers(store: ApiAdminStorage) {
     handler: async () => {
       try {
         const rows = await store.listSettings();
-        return { status: 200, data: { settings: Object.fromEntries(rows.map(r => [r.key, r.value])) } };
+        return { status: 200, data: { settings: Object.fromEntries(rows.map(r => [r.key, redactSetting(r.key, r.value)])) } };
       } catch { return { status: 500, data: { error: "Failed to load settings" } }; }
     },
   });
@@ -495,7 +496,7 @@ export function createApiHandlers(store: ApiAdminStorage) {
         const r = await store.getSetting(req.params.key);
         // A missing setting is null rather than a 404 — callers read `.value` and
         // fall back to a default, which is the existing behaviour.
-        return { status: 200, data: { value: r ? r.value : null, updatedAt: r ? r.updatedAt : null } };
+        return { status: 200, data: { value: r ? redactSetting(req.params.key, r.value) : null, updatedAt: r ? r.updatedAt : null } };
       } catch { return { status: 500, data: { error: "Failed to load setting" } }; }
     },
   });
@@ -512,7 +513,10 @@ export function createApiHandlers(store: ApiAdminStorage) {
         return { status: 400, data: { error: "value is required" } };
       }
       try {
-        const r = await store.setSetting(req.params.key, body.value);
+        // A redacted secret coming back from a form means "keep what is stored".
+        const prev = await store.getSetting(req.params.key);
+        const value = mergeSettingSecrets(req.params.key, body.value, prev ? prev.value : null);
+        const r = await store.setSetting(req.params.key, value);
         return { status: 200, data: { success: true, updatedAt: r.updatedAt } };
       } catch { return { status: 500, data: { error: "Failed to save setting" } }; }
     },

@@ -22,7 +22,7 @@ import {
   runBackup, getLastBackupAt, getAutoBackupEnabled, setAutoBackupEnabled,
   getAutoBackupInterval, setAutoBackupIntervalMinutes, startAutoBackup, stopAutoBackup,
 } from "@/lib/backup";
-import { planRestore, describeRestore, type RestorePlan } from "@shared/backup";
+import { planRestore, describeRestore, mergeRestoredSettings, SETTINGS_TABLE, type RestorePlan } from "@shared/backup";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -344,7 +344,9 @@ export default function SettingsPage() {
       // snapshot leaves everything else untouched instead of clearing it.
       await db.transaction("rw", plan.restore.map(t => db.table(t)), async () => {
         for (const name of plan.restore) {
-          const rows = (snapshot as Record<string, unknown[]>)[name];
+          let rows = (snapshot as Record<string, unknown[]>)[name];
+          // A redacted credential in a snapshot must not overwrite a working one.
+          if (name === SETTINGS_TABLE) rows = mergeRestoredSettings(rows, await db.table(name).toArray());
           await db.table(name).clear();
           if (rows.length) await db.table(name).bulkPut(rows);
         }
