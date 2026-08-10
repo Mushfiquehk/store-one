@@ -149,6 +149,124 @@ half-built than not started (Feature 3 T3 in particular).
 
 ---
 
+## Feature 24 — What is for sale right now: 86-ing, and a menu that knows the time
+
+**Status:** planned
+**Vision pillar:** #2 — *"creating products, combos, discounts, promotions etc."* is the agent's job,
+and "86 the salmon" is the single most common thing an operator would say to one during service.
+Also #1: a menu that offers what the kitchen cannot make is a menu that generates refunds.
+**Depends on:** nothing. Composes with Feature 15 (over-drawn stock suggests what to 86), Feature 22
+(the business-day boundary), and Feature 2 (the agent tool).
+**Added:** 2026-08-10
+
+### The finding
+
+**There is no way to stop selling something without deleting it.**
+
+`Product`, `Variant` and `Modifier` (`client/src/lib/db.ts:14-60`) carry `updatedAt` and `deletedAt`
+and nothing else about whether they can be sold. `availableAsIngredient` on the product is about
+whether a recipe may consume it, not whether a customer may buy it. The POS filters products by name
+and tag (`pos.tsx:95, 114`) and by soft-deletion; there is no other gate. Every product that exists
+is on sale, always.
+
+So an operator who runs out of salmon at 7pm has two options: leave it on the menu and disappoint
+whoever orders it, or delete it. **Deleting it is worse than it looks:**
+
+- It is the same mechanism used for "this item is gone forever", so the two intents become
+  indistinguishable in the data.
+- Re-creating it tomorrow produces a **new `id`**. Feature 13's product mix aggregates by
+  `productId`, so a dish 86'd and restored twice a week splits its own sales history into three
+  products, none of which shows what it actually sells. Feature 10's margins inherit the same split.
+- Feature 1's blueprint matcher ignores soft-deleted rows by design, so an agent re-applying the menu
+  quietly creates a duplicate rather than reviving the original.
+
+**And nothing knows the time.** A `hoursOfOperation` setting exists and is read by the schedule page
+(`schedule.tsx:97`) and the settings page — the store knows when it is open and the menu does not use
+it at all. Breakfast served until 11, a lunch special, a bar menu after 4: none of them are
+expressible, so every item is offered at every hour the till is on.
+
+### The distinction the whole feature rests on
+
+**Unavailable is not deleted.** Deleted means "this is not part of my menu"; unavailable means "not
+right now". They differ in reversibility, in what reports should do with them, and in what an agent
+is allowed to do unprompted. Keeping them as one field is what produces the fragmented history above.
+
+```
+ponytail: one boolean and one optional time window per product. No availability
+calendar, no seasonal schedules, no per-location availability (that is Feature
+3's), no auto-86 from stock levels. The upgrade when an operator runs two
+genuinely different menus is a menu-per-daypart, not a rules engine on this
+boolean.
+```
+
+### Tasks
+
+**T1 — Available, as its own fact** (~15 min)
+- Add `available: boolean NOT NULL DEFAULT true` to products and variants (`shared/schema.ts`,
+  `client/src/lib/db.ts` with a version bump, `server/schema.ts`). Default `true` means every
+  existing row behaves exactly as today.
+- The POS shows unavailable items **greyed out and unselectable, not hidden**. Hidden items generate
+  "do you still have the muffins?" at the counter; a visibly crossed-out item answers it before it is
+  asked. Hiding is also how staff conclude the POS is broken.
+- Put the comment next to the field: `available` is temporary and reversible, `deletedAt` is
+  permanent, and 86-ing must never be implemented as a delete. That sentence is the feature.
+- Check: an unavailable variant cannot be added to a cart, still appears on the menu, and still shows
+  in reports for periods when it did sell.
+
+**T2 — 86 it from where you find out** (~15 min)
+- One long-press or one tap-and-confirm on the POS tile marks an item unavailable. The person who
+  discovers the salmon is gone is holding the till or standing at the pass, not sitting in an admin
+  page — Feature 6's whole thesis is that the operator should not have to become an administrator.
+- **86 persists until someone clears it.** Do not auto-restore overnight: an item that is out on
+  Tuesday night is usually still out on Wednesday morning, and silently re-enabling it sells
+  something nobody has. Instead, show a banner at the start of each business day (Feature 22 T1's
+  boundary) listing what is currently 86'd, so restoring is a deliberate morning decision.
+- Record it in Feature 19's action log with the actor — 86-ing is the fastest way to make an item's
+  sales vanish, and it should be as attributable as a void.
+- Check: 86 an item, confirm it cannot be sold, reload, confirm it is still 86'd, and confirm the
+  next business day opens with a banner naming it rather than quietly restoring it.
+
+**T3 — Items that are only for sale at certain times** (~15 min)
+- Add an optional availability window to the product: `availableFromMinutes`, `availableToMinutes`
+  and a day-of-week mask. Empty means always, which is what every existing row gets.
+- The POS applies it against local time. A window crossing midnight (a late-night menu) must work —
+  test it, because `from > to` is the case that gets written last and breaks first.
+- **Never hard-block.** An out-of-window item is dimmed with its window stated ("Breakfast — until
+  11:00") and can still be rung with a confirm. The same principle as Feature 15 T3: record the
+  truth, do not enforce it. A till that refuses to sell a breakfast burrito at 11:02 is a till the
+  staff will route around, and then nothing is accurate.
+- Check: an item with an 06:00–11:00 window is dimmed at 11:01 and normal at 10:59; an item with a
+  22:00–02:00 window is available at midnight.
+
+**T4 — Let the agent do it, and let stock suggest it** (~15 min)
+- Add `set_availability` to Feature 2's MCP tool table. "86 the salmon" and "put the breakfast menu
+  back on" are the two sentences an operator most wants to say rather than tap, and both are one
+  call.
+- Where Feature 15's ledger shows an ingredient over-drawn, **suggest** the menu items that depend on
+  it as 86 candidates — with the item, the ingredient, and how far negative it is. Suggest, never
+  act: stock counts drift and an auto-86 that removes the top seller at 8am on a bad count is worse
+  than the count being wrong.
+- The agent tool description must say the same thing: propose, show the operator, apply on approval —
+  the read-propose-preview-apply loop this plan keeps converging on.
+- Check: an over-drawn ingredient produces a suggestion naming the dishes that use it and does not
+  change their availability; the agent tool flips a flag and the POS reflects it without a reload.
+
+### Non-goals
+
+Per-location availability (Feature 3 once locations exist), separate menus per daypart, seasonal or
+calendar-based scheduling, automatic 86 from stock levels, quantity-limited items ("only 12 specials
+left" — a real feature and a different one, since it needs a counter that decrements per sale),
+customer-facing availability on any online channel, and availability on modifiers (worth doing, but
+the plumbing is the same and the demand is lower — add it once the product-level version is in use).
+
+### Definition of done
+
+An operator marks something unavailable in one tap from the till, it stays that way until they say
+otherwise, the breakfast items dim themselves at 11, and none of it deletes a product or splits its
+sales history.
+
+---
+
 ## Feature 23 — The kitchen: an order that reaches the people making it
 
 **Status:** planned
