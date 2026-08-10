@@ -32,6 +32,7 @@ its section. They are ordered by what they cost if left alone.
 | **19** | No sale, price change, or adjustment records who made it; the only "current employee" is dialog state cleared on submit | `Sale` has no `employeeId` (`db.ts:142-156`); `app-shell.tsx:57, 85` | Feature 12's void attribution and Feature 15's ledger actor have nothing to record |
 | **15** | Recipe depletion is implemented twice — `pos.tsx:373-436` duplicates `bom-engine.ts:203-293`, and only the POS copy runs on real sales | the two already differ at `pos.tsx:367` vs `bom-engine.ts:224` | Pillar #4's accuracy claim rests on a copy nothing tests |
 | **15** | Stock adjustments clamp at zero and record nothing | `local-storage.ts:257`, `dexie-admin-storage.ts:266`; no ledger table in `db.ts:194-211` | Over-sales vanish; no answer to "where did it go" |
+| **21** | The Settings tax-rate field is bound to `useState` and written nowhere; the till charges a hardcoded 8.25% in every store | `settings.tsx:89, 411-412` (only three mentions of `taxRate` in the file); `pos.tsx:38` — `setTaxRatePct` is never called | Every operator charges the wrong tax and cannot change it |
 | **5** | Combos are ignored by the live order path | `bom-engine.ts` is imported only by `routes.ts:16` for test orders; `/api/orders/simulate` prices inline with a hardcoded 8% tax | Combos charge full price; three different tax rates in the codebase |
 
 ~~**Suggested first session**~~ — **done.** Features 7, 9 and 11 have all landed, which clears the
@@ -144,6 +145,140 @@ All four tasks complete, every `Check:` passing, `npm run check` (tsc) clean, an
 stated "Definition of done" demonstrably true. A feature with three of four tasks done is not
 partially shipped — it is unshipped, and several of these leave the system in a worse state
 half-built than not started (Feature 3 T3 in particular).
+
+---
+
+## Feature 21 — Tax: the rate the operator typed, on the items that are actually taxable
+
+**Status:** planned
+**Vision pillar:** #1 — a POS a new business can operate. Charging the wrong tax is not a rough edge;
+it is the operator's liability at the end of the quarter.
+**Depends on:** nothing. Feature 7 T3 shipped `GET`/`PUT /api/settings/:key`, which is where the rate
+belongs. **Coordinate with Feature 5 T2**, which kills the server order path's hardcoded `0.08` and
+reads the same `tax.ratePct` key — that task owns the server half, this feature owns the client half
+and the model. Neither is a substitute for the other.
+**Added:** 2026-08-10
+
+### The finding
+
+**Every store using this POS charges 8.25%, and the Settings field that appears to change it is not
+connected to anything.**
+
+`client/src/pages/settings.tsx:89` declares `const [taxRate, setTaxRate] = useState(8.25)`. The
+input at `:411` binds to it and `:412` sets it. Those are the **only three occurrences of `taxRate`
+in the file** — no `fetch`, no `PUT`, no store write. The label above it reads *"The default tax rate
+applied to all taxable items."* An operator types their real rate, navigates away, and it is gone.
+The same page persists hours of operation and email settings through `/api/settings` twenty lines
+above, so the mechanism is present and this one field simply does not use it.
+
+Meanwhile the till has its own copy: `pos.tsx:38` is `useState(8.25)`, `:337` computes
+`taxCents = round(subtotal × taxRatePct / 100)`, and `:845` prints **"Tax (8.25%)"** on the summary
+the customer is shown. `setTaxRatePct` is **never called anywhere** — line 38 is its only mention. The
+rate is a constant wearing a state hook.
+
+The plan's triage says there are three tax rates in the codebase. Counted properly there are six
+sites:
+
+| Where | Value |
+|---|---|
+| `client/src/pages/pos.tsx:38` | `8.25` — what customers are actually charged |
+| `client/src/pages/settings.tsx:89` | `8.25` — the field that saves nowhere |
+| `client/src/components/app-shell.tsx:51` | `8.25` — declared, never read, dead |
+| `client/src/pages/home.tsx:79` | `8.25` — in the dead POS Feature 16 T4 deletes |
+| `shared/api-handlers.ts:451` | `0.08` — the server order path (Feature 5 T2) |
+| `client/src/lib/seed-data.ts:353` | `0.0825` — demo sales |
+
+**And everything is taxable.** There is no per-item tax flag anywhere in the live schema — the only
+`taxable` field in the repo is in `home.tsx:27`, the dead page. In most US states prepared food and
+grocery are taxed differently, and gift cards and many packaged goods are not taxed at all; a POS
+that taxes every line at one rate cannot be operated legally in a lot of places it would otherwise
+be a good fit for.
+
+### The shape
+
+The rate is one store setting, read in one place, and **stamped onto the sale**. That last part is
+the piece that is easy to skip and impossible to retrofit: when a jurisdiction changes its rate,
+every historical receipt must still reprint with the rate that was charged, and every prior period
+must still reconcile. A sale that stores only `taxCents` cannot explain itself; one that stores the
+rate can.
+
+```
+ponytail: one rate, one boolean per product, one inclusive/exclusive switch. No
+tax jurisdictions, no rate tables, no Avalara, no address-based lookup. The
+upgrade when an operator opens across a state line is a rate per location
+(Feature 3), not a tax engine.
+```
+
+### Tasks
+
+**T1 — One rate, set by the operator, actually charged** (~15 min)
+- Persist the Settings field to the `tax.ratePct` store setting through the API Feature 7 T3 shipped,
+  and read it in the POS in place of `pos.tsx:38`'s constant. Same key Feature 5 T2 uses — if the two
+  land in either order they must agree on the name, or the server and the till will charge different
+  amounts.
+- Delete the dead copies: `app-shell.tsx:51` (declared and never read) and, once Feature 16 T4
+  removes `home.tsx`, that one goes with the file.
+- **Default to `0`, not `8.25`.** A store with no configured rate charging 8.25% is the same class of
+  error as Feature 10's zero-cost-means-100%-margin: a plausible wrong number that nobody checks.
+  Zero is visibly unconfigured, and Feature 5 T2 already chose zero for the same reason.
+- Surface an unconfigured rate on the Feature 6 setup checklist rather than silently charging nothing
+  forever.
+- Check: set 6.5%, reload, ring a $10.00 item, and confirm $0.65 of tax and a "Tax (6.5%)" label —
+  today both read 8.25% no matter what was typed.
+
+**T2 — Items that are not taxed** (~15 min)
+- Add `taxable: boolean` (default `true`) to products in `shared/schema.ts`, `client/src/lib/db.ts`
+  (Dexie bump) and `server/schema.ts`, editable in the product editor. Default `true` keeps every
+  existing row behaving exactly as it does today.
+- Compute tax over the taxable subtotal only, in **one** place — the pricing module Feature 5 T1
+  creates (`shared/pricing.ts`) — so the till, the server order path and any future channel agree.
+  Do not add a second tax calculation to the POS page.
+- A discount reduces the taxable base proportionally: tax applies to the discounted subtotal, which
+  is the order of operations Feature 5 T3 already fixes. Do not re-decide it here.
+- Check: a cart with one taxable $10 item and one exempt $10 item at 10% produces $1.00 of tax, not
+  $2.00; and an order-level discount reduces the taxable base rather than the tax being taken on the
+  pre-discount total.
+
+**T3 — Tax-inclusive pricing** (~15 min)
+- Add a `tax.inclusive` boolean setting. When true, the menu price already contains the tax and the
+  tax line is *extracted* — `tax = round(total × rate / (100 + rate))` — rather than added. This is
+  how VAT and GST jurisdictions price, and a POS that cannot express it is unusable outside North
+  America.
+- Implement it as one branch in the same pricing function as T2, not as a second path. The receipt
+  must say which mode it was — "Tax included" versus a separate line — because those are different
+  claims about what the customer paid.
+- Check: a $10.00 inclusive price at 10% yields a $10.00 total with $0.91 of tax; the same price
+  exclusive yields $11.00 with $1.00; and rounding across a three-line cart still sums exactly to the
+  order total with no stray cent.
+
+**T4 — Stamp the rate on the sale, and report what was collected** (~15 min)
+- Add `taxRatePct` and `taxInclusive` to the `Sale` row, written at every place a sale is created
+  (`pos.tsx:446`, `shared/api-handlers.ts:464`, `server/bom-engine.ts:440`). Nullable for existing
+  rows; do not backfill a guess about what an old sale was charged.
+- Feature 20's receipt reads them rather than the current setting, so a reprint after a rate change
+  still shows what the customer actually paid. Without this, every historical receipt silently
+  rewrites itself the day the rate changes.
+- Add tax collected for the period to the reports page — operators file this monthly or quarterly and
+  currently have to derive it by hand. It is a sum of `taxCents` over Feature 13's window; do not
+  recompute it from rates.
+- Check: change the store rate after ringing a sale, then reprint that sale and confirm it still
+  shows the old rate and the same tax; and confirm the period's tax total equals the sum of the
+  stored `taxCents`, not a rate applied to revenue.
+
+### Non-goals
+
+Multiple tax jurisdictions and rate tables, address- or location-based rate lookup (a rate per
+location is Feature 3's shape once locations exist), tax categories beyond one taxable flag, tax
+holidays, exemption certificates and tax-exempt customers, filing or remittance, and integration with
+any tax service. **Rounding is per order, not per line**, matching what the code does today — this
+feature must not quietly change it, and if a jurisdiction requires per-line rounding that is a
+separate, deliberate change with its own tests.
+
+### Definition of done
+
+The rate an operator types is the rate their customers are charged, exempt items are not taxed,
+inclusive pricing works, and every sale carries the rate it was rung at so old receipts and old
+periods still tell the truth after the rate changes.
 
 ---
 
