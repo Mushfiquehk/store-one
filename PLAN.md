@@ -149,6 +149,135 @@ half-built than not started (Feature 3 T3 in particular).
 
 ---
 
+## Feature 23 — The kitchen: an order that reaches the people making it
+
+**Status:** planned
+**Vision pillar:** #1 — "setup **and operate**", and #4 indirectly: a half-and-half pizza with
+unlimited toppings is a recipe-costing triumph and a kitchen disaster if the toppings never reach the
+person building it.
+**Depends on:** nothing. **Coordinates with Feature 12** — see the status collision below, which must
+be resolved whichever of the two lands first.
+**Added:** 2026-08-10
+
+### The finding
+
+**Nothing in this system tells anyone to make anything.**
+
+The only view of an in-flight order is `client/src/components/order-receipts.tsx`, rendered inside
+the POS page on the cashier's own device. It filters
+`closedAt === null && customerName !== undefined && status === "completed"` (`:142`) and offers one
+action: **Close Order** (`:123`). That is the entire order lifecycle — a sale is born closed-ready and
+someone eventually clicks a button on the till.
+
+Three consequences, in order of how much they hurt on a busy morning:
+
+1. **There is no kitchen-facing view at all.** No route, no second screen, no station. The person on
+   bar or on the line reads the cashier's tablet over their shoulder, or the cashier calls the order
+   out loud. `grep -rin "kitchen\|prepStatus\|fired\|readyAt\|station"` across `client/src`, `server`
+   and `shared` returns one hit — a menu label in `products.tsx:22`.
+2. **An order rung without a customer name never appears anywhere.** That `customerName !== undefined`
+   filter (already flagged in Feature 20) means the rail silently omits it. On the till it is a
+   missing row; for the kitchen it would be a drink nobody makes.
+3. **There is no order number.** `customerName` is the only human-sayable identifier a sale has, and
+   it is optional. Two customers called Sarah, or one who declined to give a name, and the counter
+   has no way to hand the right cup to the right person.
+
+And the modifiers — the thing pillar #4 is built around — are stored on `linesJson` and displayed
+only in that one rail. The system can cost a half-and-half pizza to the gram and cannot tell the
+kitchen which half.
+
+### The status collision — resolve this before either feature is built
+
+`adminSales.status` (`server/schema.ts:145`) is `"completed"` everywhere and nothing else; Feature 12
+T1 claims that field for the vocabulary `"completed" | "void" | "refund"`.
+
+**Preparation state must therefore be its own field, not another value in `status`.** A voided order
+and a ready order are orthogonal facts — an order can be refunded *because* it was never made — and
+collapsing them into one enum means the first refund of an in-progress ticket has no representable
+state. Add `prepState` (`NEW` | `IN_PROGRESS` | `READY` | `SERVED`) alongside `status`, and note it
+in Feature 12 T1 so whichever lands second does not "tidy up" by merging them.
+
+### The shape
+
+No second application. The app already runs on the device; the kitchen is a route in it — `/kitchen`
+— reading the same store, showing tickets big enough to read from two feet away. A tablet propped on
+the pass is the deployment.
+
+```
+ponytail: /kitchen is a route in the same app over the same Dexie store, polling
+like every other page here. No WebSocket, no push, no separate KDS app, no
+station routing. Cross-device tickets need Feature 8's sync to converge first —
+that is a real dependency, not a nice-to-have, and it is why this cut is
+same-device.
+```
+
+Cross-device is deliberately out. Today the kitchen tablet would need `syncRecords` to carry sales
+reliably, and Feature 8 says plainly that sync does not converge. Shipping a two-device kitchen on
+top of that would produce tickets that appear late, twice, or not at all — worse than the shouting it
+replaces.
+
+### Tasks
+
+**T1 — A preparation state that is not `status`** (~15 min)
+- Add `prepState` to `Sale` (`shared/schema.ts`, `client/src/lib/db.ts` with a version bump,
+  `server/schema.ts`), defaulting to `NEW`, and the transitions `NEW → IN_PROGRESS → READY → SERVED`.
+  Existing rows read as `NEW`; a sale with `closedAt` set reads as `SERVED` so history is not
+  suddenly full of unmade orders.
+- Keep `status` untouched for Feature 12. Add the comment there explaining why the two are separate —
+  that comment is the deliverable, because the merge is what a later reader will otherwise attempt.
+- Record transitions through Feature 19's action log if it has landed, and leave the call site
+  obvious if it has not.
+- Check: an existing seeded sale reads `SERVED` rather than `NEW`; a new sale starts `NEW`; and the
+  type refuses an unknown state.
+
+**T2 — `/kitchen`: the tickets** (~15 min)
+- Add the route and a ticket board: oldest first, each ticket showing its order number, every line
+  with its **modifiers spelled out**, and the elapsed time since it was rung. Type large — this is
+  read at arm's length by someone with their hands full.
+- Removals must not look like additions. "No onions" and "Add onions" differing only by a word is how
+  an allergy incident happens; render them differently enough to be unmistakable at a glance.
+- One action per ticket: **Ready**. One per line if a ticket is partly done. Nothing else — a kitchen
+  screen with a settings menu is a kitchen screen someone taps by accident mid-service.
+- Check: an order with a modifier appears within one refresh of being rung, shows the modifier, and
+  moves off the active board when marked ready.
+
+**T3 — An order number, and no silently dropped tickets** (~15 min)
+- Give every sale a short daily order number — resets with the business day from Feature 22 T1, so
+  the counter calls "84" rather than a UUID or a name that may not exist.
+- Delete the `customerName !== undefined` filter (`order-receipts.tsx:142`). Every open order belongs
+  on both the rail and the board; a nameless order is the common case, not an exception.
+- Show the number on Feature 20's receipt, so a customer's paper and the counter's shout agree.
+- Check: three orders rung with no names get 1, 2 and 3 and all appear on the board; the numbers reset
+  the next business day rather than climbing forever.
+
+**T4 — How long things actually take** (~15 min)
+- Store `readyAt` and report ticket time — rung to ready — for the period: median and worst, and the
+  items that are slowest. An operator guessing at their ticket times is guessing at their staffing,
+  and Feature 14 is about to give them the labour cost of that guess.
+- Show the current board's oldest ticket age prominently. The single most useful number during
+  service is "the oldest thing waiting", and it is the one a queue of cards buries.
+- **Do not build alerting or escalation.** A colour change past a threshold is enough; a POS that
+  starts paging people is a product decision nobody asked for.
+- Check: a ticket marked ready five minutes after it was rung reports five minutes; a period with no
+  tickets reports no median rather than zero.
+
+### Non-goals
+
+Multi-device and cross-tablet tickets (needs Feature 8 to converge — stated above and meant), station
+routing and multi-station tickets, course firing and coursing, table and seat management, printed
+kitchen chits (Feature 20 already declines the printer stack), bump bars, recall of a bumped ticket
+beyond an undo, prep-time prediction, delivery and online-order intake, and any alerting. Table
+service — tabs, seats, transfers — is a genuinely different product shape and would be its own
+feature, not an extension of this one.
+
+### Definition of done
+
+Every order rung appears on a kitchen screen within seconds, with its modifiers legible and its
+number visible, someone marks it ready, and the operator can see afterwards how long the morning's
+tickets actually took.
+
+---
+
 ## Feature 22 — Close of day: what should be in the drawer, and what is
 
 **Status:** planned
