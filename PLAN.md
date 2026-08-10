@@ -26,7 +26,7 @@ its section. They are ordered by what they cost if left alone.
 | ~~**11**~~ | ~~`lastPurchasePrice` stores price per *purchased* unit; recipes consume *stocking* units~~ **Fixed** — `shared/units.ts` | ~~`storage.ts:910`~~ | — |
 | **8** | Sync compares Drizzle rows to Dexie records via `JSON.stringify`, so they never match | `storage.ts:~270` vs `sync.ts:97` — differing key order and field set | Every menu record re-pushed to every client on every sync, forever |
 | **8** | Conflict resolution reads `adminUpdatedAt` but never compares it | `storage.ts:215+` | Newer POS edits silently discarded |
-| **17** | The stored SMTP password is returned by `GET /api/settings`, pre-filled into a form, and included in every backup | `api-handlers.ts:467-472`; `settings.tsx:109, 580`; `db.ts:462` → `backup.ts:32` | An operator's real mail credential leaks to anyone who can reach the server or fetch a backup |
+| ~~**17**~~ | ~~The stored SMTP password is returned by `GET /api/settings`, pre-filled into a form, and included in every backup~~ **Fixed** — `SECRET_SETTING_FIELDS`, `shared/schema.ts` | ~~`api-handlers.ts:467-472`~~ | — |
 | **16** | Whether the till can record a card sale depends on ephemeral React state | `pos.tsx:133` reads `integrations`, which is `useState([])` at `store.tsx:129` | Every reload puts the store back to cash-only |
 | **16** | "Integration Connected — Successfully linked to provider" is a toast over a no-op | `store.tsx:236-241` — no network call, no persistence | Pillar #3's only surface is a prop |
 | **19** | No sale, price change, or adjustment records who made it; the only "current employee" is dialog state cleared on submit | `Sale` has no `employeeId` (`db.ts:142-156`); `app-shell.tsx:57, 85` | Feature 12's void attribution and Feature 15's ledger actor have nothing to record |
@@ -41,10 +41,10 @@ its section. They are ordered by what they cost if left alone.
 three defects that cost the most: silently discarded sales, a backup that could wipe a device, and
 costs wrong by orders of magnitude.
 
-**Start with the three that are cheap and depend on nothing:** **Feature 17 T1** (stop returning the
-stored SMTP password from `GET /api/settings` — a credential leak, and the whole task is a redaction
-map and two handlers), **Feature 16 T1** (the till drops to cash-only on every reload), and
-**Feature 15 T1** (delete one of the two copies of the depletion walk before either drifts further).
+~~**Feature 17 T1**~~ — **done**, along with the rest of Feature 17: the credential leak is closed.
+**Start with the two that are left and depend on nothing:** **Feature 16 T1** (the till drops to
+cash-only on every reload) and **Feature 15 T1** (delete one of the two copies of the depletion walk
+before either drifts further).
 
 **Then**, in this order: **Feature 10** (margins — both of its blockers, 11 and 13, have now landed,
 so its inputs are finally true), then **Feature 14** (labour, which needs 13's real revenue as its
@@ -1183,7 +1183,12 @@ the number means something.
 
 ## Feature 17 — The SMTP password is in the backup, and in every settings response
 
-**Status:** T1 done — `SECRET_SETTING_FIELDS`, `redactSetting` and `mergeSettingSecrets` live in
+**Status:** done — T1–T4 complete. A stored credential is write-only through the API, absent from
+backups, never sent to the browser, and verifiable with a test email. One map,
+`SECRET_SETTING_FIELDS`, is the whole mechanism; a map-driven assertion in
+`shared/api-handlers.test.ts` keeps the next credential from re-opening the hole.
+
+T1 done — `SECRET_SETTING_FIELDS`, `redactSetting` and `mergeSettingSecrets` live in
 `shared/schema.ts`; both settings read handlers redact, and `PUT` merges a marker or absent secret
 over the stored value (`shared/api-handlers.ts:479-524`, tests in `shared/api-handlers.test.ts`).
 T2 done — `redactSettingsRows` / `mergeRestoredSettings` in `shared/backup.ts` (tested); `buildSnapshot`
@@ -1193,7 +1198,10 @@ T3 done — the email card shows "Configured" with a **Replace** action instead 
 abandoned Replace re-sends the marker rather than blanking the credential, and **Send test email**
 (`POST /api/settings/emailConfig/test`) verifies the configuration without reading it back. Both it
 and `/api/schedule/publish` build their transport from one `mailTransport()` in `server/routes.ts`.
-T4 remains: the docs note, and pointing Features 16 and 4 at the same map.
+T4 done — the map-driven assertion covers both read handlers and fails if either leaks (verified by
+sabotaging `redactSetting`), Features 16 T3 and 4 T1 now point at this mechanism instead of inventing
+their own, and `docs/local-setup.md` states what is stored, what a backup contains, and that the
+settings API is unauthenticated until Feature 4 lands.
 **Vision pillar:** #3 — third-party services need credentials, and this plan is about to add more of
 them (Feature 16's integrations, Feature 4's API tokens). Also #1: losing an operator's email
 account is not a foundation.
@@ -1431,7 +1439,9 @@ upgrade when a real terminal lands is one integration whose status flips to
   a demo" is how `hasPaymentIntegration` came to gate real money.
 - When an integration does become `available`, its connected-state lives in store settings under
   `integrations.<id>`, the same mechanism as T1 — **no credentials in `localStorage`**, and no new
-  table for a list that is currently six rows long.
+  table for a list that is currently six rows long. Any credential it grows goes in
+  `SECRET_SETTING_FIELDS` (`shared/schema.ts`, Feature 17 T1) — one line, and it is then absent from
+  every settings response and every backup. Do not invent a second redaction path.
 - Keep the page and its nav entry. Pillar #3 is a real promise and the page is where an operator will
   look for it; the fix is for it to describe a roadmap rather than simulate a product.
 - Check: no click anywhere on the page produces a "Successfully linked" toast, and a reload changes
@@ -2950,7 +2960,9 @@ part. **Feature 3 T2 should be treated as superseded by this feature's T3.**
   here needs a stateless self-describing token, and a random 32-byte string in a table is simpler
   to reason about and trivially revocable.
 - **Store hashes, never the token.** The plaintext token is shown exactly once, at mint time. A
-  database leak should not hand over live credentials.
+  database leak should not hand over live credentials. This is Feature 17's write-only rule applied
+  to a value the server never needs back at all — so no entry in `SECRET_SETTING_FIELDS` is needed
+  here, and no read path may return a token, hashed or otherwise.
 - **The local server is exempt.** `client/src/lib/local-server.ts` binds `127.0.0.1` and serves the
   device's own IndexedDB to the app running on that device. Requiring a token there adds a secret to
   manage on every tablet and protects nothing that the device's own lock screen does not.

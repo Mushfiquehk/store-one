@@ -154,14 +154,30 @@ test("a stored credential is never in a settings response, and survives a redact
   assert.equal(storedValue(store, "emailConfig").password, "next");
 });
 
-test("every secret field in the map is redacted, not just emailConfig's", async () => {
+// This is the assertion that has to outlive the feature: it reads the map rather than
+// naming emailConfig, so the next credential added to SECRET_SETTING_FIELDS is covered
+// the moment it is added — and a credential added as a plain setting, outside the map,
+// is the failure this cannot catch. Adding one to the map is the whole job.
+test("no read handler returns any value the secret map covers", async () => {
   for (const [key, fields] of Object.entries(SECRET_SETTING_FIELDS)) {
-    const h = createApiHandlers(stubStore());
+    const store = stubStore();
+    const h = createApiHandlers(store);
     const value = Object.fromEntries(fields.map(f => [f, `plain-${f}`]));
     await call(h, "PUT", `/api/settings/${key}`, { value });
-    const body = JSON.stringify((await call(h, "GET", "/api/settings")).data);
+
+    // Both exits: the list and the single-key read.
+    const bodies = [
+      ["GET /api/settings", (await call(h, "GET", "/api/settings")).data],
+      [`GET /api/settings/${key}`, (await call(h, "GET", `/api/settings/${key}`)).data],
+    ] as const;
+    for (const [where, body] of bodies) {
+      for (const f of fields) {
+        assert.ok(!JSON.stringify(body).includes(`plain-${f}`), `${key}.${f} leaked from ${where}`);
+      }
+    }
+    // ...and the value really is stored, so the test cannot pass by dropping the write.
     for (const f of fields) {
-      assert.ok(!body.includes(`plain-${f}`), `${key}.${f} leaked from GET /api/settings`);
+      assert.equal(storedValue(store, key)[f], `plain-${f}`);
     }
   }
 });

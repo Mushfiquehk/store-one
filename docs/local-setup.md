@@ -119,6 +119,34 @@ The Express server **automatically creates all tables** on first start (no migra
 
 ---
 
+## Stored credentials
+
+The only credential the app stores on your behalf today is the **SMTP password** for the mail account
+that sends published schedules. It lives in the `settings` table under `emailConfig`, in plaintext —
+it has to be usable to authenticate against your mail server.
+
+What that means in practice:
+
+| | |
+|---|---|
+| **The API never returns it.** | `GET /api/settings` and `GET /api/settings/emailConfig` return `"__SET__"` in its place. Saving that marker back means "keep the stored value", so a save from the Settings page cannot blank it. |
+| **The Settings page never receives it.** | The password field shows *Configured* with a **Replace** action. Use **Send test email** to check the configuration — there is no need, ever, to read the value back. |
+| **Backups do not contain it.** | The snapshot uploaded by the backup card is redacted field-by-field. The rest of `settings` (hours of operation, tax rate) still travels; restoring a snapshot leaves this device's stored password alone. |
+| **Sync does not carry it.** | `settings` is not in `SYNC_CATEGORY_TABLES`. |
+| **It is not encrypted at rest.** | Anyone with the Postgres credentials above, or the device's IndexedDB, can read it. |
+
+The single list of what counts as a secret is `SECRET_SETTING_FIELDS` in `shared/schema.ts`. A new
+credential — a payment provider key, a supplier API token — belongs in that map, and is then redacted
+at every exit automatically. A credential stored as an ordinary setting is *not* protected.
+
+> **Until API tokens land (Feature 4), the settings API is unauthenticated.** Anything that can reach
+> the Express port can write settings, and read every non-secret one. Run this on your own network,
+> and do not put a mail credential you care about — a personal or shared business mailbox — on a
+> server reachable from the internet. A dedicated sending account you can revoke is the right choice
+> regardless.
+
+---
+
 ## Troubleshooting
 
 ### "password authentication failed for user postgres"
