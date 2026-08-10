@@ -87,6 +87,8 @@ export const adminInventoryItems = pgTable("admin_inventory_items", {
   unitOfMeasure: text("unit_of_measure").notNull().default("each"),
   currentQuantity: doublePrecision("current_quantity").notNull().default(0),
   lowStockThreshold: doublePrecision("low_stock_threshold"),
+  // Cents per *stocking* unit — the unit billOfMaterials.quantityDeducted is in. An invoice
+  // quotes cents per purchase unit; shared/units.ts converts on the way in.
   lastPurchasePrice: doublePrecision("last_purchase_price"),
   // An item is bought in one unit and consumed in another: purchaseUnit labels the bought one
   // ("bag"), unitsPerPurchase says how many stocking units come in it. Default 1 is today's

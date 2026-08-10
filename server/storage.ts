@@ -9,6 +9,7 @@ import {
 import type { Client, Backup, SyncRecord } from "./schema";
 import type { StoreSetting } from "../shared/api-handlers";
 import { eq, desc, sql, and, gt, inArray, isNull, count } from "drizzle-orm";
+import { costPerStockUnit } from "../shared/units";
 
 export interface ListOptions {
   limit?: number;
@@ -928,8 +929,11 @@ export const adminStorage: IAdminStorage = {
       const existing = await db.select().from(adminInventoryItems).where(eq(adminInventoryItems.id, lineItem.inventoryItemId)).limit(1);
       if (existing.length > 0) {
         await db.update(adminInventoryItems).set({
-          lastPurchasePrice: lineItem.unitPriceCents,
-          currentQuantity: existing[0].currentQuantity + lineItem.quantity,
+          // The invoice quotes a price per purchase unit; lastPurchasePrice is per stocking unit.
+          lastPurchasePrice: costPerStockUnit(lineItem.unitPriceCents, existing[0].unitsPerPurchase),
+          // The line is quoted in purchase units, and stock is counted in stocking units:
+          // one gallon received is 128 oz on hand, not 1.
+          currentQuantity: existing[0].currentQuantity + stockUnitsReceived(lineItem.quantity, existing[0].unitsPerPurchase),
           updatedAt: now,
         }).where(eq(adminInventoryItems.id, lineItem.inventoryItemId));
       }
