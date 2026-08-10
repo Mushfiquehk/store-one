@@ -26,6 +26,8 @@ its section. They are ordered by what they cost if left alone.
 | **11** | `lastPurchasePrice` stores price per *purchased* unit; recipes consume *stocking* units | `storage.ts:910`; seed data implies $4.50/oz milk, $12/oz espresso beans | Every cost and margin wrong by orders of magnitude |
 | **8** | Sync compares Drizzle rows to Dexie records via `JSON.stringify`, so they never match | `storage.ts:~270` vs `sync.ts:97` — differing key order and field set | Every menu record re-pushed to every client on every sync, forever |
 | **8** | Conflict resolution reads `adminUpdatedAt` but never compares it | `storage.ts:215+` | Newer POS edits silently discarded |
+| **16** | Whether the till can record a card sale depends on ephemeral React state | `pos.tsx:133` reads `integrations`, which is `useState([])` at `store.tsx:129` | Every reload puts the store back to cash-only |
+| **16** | "Integration Connected — Successfully linked to provider" is a toast over a no-op | `store.tsx:236-241` — no network call, no persistence | Pillar #3's only surface is a prop |
 | **15** | Recipe depletion is implemented twice — `pos.tsx:373-436` duplicates `bom-engine.ts:203-293`, and only the POS copy runs on real sales | the two already differ at `pos.tsx:367` vs `bom-engine.ts:224` | Pillar #4's accuracy claim rests on a copy nothing tests |
 | **15** | Stock adjustments clamp at zero and record nothing | `local-storage.ts:257`, `dexie-admin-storage.ts:266`; no ledger table in `db.ts:194-211` | Over-sales vanish; no answer to "where did it go" |
 | **5** | Combos are ignored by the live order path | `bom-engine.ts` is imported only by `routes.ts:16` for test orders; `/api/orders/simulate` prices inline with a hardcoded 8% tax | Combos charge full price; three different tax rates in the codebase |
@@ -94,7 +96,8 @@ there. Either land features serially, or expect to resolve that file on every me
 | `server/storage.ts` | 3 (~40 methods), 11 (the invoice-receive path) |
 | `server/routes.ts` | 3, 4, 6 (moves the demo-clear handler out), 7 (the adapter stubs) |
 | `server/bom-engine.ts` | 5 (pricing, `:295-335`), 15 (depletion, `:203-293`) — different regions |
-| `client/src/pages/pos.tsx` | 15 (deletes the duplicated depletion walk) |
+| `client/src/pages/pos.tsx` | 15 (deletes the duplicated depletion walk), 16 (payment dialog, `:900-960`) |
+| `client/src/lib/store.tsx` | 16 (deletes the `integrations` state and its toggle) |
 | `client/src/lib/db.ts` | 9 (backup list), 11 (two columns), 12 (reversal fields), 15 (ledger table) |
 | `client/src/lib/local-storage.ts` | 11 (two copies of the same receive path) |
 | `client/src/components/product-wizard.tsx` | 11 (deletes the duplicated cost arithmetic) |
@@ -134,6 +137,148 @@ All four tasks complete, every `Check:` passing, `npm run check` (tsc) clean, an
 stated "Definition of done" demonstrably true. A feature with three of four tasks done is not
 partially shipped — it is unshipped, and several of these leave the system in a worse state
 half-built than not started (Feature 3 T3 in particular).
+
+---
+
+## Feature 16 — Taking money: a card button that survives a reload, and an integrations page that does not lie
+
+**Status:** planned
+**Vision pillar:** #3 — *"optional add-on features that the operator can setup and pay for later. The
+operator can optionally integrate 3rd party vendors."* This pillar has a page, a nav entry, and no
+implementation. Also #1: "setup **and operate**" — operating a till means taking the money.
+**Depends on:** nothing unshipped. Feature 7 T3 already landed store settings on both servers, which
+is where T1's configuration belongs. **This feature is implementable today.**
+**Added:** 2026-08-09
+
+### The finding
+
+**The Integrations page is a prop.** `client/src/pages/integrations.tsx` renders six provider cards
+defined as object literals inside the component body (`:13-23`) — Sysco Connect, US Foods, Local
+Farms API, Stripe Terminal, Square Reader, Toast Connect. Connecting one calls `toggleIntegration`,
+which is:
+
+```ts
+// client/src/lib/store.tsx:236-241
+const toggleIntegration = useCallback((id: string) => {
+  setIntegrations(prev => {
+    if (prev.includes(id)) return prev.filter(i => i !== id);
+    toast({ title: "Integration Connected", description: "Successfully linked to provider." });
+```
+
+`setIntegrations` is React `useState<string[]>([])` (`store.tsx:129`). No network call, no
+persistence, no credential, no provider on the other end. The toast says *"Successfully linked to
+provider"* about a provider that was never contacted, and the whole thing **evaporates on reload**.
+On the admin path it is worse: `admin-store.tsx:129` declares the same field with no setter at all,
+so it is permanently `[]`.
+
+This is the Feature 7 failure again — reporting success for something that did not happen — except
+here it is the one page the product points at for pillar #3.
+
+**And it is load-bearing.** `pos.tsx:133` computes
+`hasPaymentIntegration = integrations.some(id => id.startsWith('pay_'))`, and that flag gates the
+**Card** button in the payment dialog (`pos.tsx:922-928`, `disabled={!hasPaymentIntegration}`, with
+the label *"(Setup Integration)"*), while `handleConfirmOrder` forces `Cash` when it is false
+(`:350`). So:
+
+- Every reload puts the till back to **cash only**. A store that takes cards has to re-click a fake
+  toggle each time the tablet restarts, and nothing on screen explains that.
+- The gate protects nothing. "Connecting" Stripe Terminal starts no payment flow, charges no card,
+  and returns no authorisation — it only unlocks the ability to *label* a sale as Card.
+
+The two facts together are the real defect: **whether a store can record a card sale depends on
+ephemeral React state**, and the honest version of that decision — "this store accepts cards" — is
+not stored anywhere.
+
+**Cash is not recorded either.** A grep for `tender`, `changeDue`, `amountPaid` or `cashGiven`
+across `client/src`, `server` and `shared` returns nothing. The payment dialog shows Total Due and
+two buttons (`pos.tsx:900-960`); it never asks what the customer handed over, so there is no change
+due to hand back and no expected drawer figure at close. A cash sale records the total and nothing
+about the money.
+
+**A second, dead copy of all of this exists.** `client/src/pages/home.tsx` is 1,141 lines with its
+own cart, its own `paymentMethod` state (`:97`), and its own sale-recording path (`:274`). It is
+imported by nothing — `App.tsx` routes `/` to `pos.tsx` and never mentions `home`. Any fix to the
+payment path has a coin-flip chance of being applied to the file that does not run.
+
+### The shape
+
+What a store accepts is **configuration**, not an integration status. Most small operators take cards
+on a standalone terminal from their bank and want the POS to record the tender — that is a supported
+setup, not a missing feature, and the current design has no way to express it.
+
+```
+ponytail: accepted tender types are a store setting and a string on the sale.
+No processor SDK, no payment state machine, no auth/capture, no webhooks. The
+upgrade when a real terminal lands is one integration whose status flips to
+'available' — the setting and the sale field do not change shape.
+```
+
+### Tasks
+
+**T1 — Accepted tender types become a store setting** (~15 min)
+- Store `payments.methods` (default `["Cash", "Card"]`) through the settings API Feature 7 T3 put on
+  both servers (`GET`/`PUT /api/settings/:key`). Add it to the Settings page beside the other store
+  configuration, not to the Integrations page — this is a property of the business, not of a vendor.
+- Replace `hasPaymentIntegration` (`pos.tsx:133`) with a read of that setting. Render one button per
+  accepted method rather than a hardcoded Card/Cash pair, and delete the `(Setup Integration)`
+  label — it points at a page that cannot deliver what it promises.
+- A store must be left with at least one method. Saving an empty list is the one input here that can
+  brick a till, so reject it rather than trusting the UI to prevent it.
+- Check: enable Card, reload the page, and confirm Card is still selectable — that single assertion
+  is the whole bug. Then set the store to cash-only and confirm Card cannot be chosen.
+
+**T2 — Cash tender and change due** (~15 min)
+- Add `tenderedCents` and `changeCents` to `Sale` (`shared/schema.ts`, `client/src/lib/db.ts`, and
+  the Dexie version bump), both nullable so existing rows stay readable.
+- In the payment dialog, a Cash sale asks for the amount tendered — with quick buttons for the exact
+  total and the next round notes — and shows the change due before the sale is recorded. Change is
+  `tendered - total`, computed in one place and never negative: an under-tender is a blocked
+  confirm, not a negative change.
+- A non-cash sale records `tenderedCents = totalCents` and `changeCents = 0`. Not null — the day's
+  cash expectation is a sum over this column, and a null in the middle of it is a hole nobody can
+  distinguish from a zero.
+- Check: $20.00 against a $13.75 total shows $6.25 and stores both numbers; $10.00 against $13.75
+  cannot be confirmed; a card sale stores tendered equal to the total.
+
+**T3 — An integrations page that states what is true** (~15 min)
+- Move the six provider literals out of the component into `shared/integrations.ts`, each with a
+  `status: "available" | "planned"`. **Every one of them is `planned` today** — none has an
+  implementation — so each card says so plainly and offers no toggle. A disabled card that says
+  "not available yet" is honest; a working toggle that persists nothing is not.
+- Delete `toggleIntegration` and the `integrations` state from both stores (`store.tsx:129, 236-241`,
+  `admin-store.tsx:129`) once nothing reads them. Leaving a fake toggle behind because it is "only
+  a demo" is how `hasPaymentIntegration` came to gate real money.
+- When an integration does become `available`, its connected-state lives in store settings under
+  `integrations.<id>`, the same mechanism as T1 — **no credentials in `localStorage`**, and no new
+  table for a list that is currently six rows long.
+- Keep the page and its nav entry. Pillar #3 is a real promise and the page is where an operator will
+  look for it; the fix is for it to describe a roadmap rather than simulate a product.
+- Check: no click anywhere on the page produces a "Successfully linked" toast, and a reload changes
+  nothing about what the page shows.
+
+**T4 — Delete the dead second POS** (~15 min)
+- Remove `client/src/pages/home.tsx`. Confirm it first — `grep -rn "pages/home" client/src` returns
+  nothing and `App.tsx` routes `/` to `pos.tsx` — then delete it rather than leaving 1,141 lines of
+  parallel cart, pricing and payment code for the next reader to fix by mistake.
+- If any of it is genuinely wanted, take that part into `pos.tsx` in this task and delete the rest.
+  What must not happen is the file surviving as a reference copy; that is how the two depletion
+  copies in Feature 15 came about.
+- Check: `npm run check` is clean and the app builds with the file gone.
+
+### Non-goals
+
+Real processor integration (Stripe/Square terminal handshakes, auth/capture, webhooks, refunds to a
+card), tips and tip-outs, split tender across two methods on one sale, gift cards, and offline card
+queuing. **Cash-drawer reconciliation — an opening float, a shift close, and an over/short figure —
+is the obvious next feature** and is why T2 stores the tender rather than only the change: without
+that column there is nothing to reconcile against. Feature 12 lists it as a non-goal too; whichever
+of these lands first, the drawer is its own entry, not a fifth task here.
+
+### Definition of done
+
+A store configures which payment methods it accepts, that survives a reload, a cash sale shows the
+change the customer is owed and records what they handed over, the Integrations page says truthfully
+that nothing is connected yet, and there is exactly one POS page in the codebase.
 
 ---
 
