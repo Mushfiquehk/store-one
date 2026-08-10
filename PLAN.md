@@ -33,6 +33,7 @@ its section. They are ordered by what they cost if left alone.
 | **15** | Recipe depletion is implemented twice — `pos.tsx:373-436` duplicates `bom-engine.ts:203-293`, and only the POS copy runs on real sales | the two already differ at `pos.tsx:367` vs `bom-engine.ts:224` | Pillar #4's accuracy claim rests on a copy nothing tests |
 | **15** | Stock adjustments clamp at zero and record nothing | `local-storage.ts:257`, `dexie-admin-storage.ts:266`; no ledger table in `db.ts:194-211` | Over-sales vanish; no answer to "where did it go" |
 | **21** | The Settings tax-rate field is bound to `useState` and written nowhere; the till charges a hardcoded 8.25% in every store | `settings.tsx:89, 411-412` (only three mentions of `taxRate` in the file); `pos.tsx:38` — `setTaxRatePct` is never called | Every operator charges the wrong tax and cannot change it |
+| **22** | Nothing ever asks how much cash is in the drawer — no float, no count, no over/short, no trading day | `grep -rin "drawer\|openingFloat\|cashCount\|endOfDay"` returns nothing | Every other defect in this table is undetectable in daily operation |
 | **5** | Combos are ignored by the live order path | `bom-engine.ts` is imported only by `routes.ts:16` for test orders; `/api/orders/simulate` prices inline with a hardcoded 8% tax | Combos charge full price; three different tax rates in the codebase |
 
 ~~**Suggested first session**~~ — **done.** Features 7, 9 and 11 have all landed, which clears the
@@ -145,6 +146,136 @@ All four tasks complete, every `Check:` passing, `npm run check` (tsc) clean, an
 stated "Definition of done" demonstrably true. A feature with three of four tasks done is not
 partially shipped — it is unshipped, and several of these leave the system in a worse state
 half-built than not started (Feature 3 T3 in particular).
+
+---
+
+## Feature 22 — Close of day: what should be in the drawer, and what is
+
+**Status:** planned
+**Vision pillar:** #1 — "setup **and operate**". Counting the drawer is the one thing a cash business
+does every single day, and it is the only routine check that catches theft, mis-rings and
+mis-configuration at all.
+**Depends on:** Feature 16 T2 for `tenderedCents` / `changeCents` (T2 below degrades honestly
+without them), Feature 19 T1 for who counted. Named as "the obvious next feature" in both Feature 12's
+and Feature 16's non-goals — this is that entry.
+**Added:** 2026-08-10
+
+### The finding
+
+`grep -rin "drawer\|shiftStart\|openingFloat\|cashCount\|zreport\|endOfDay\|closeout"` across
+`client/src`, `server` and `shared` returns **nothing**. There is no shift, no session, no opening
+float, no cash count, no over/short, and no notion of a trading day closing at all.
+
+What exists is `paymentMethod` on the sale (`db.ts:148`) — a string, `"Cash"` or `"Card"`. So the
+system knows how much cash it *should* have taken and has never once been asked how much is actually
+in the till. Nothing compares the two, because there is nothing to compare against: no starting
+amount, no ending count.
+
+The consequence is that **every failure this plan has documented is undetectable in practice**. A
+mis-configured tax rate (Feature 21), a void that walked out with the cash (Feature 12), a sale rung
+on the wrong item, a cashier taking a twenty — the drawer count is how a small operator finds out
+any of them happened, usually the same evening. Without it, the first signal is the accountant, months
+later, and by then the pattern is unrecoverable.
+
+This is also the feature that makes the others' numbers checkable. Feature 13 makes revenue real, but
+"real" there means "correctly summed from what was rung". A drawer count is the only place the system
+touches physical reality and can be wrong out loud.
+
+### The design points that matter
+
+**Count blind.** The expected figure must not be shown until the count is entered. A count taken with
+the target on screen is not a count — anyone skimming can simply enter the expected number, and the
+one control the operator has evaporates. This is the whole feature's integrity in one UI decision.
+
+**A trading day is not a calendar day.** A store closing at 1am must have those sales in the day that
+began the previous morning. Feature 13 T1 already establishes local-time bucketing for reports;
+this feature needs a business-day boundary (a `day.startHour` setting, default 4am) and the two must
+use the same rule or the day's sales report and the day's drawer will disagree by exactly the
+after-midnight trade.
+
+**Over/short is not revenue.** A $12 shortage did not reduce sales; it is a separate line. Feature 18
+must show it as its own item, not folded into either revenue or expenses — the same double-counting
+care that feature applies to purchases versus COGS.
+
+```
+ponytail: one session row per drawer per day, opened with a float and closed
+with a single counted total. No denomination breakdown, no blind-recount
+workflow, no mid-shift skims, no multi-drawer assignment. Per-denomination
+counting is the upgrade the first time an operator asks why the count is off by
+a roll of quarters.
+```
+
+### Tasks
+
+**T1 — The drawer session** (~15 min)
+- Add a `drawerSessions` table (`shared/schema.ts`, `client/src/lib/db.ts` with a version bump, and
+  the `crudEntities` line in `shared/api-handlers.ts`): `id`, `openedAt`, `openedByEmployeeId`,
+  `openingFloatCents`, `closedAt`, `closedByEmployeeId`, `countedCents`, `expectedCents`,
+  `varianceCents`, `note`.
+- One open session at a time on a device. Opening while one is open is an error, not a second row —
+  two overlapping sessions make every sale ambiguous about which drawer it belongs to.
+- Add a `day.startHour` setting (default 4) and derive the session's sales window from it rather than
+  from midnight.
+- Do **not** block selling when no session is open. A till that refuses to sell because nobody
+  clicked "open drawer" is a till that gets worked around; an unattached sale is attributed to the
+  session that covers its timestamp when one is opened later.
+- Check: opening a session and closing it produces one row with both timestamps; a second open while
+  one is live is rejected; a sale rung at 1am belongs to the session that opened the previous
+  morning.
+
+**T2 — What should be in there** (~15 min)
+- Add `shared/drawer.ts` with a pure `expectedCash(session, sales, movements)`:
+  `openingFloat + cash tendered − change given + paid in − paid out`. Pure over the existing types,
+  the same shape as `shared/labor.ts` and `shared/reports.ts`.
+- **Degrade honestly without Feature 16 T2.** Until tender and change are recorded, cash taken is
+  approximated by the totals of cash sales, which is right whenever change came from the drawer and
+  cannot see a cash sale settled from a pocket. Return the figure with a flag saying which basis was
+  used; do not present an approximation as a count.
+- Add paid-in / paid-out movements — a supplier COD, a till float top-up, petty cash — as rows with
+  a required reason. Cash leaving a drawer with no record is exactly the hole this feature exists to
+  close, and Feature 18's expense categories are where a paid-out lands on the P&L.
+- Check: a session with a $200 float, three cash sales totalling $47.50, $12 tendered against a
+  $10.75 sale, and a $30 paid-out expects $217.50 — and the same computation over the same rows twice
+  returns the same number.
+
+**T3 — Count it blind, and record who** (~15 min)
+- Closing asks for the counted total **before** showing anything else. Only after it is entered does
+  the screen show expected, counted, and the variance. Do not preview the expected figure, do not
+  pre-fill the field, and do not allow "use expected" as a shortcut.
+- Record who counted (Feature 19 T1's active employee) and write one Feature 19 `actionLog` row —
+  `DRAWER_CLOSED` with the variance in its summary. A closed drawer is a decision with money
+  attached; it belongs in the same list as the voids.
+- A variance beyond a configurable threshold (default $5) requires a note before the session can
+  close. Not a block — a note. An operator who is $40 short at 11pm needs to record what they think
+  happened while they still remember it.
+- Check: the expected figure is absent from the DOM until the count is submitted; closing $8 short
+  demands a note; the action log row names the employee and the variance.
+
+**T4 — The pattern, not just the day** (~15 min)
+- Add a close-of-day view: today's session, and the last 30 sessions with their variances. **One bad
+  night is noise; the same cashier short every Thursday is the finding**, and a single-day screen can
+  never show it — which is why this task is part of the feature rather than a later nicety.
+- Show cumulative variance for the period and put it on Feature 18's P&L as its own line, never
+  inside revenue or expenses.
+- Surface the approximation flag from T2 wherever a variance is shown. A variance computed without
+  tender data has a known error bar and must not be presented as if it were exact.
+- Check: three sessions with variances of −$2, +$1 and −$40 show a cumulative −$41 and the −$40 is
+  visibly distinguishable from the noise, not averaged into it.
+
+### Non-goals
+
+Per-denomination counting, mid-shift skims and drops, safe and deposit tracking, multiple drawers per
+device, drawer assignment per cashier, a physical cash-drawer kick (that is a hardware feature, and
+Feature 20 already declines the printer it would hang off), card settlement and batch reconciliation
+against a processor, and tip declaration. Also out: any automatic accusation. The system reports a
+variance and who was on; deciding what it means is the operator's job, and a POS that flags a
+cashier as a suspect is a product that gets someone fired over a rounding error.
+
+### Definition of done
+
+An operator opens the drawer with a float in the morning, counts it at night without being shown the
+answer first, and sees what the difference was — with a month of those differences behind it so a
+pattern is visible before it becomes a habit.
 
 ---
 
