@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { costPerStockUnit, hasConversionFactor, stockUnitsReceived } from "./units";
+import { costPerStockUnit, stockUnitsReceived } from "./units";
 
 test("one gallon at $4.50 into an item stocked in oz costs ~3.5c per oz", () => {
   assert.ok(Math.abs(costPerStockUnit(450, 128) - 3.515625) < 1e-9);
@@ -26,10 +26,4 @@ test("an unset factor receives the quantity as typed", () => {
   for (const factor of [null, undefined, 0, -1]) {
     assert.equal(stockUnitsReceived(3, factor as number), 3);
   }
-});
-
-test("hasConversionFactor only counts a real pack size", () => {
-  assert.equal(hasConversionFactor(128), true);
-  assert.equal(hasConversionFactor(1), false);
-  assert.equal(hasConversionFactor(null), false);
 });

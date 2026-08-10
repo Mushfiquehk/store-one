@@ -49,7 +49,7 @@ function ChartCard({ title, data, dataKey, format: fmt }: { title: string; data:
     <Card className="shadow-soft rounded-2xl">
       <CardHeader className="pb-2"><CardTitle className="text-base">{title}</CardTitle></CardHeader>
       <CardContent>
-        {data.length === 0 ? (
+        {data.every(d => !d[dataKey]) ? (
           // A flat line at zero and a week of no trading look identical on a chart, and
           // only one of them is true. Say which.
           <div className="h-[280px] flex items-center justify-center text-sm text-muted-foreground" data-testid="text-no-sales">
@@ -97,20 +97,28 @@ export default function ReportsPage() {
   //
   // Each granularity carries the range it means: hourly is today's trading day, or every
   // 09:00 the shop has ever traded would stack up under one repeated label.
-  const salesData = useMemo(() => {
+  // One window for the whole page. Every number below is for this range and says so, so the
+  // KPI cards and the product mix cannot quietly be measuring different periods.
+  const range = useMemo(() => {
     const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const since = currentGranularity === "hourly"
-      ? startOfToday
-      : currentGranularity === "daily"
-        ? startOfToday - 13 * 86400000
-        : new Date(now.getFullYear(), now.getMonth() - 11, 1).getTime();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    if (currentGranularity === "hourly") return { since: startOfToday.getTime(), label: "today" };
+    if (currentGranularity === "daily") {
+      return { since: new Date(now.getFullYear(), now.getMonth(), now.getDate() - 13).getTime(), label: "last 14 days" };
+    }
+    return { since: new Date(now.getFullYear(), now.getMonth() - 11, 1).getTime(), label: "last 12 months" };
+  }, [currentGranularity]);
 
-    return salesSeries(sales, { granularity: currentGranularity as Granularity, since })
-      .map(b => ({ label: b.label, sales: b.revenueCents / 100, transactions: b.transactions }));
-  }, [sales, currentGranularity]);
+  // fill: the chart's x-axis is a continuous range, so a day the shop was closed has to be a
+  // zero on the line rather than a missing point that draws its neighbours as adjacent.
+  const salesData = useMemo(
+    () => salesSeries(sales, { granularity: currentGranularity as Granularity, since: range.since, fill: true })
+      .map(b => ({ label: b.label, sales: b.revenueCents / 100, transactions: b.transactions })),
+    [sales, currentGranularity, range],
+  );
 
-  const hasSales = salesData.length > 0;
+  // Zero-filled buckets are not evidence of trading — ask the transactions, not the bucket count.
+  const hasSales = salesData.some(b => b.transactions > 0);
 
   const totals = useMemo(() => {
     const currentSales = salesData.reduce((acc, curr) => acc + curr.sales, 0);
@@ -129,7 +137,7 @@ export default function ReportsPage() {
     const productOfVariant = new Map(variants.map(v => [v.id, v.productId]));
     const byProduct = new Map<string, { name: string; quantity: number; revenueCents: number }>();
 
-    for (const row of productMix(sales)) {
+    for (const row of productMix(sales, { since: range.since })) {
       const productId = row.productId || productOfVariant.get(row.variantId) || "";
       const product = products.find(p => p.id === productId);
       if (!showIngredientProducts && product?.availableAsIngredient) continue;
@@ -141,7 +149,7 @@ export default function ReportsPage() {
     }
 
     return Array.from(byProduct.values()).sort((a, b) => b.revenueCents - a.revenueCents);
-  }, [sales, products, variants, showIngredientProducts]);
+  }, [sales, products, variants, showIngredientProducts, range]);
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
@@ -179,9 +187,9 @@ export default function ReportsPage() {
 
             <TabsContent value="sales" className="space-y-6 mt-0">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <KpiCard title="Total Revenue" value={hasSales ? formatMoney(totals.sales * 100) : "\u2014"} icon={<DollarSign className="h-4 w-4" />} />
-                <KpiCard title="Avg Ticket" value={hasSales ? formatMoney(totals.avgCheck * 100) : "\u2014"} icon={<TrendingUp className="h-4 w-4" />} />
-                <KpiCard title="Transactions" value={hasSales ? totals.txns.toString() : "\u2014"} icon={<Users className="h-4 w-4" />} />
+                <KpiCard title={`Total Revenue (${range.label})`} value={hasSales ? formatMoney(totals.sales * 100) : "\u2014"} icon={<DollarSign className="h-4 w-4" />} />
+                <KpiCard title={`Avg Ticket (${range.label})`} value={hasSales ? formatMoney(totals.avgCheck * 100) : "\u2014"} icon={<TrendingUp className="h-4 w-4" />} />
+                <KpiCard title={`Transactions (${range.label})`} value={hasSales ? totals.txns.toString() : "\u2014"} icon={<Users className="h-4 w-4" />} />
               </div>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <ChartCard title="Sales Overview" data={salesData} dataKey="sales" format="currency" />
@@ -193,7 +201,7 @@ export default function ReportsPage() {
               <Card className="shadow-soft rounded-2xl">
                 <CardHeader>
                   <div className="flex items-center justify-between">
-                    <CardTitle>Product Performance</CardTitle>
+                    <CardTitle>Product Performance <span className="text-sm font-normal text-muted-foreground">({range.label})</span></CardTitle>
                     <div className="flex items-center gap-2" data-testid="toggle-show-ingredient-products">
                       <Label className="text-xs text-muted-foreground">Show ingredient products</Label>
                       <Switch

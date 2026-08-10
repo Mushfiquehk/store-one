@@ -72,6 +72,40 @@ test("the window excludes sales outside it, in both directions", () => {
   assert.equal(salesSummary(twoSales, { until: at(2026, 3, 1, 10) }).totalSales, 1);
 });
 
+test("fill emits the days the shop was closed, so a chart cannot draw over a gap", () => {
+  const withGap: ReportSale[] = [
+    { createdAt: at(2026, 3, 1, 10), totalCents: 500 },
+    { createdAt: at(2026, 3, 4, 10), totalCents: 700 },
+  ];
+  const filled = salesSeries(withGap, { granularity: "daily", since: at(2026, 3, 1, 0), until: at(2026, 3, 4, 23), fill: true });
+  assert.deepEqual(filled.map(b => [b.label, b.revenueCents]), [
+    ["Mar 01", 500],
+    ["Mar 02", 0],
+    ["Mar 03", 0],
+    ["Mar 04", 700],
+  ]);
+
+  // Without fill, Mar 01 and Mar 04 sit next to each other and the gap disappears.
+  const sparse = salesSeries(withGap, { granularity: "daily", since: at(2026, 3, 1, 0) });
+  assert.deepEqual(sparse.map(b => b.label), ["Mar 01", "Mar 04"]);
+});
+
+test("fill never invents revenue, only buckets", () => {
+  const filled = salesSeries(twoSales, { granularity: "daily", since: at(2026, 3, 1, 0), until: at(2026, 3, 5), fill: true });
+  const total = filled.reduce((sum, b) => sum + b.revenueCents, 0);
+  assert.equal(total, 1475);
+  assert.equal(filled.reduce((sum, b) => sum + b.transactions, 0), 2);
+});
+
+test("fill steps by calendar month, not by 30 days", () => {
+  const filled = salesSeries([], { granularity: "monthly", since: at(2026, 1, 15, 0), until: at(2026, 4, 2), fill: true });
+  assert.deepEqual(filled.map(b => b.label), ["Jan 2026", "Feb 2026", "Mar 2026", "Apr 2026"]);
+});
+
+test("fill without a since does nothing rather than guessing a start", () => {
+  assert.deepEqual(salesSeries([], { granularity: "daily", fill: true }), []);
+});
+
 test("an empty store reports nothing, not zeros dressed as data", () => {
   assert.deepEqual(salesSeries([], { granularity: "daily" }), []);
   assert.deepEqual(productMix([]), []);
@@ -81,6 +115,20 @@ test("an empty store reports nothing, not zeros dressed as data", () => {
     totalTaxCents: 0,
     averageOrderCents: 0,
   });
+});
+
+// The handler tests in api-handlers.test.ts pass `query` straight to handle(), so they pin
+// the contract but could never have caught the real bug: both servers built an ApiRequest
+// with no `query` at all, and every window on these endpoints was silently discarded.
+// Hitting the report routes for real needs Postgres, so this guards the one line each
+// adapter has to keep — cheap, and it fails the moment the field is dropped again.
+test("both servers forward the query string to the shared handlers", () => {
+  const express = readFileSync(new URL("../server/routes.ts", import.meta.url), "utf8");
+  assert.match(express, /query: req\.query/, "server/routes.ts stopped forwarding req.query");
+
+  const local = readFileSync(new URL("../client/src/lib/local-server.ts", import.meta.url), "utf8");
+  assert.match(local, /URLSearchParams/, "local-server.ts stopped parsing the query string");
+  assert.match(local, /^\s*query,$/m, "local-server.ts stopped passing query into ApiRequest");
 });
 
 // One line, and it is what stops this regressing the next time someone needs a chart to

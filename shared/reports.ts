@@ -25,6 +25,14 @@ export type SalesWindow = {
   granularity: Granularity;
   since?: number;
   until?: number;
+  /**
+   * Emit every bucket across the window, including the ones with no sales.
+   *
+   * Off by default because a bare list of buckets should not invent rows. On for a chart:
+   * an x-axis is a continuous range, so dropping a closed Monday draws Sunday next to
+   * Tuesday and the line reads as uninterrupted trading. Needs `since`.
+   */
+  fill?: boolean;
 };
 
 export type SalesBucket = {
@@ -85,8 +93,24 @@ function bucketLabel(start: number, granularity: Granularity): string {
  * to draw.
  */
 export function salesSeries(sales: ReportSale[], window: SalesWindow): SalesBucket[] {
-  const { granularity, since, until } = window;
+  const { granularity, since, until, fill } = window;
   const buckets = new Map<number, SalesBucket>();
+
+  const emptyBucket = (start: number): SalesBucket =>
+    ({ label: bucketLabel(start, granularity), startedAt: start, revenueCents: 0, transactions: 0 });
+
+  if (fill && since != null) {
+    // Step by calendar unit rather than by a fixed number of milliseconds: a day is not
+    // always 86400000 ms across a daylight-saving boundary, and months are never equal.
+    const end = until ?? Date.now();
+    let cursor = new Date(bucketStart(since, granularity));
+    while (cursor.getTime() <= end) {
+      buckets.set(cursor.getTime(), emptyBucket(cursor.getTime()));
+      if (granularity === "hourly") cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate(), cursor.getHours() + 1);
+      else if (granularity === "daily") cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 1);
+      else cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
+    }
+  }
 
   for (const sale of sales) {
     const at = sale.createdAt;
@@ -97,7 +121,7 @@ export function salesSeries(sales: ReportSale[], window: SalesWindow): SalesBuck
     const start = bucketStart(at, granularity);
     let bucket = buckets.get(start);
     if (!bucket) {
-      bucket = { label: bucketLabel(start, granularity), startedAt: start, revenueCents: 0, transactions: 0 };
+      bucket = emptyBucket(start);
       buckets.set(start, bucket);
     }
     bucket.revenueCents += sale.totalCents || 0;
