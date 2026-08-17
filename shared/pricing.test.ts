@@ -28,7 +28,7 @@ const data = (over: Partial<CostingData> = {}): CostingData => ({
 
 test("a fully-priced variant costs what its recipe adds up to", () => {
   // 0.5 oz beans @ 40 = 20, plus 8 oz milk @ 3 = 24.
-  assert.deepEqual(costVariant("v_latte", data()), { costCents: 44, unknownIngredients: [] });
+  assert.deepEqual(costVariant("v_latte", data()), { costCents: 44, unknownIngredients: [], hasRecipe: true });
 });
 
 test("an unpriced ingredient is named, and is not treated as free", () => {
@@ -57,13 +57,13 @@ test("an ingredient the catalogue does not know is unknown, not skipped", () => 
 test("an item priced below its ingredients reports a negative margin", () => {
   // Negative margins are the entire point of the report; clamping them to zero would
   // hide the only rows an operator has to act on.
-  const cost = { costCents: 44, unknownIngredients: [] };
+  const cost = { costCents: 44, unknownIngredients: [], hasRecipe: true };
   assert.equal(marginPct(40, cost), -10);
   assert.equal(marginPct(88, cost), 50);
 });
 
 test("a giveaway price states no margin rather than dividing by zero", () => {
-  assert.equal(marginPct(0, { costCents: 44, unknownIngredients: [] }), null);
+  assert.equal(marginPct(0, { costCents: 44, unknownIngredients: [], hasRecipe: true }), null);
 });
 
 test("sumIngredientCosts rounds once, at the end, and names each unknown once", () => {
@@ -145,4 +145,19 @@ test("a variant nobody bought still gets a row", () => {
   const rows = menuMargins(marginData(), []);
   assert.equal(rows.length, 3);
   assert.ok(rows.every(r => r.quantity === 0 && r.contributionCents === 0));
+});
+
+test("a variant with no recipe at all is unknown, not a 100% margin", () => {
+  // The seeded menu hangs BOM rows off a product's small variant only, so every medium
+  // and large has no recipe. Costing them at zero would put the whole menu's biggest
+  // sizes at the top of the margin report as the most profitable items on it.
+  const d = marginData();
+  d.variants.push({ id: "v_latte_l", name: "Large", productId: "p_latte", basePrice: 600, directInventoryId: null });
+
+  const rows = menuMargins(d, [{ variantId: "v_latte_l", quantity: 999 }]);
+  const large = rows.find(r => r.variantId === "v_latte_l")!;
+  assert.equal(large.costKnown, false);
+  assert.equal(large.marginPct, null);
+  assert.equal(large.contributionCents, 0);
+  assert.notEqual(rows[0].variantId, "v_latte_l", "and it does not lead the report");
 });
