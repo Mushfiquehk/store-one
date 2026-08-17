@@ -38,6 +38,11 @@ const variantSchema = z.object({
 const productSchema = z.object({
   name: entityName,
   type: z.enum(["RETAIL", "RESTAURANT"]).default("RESTAURANT"),
+  // Where it sits on the till, and where in that category. Both optional: a blueprint that
+  // says nothing about layout must not move anything, which is what keeps export → apply a
+  // pure noop.
+  category: z.string().trim().min(1).nullish(),
+  sortOrder: z.number().int().nonnegative().nullish(),
   variants: z.array(variantSchema).default([]),
   // Group names only. Resolved against the blueprint *and* against groups that already
   // exist in the system — that lookup needs current state, so it lives in planMenuApply (T2).
@@ -58,6 +63,9 @@ function duplicates(names: string[]): string[] {
 export const menuBlueprintSchema = z
   .object({
     dryRun: z.boolean().default(false),
+    // The till's category bar, in order. Without this an agent can put a product in a category
+    // it cannot then position — "put the pastries first" needs the list, not just the label.
+    categories: z.array(entityName).default([]),
     modifierGroups: z.array(modifierGroupSchema).default([]),
     products: z.array(productSchema).default([]),
   })
@@ -72,6 +80,7 @@ export const menuBlueprintSchema = z
       }
     };
 
+    report(["categories"], duplicates(bp.categories), "category");
     report(["modifierGroups"], duplicates(bp.modifierGroups.map((g) => g.name)), "modifier group");
     report(["products"], duplicates(bp.products.map((p) => p.name)), "product");
 
@@ -119,6 +128,8 @@ export function parseMenuBlueprint(
 
 /** The current menu, as the ApiAdminStorage list methods return it. */
 export type ExistingMenu = {
+  /** The current `menu.categories` setting, in order. Absent means nobody has set one. */
+  categories?: string[];
   products: Product[];
   variants: Variant[];
   modifierGroups: ModifierGroup[];
@@ -126,7 +137,13 @@ export type ExistingMenu = {
   productModifierGroups: ProductModifierGroup[];
 };
 
-export type ChangeEntity = "modifierGroup" | "modifier" | "product" | "variant" | "productModifierGroups";
+export type ChangeEntity =
+  | "modifierGroup"
+  | "modifier"
+  | "product"
+  | "variant"
+  | "productModifierGroups"
+  | "menuCategories";
 
 /** What moves on an update, for the operator-facing preview. */
 export type FieldDiff = Record<string, { from: unknown; to: unknown }>;
@@ -146,6 +163,8 @@ export type MenuChange = {
   values?: Record<string, unknown>;
   /** Present on `productModifierGroups`: the full desired set of group names. */
   groupNames?: string[];
+  /** Present on `menuCategories`: the desired category order. */
+  categories?: string[];
 };
 
 export type MenuPlan = { changes: MenuChange[]; errors: BlueprintError[] };
@@ -193,6 +212,22 @@ export function planMenuApply(blueprint: MenuBlueprint, existing: ExistingMenu):
   const changes: MenuChange[] = [];
   const errors: BlueprintError[] = [];
 
+  // The category order, before anything else: a product can then name a category the operator
+  // will actually see. An empty list in the blueprint says nothing rather than "delete them all".
+  if (blueprint.categories.length > 0) {
+    const currentCategories = existing.categories ?? [];
+    const same =
+      currentCategories.length === blueprint.categories.length &&
+      currentCategories.every((c, i) => c === blueprint.categories[i]);
+    changes.push({
+      op: same ? "noop" : currentCategories.length > 0 ? "update" : "create",
+      entity: "menuCategories",
+      name: "menu.categories",
+      categories: blueprint.categories,
+      ...(same ? {} : { fields: { categories: { from: currentCategories, to: blueprint.categories } } }),
+    });
+  }
+
   const existingGroups = byName(existing.modifierGroups);
   const existingProducts = byName(existing.products);
 
@@ -229,8 +264,23 @@ export function planMenuApply(blueprint: MenuBlueprint, existing: ExistingMenu):
     const current = existingProducts.get(key(product.name));
     changes.push(
       current
-        ? upsert("product", product.name, current, { type: product.type })
-        : { op: "create", entity: "product", name: product.name, values: { type: product.type } },
+        ? upsert("product", product.name, current, {
+            type: product.type,
+            // `?? undefined` rather than `?? null`: omitted means "leave it alone", and diff()
+            // skips undefined. Explicit null in the blueprint does clear it.
+            category: product.category === undefined ? undefined : product.category,
+            sortOrder: product.sortOrder === undefined ? undefined : product.sortOrder,
+          })
+        : {
+            op: "create",
+            entity: "product",
+            name: product.name,
+            values: {
+              type: product.type,
+              ...(product.category === undefined ? {} : { category: product.category }),
+              ...(product.sortOrder === undefined ? {} : { sortOrder: product.sortOrder }),
+            },
+          },
     );
 
     // A variant matches within its product.

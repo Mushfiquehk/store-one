@@ -1,5 +1,5 @@
 import { parseMenuBlueprint, planMenuApply, type ExistingMenu, type FieldDiff, type MenuPlan } from "./menu-blueprint";
-import { mergeSettingSecrets, redactSetting, validateSetting } from "./schema";
+import { MENU_CATEGORIES_KEY, mergeSettingSecrets, redactSetting, validateSetting } from "./schema";
 import type { Modifier, ModifierGroup, Product, ProductModifierGroup, Variant } from "./schema";
 import { productMix, salesSeries, salesSummary, type Granularity, type ReportSale } from "./reports";
 import { menuMargins, type MarginData, type MarginVariant } from "./pricing";
@@ -267,6 +267,11 @@ async function applyMenuPlan(store: ApiAdminStorage, plan: MenuPlan, existing: E
         } else {
           await store.updateVariant(change.id!, updatePayload(change.fields));
         }
+        break;
+      }
+      case "menuCategories": {
+        // The one write: the till reads this setting for its bar order (Feature 25 T2).
+        await store.setSetting(MENU_CATEGORIES_KEY, change.categories ?? []);
         break;
       }
       case "productModifierGroups": {
@@ -538,7 +543,9 @@ export function createApiHandlers(store: ApiAdminStorage) {
         }
         const blueprint = parseResult.blueprint;
 
+        const configuredCategories = await store.getSetting(MENU_CATEGORIES_KEY);
         const existing: ExistingMenu = {
+          categories: Array.isArray(configuredCategories?.value) ? configuredCategories.value as string[] : [],
           products: (await store.listProducts()) as Product[],
           variants: (await store.listVariants()) as Variant[],
           modifierGroups: (await store.listModifierGroups()) as ModifierGroup[],

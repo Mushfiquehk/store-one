@@ -258,7 +258,10 @@ can exist in one store and not the other.
 
 ## Feature 25 — The menu grid: a product you add can currently become unreachable
 
-**Status:** T1 done — the category bar leads with **All** (the default, so nothing is hidden), then the
+**Status:** done — T1–T4 complete. Nothing disappears from the till, categories are real and ordered,
+products can be arranged by dragging, and both travel with the menu blueprint.
+
+T1 done — the category bar leads with **All** (the default, so nothing is hidden), then the
 tags, then **Uncategorised** when something needs a home; a product with no tags is reachable without
 searching. The logic moved to `shared/menu-grid.ts` where it is tested, and the render-phase
 `setActiveTag` is gone — the active category is derived, falling back to All when a category disappears
@@ -276,8 +279,20 @@ layout. `reorderProducts` returns only the rows whose position changed, keeping 
 ties cannot creep in. The menu table defaults to an **arrangement** sort with a drag handle that persists
 on drop — pointer events and `elementFromPoint`, the pattern `schedule.tsx` already uses, because HTML5
 `dataTransfer` never fires on touch and this runs on an iPad.
-T4 remains. **Still no UI for reordering or renaming *categories*** — T3 arranges products within a
-category; the category list itself is still only settable through `PUT /api/settings/menu.categories`.
+T4 done — the blueprint carries `category` and `sortOrder` per product plus a top-level `categories`
+order, and `POST /api/admin/menu/apply` writes the order to the `menu.categories` setting the till
+reads. The round-trip invariant holds: re-applying the same blueprint reports every change as `noop`,
+including the category order and each product's position, and a blueprint that says nothing about
+layout moves nothing (tested — an agent editing a price cannot silently reposition the menu).
+
+**Feature 25 is complete** (T1–T4), with two threads recorded rather than hidden:
+- **No UI for reordering or renaming *categories*.** T3 arranges products within a category; the list
+  itself is set by `PUT /api/settings/menu.categories` or by a blueprint apply. `renameCategory` exists
+  and is tested but nothing calls it yet.
+- **The export half is Feature 2 T1's** (`GET /api/admin/menu/blueprint`), which is unbuilt — so
+  "export → apply is noop" is verified by round-tripping a blueprint through apply twice rather than
+  through a real export. When that endpoint lands it must emit `category`, `sortOrder` and `categories`
+  or the invariant breaks on the first export.
 **Vision pillar:** #1 — "the easiest path". Setting up a menu is the first thing an operator does and
 the till layout is what they live in afterwards.
 **Depends on:** nothing. **T1 is a bug fix and should be taken on its own** regardless of the rest.

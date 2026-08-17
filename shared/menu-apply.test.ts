@@ -28,7 +28,16 @@ function fakeStore() {
     return row;
   };
 
+  // The category order is a setting now (Feature 25 T2/T4), so apply reads and writes one.
+  const settings = new Map<string, unknown>();
+
   const store = {
+    getSetting: async (k: string) =>
+      settings.has(k) ? { key: k, value: settings.get(k), updatedAt: 1 } : null,
+    setSetting: async (k: string, value: unknown) => {
+      settings.set(k, value);
+      return { key: k, value, updatedAt: 1 };
+    },
     listProducts: async () => rows.products,
     listVariants: async () => rows.variants,
     listModifierGroups: async () => rows.modifierGroups,
@@ -51,7 +60,7 @@ function fakeStore() {
     },
   } as unknown as ApiAdminStorage;
 
-  return { store, rows };
+  return { store, rows, settings };
 }
 
 const twoProducts = {
@@ -147,4 +156,61 @@ test("an unknown modifier group reference is rejected before any write", async (
   assert.deepEqual(counts(rows), {
     products: 0, variants: 0, modifierGroups: 0, modifiers: 0, productModifierGroups: 0,
   });
+});
+
+test("categories and layout travel with the menu, and re-applying is entirely noop", async () => {
+  // The round-trip invariant this task exists to keep: an exported menu, re-applied, must
+  // report every change as noop — including the category order and each product's position.
+  const { store, settings } = fakeStore();
+
+  const blueprint = {
+    categories: ["Drinks", "Bakery"],
+    products: [
+      { name: "Latte", type: "RESTAURANT", category: "Drinks", sortOrder: 0, variants: [{ name: "Small", basePrice: 425 }] },
+      { name: "Bun", type: "RETAIL", category: "Bakery", sortOrder: 1, variants: [{ name: "Each", basePrice: 300 }] },
+    ],
+  };
+
+  const first = payload(await apply(store, blueprint));
+  assert.equal(first.changes[0].entity, "menuCategories", "the order lands before the products that name it");
+  assert.equal(first.changes[0].op, "create");
+  assert.deepEqual(settings.get("menu.categories"), ["Drinks", "Bakery"]);
+
+  const second = payload(await apply(store, blueprint));
+  assert.ok(second.changes.length > 0, "it did look at everything");
+  assert.deepEqual(
+    second.changes.filter((c: any) => c.op !== "noop"),
+    [],
+    "re-applying the same menu changes nothing at all",
+  );
+});
+
+test("reordering categories in a blueprint is an update, not a duplicate list", async () => {
+  const { store, settings } = fakeStore();
+
+  await apply(store, { categories: ["Drinks", "Bakery"], products: [] });
+  const reordered = payload(await apply(store, { categories: ["Bakery", "Drinks"], products: [] }));
+
+  assert.equal(reordered.changes[0].op, "update");
+  assert.deepEqual(settings.get("menu.categories"), ["Bakery", "Drinks"]);
+});
+
+test("a blueprint that says nothing about layout moves nothing", async () => {
+  // An agent editing a price must not silently reposition the menu.
+  const { store, rows, settings } = fakeStore();
+
+  await apply(store, {
+    categories: ["Drinks"],
+    products: [{ name: "Latte", category: "Drinks", sortOrder: 3, variants: [{ name: "Small", basePrice: 425 }] }],
+  });
+  assert.equal(rows.products[0].sortOrder, 3);
+
+  const priceOnly = payload(await apply(store, {
+    products: [{ name: "Latte", variants: [{ name: "Small", basePrice: 450 }] }],
+  }));
+
+  assert.equal(rows.products[0].category, "Drinks", "still in its category");
+  assert.equal(rows.products[0].sortOrder, 3, "still in its position");
+  assert.deepEqual(settings.get("menu.categories"), ["Drinks"], "and the bar order is untouched");
+  assert.equal(priceOnly.changes.some((c: any) => c.entity === "menuCategories"), false, "no category change proposed");
 });
