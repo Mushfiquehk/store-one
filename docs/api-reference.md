@@ -2102,3 +2102,109 @@ curl 'http://localhost:5000/api/admin/metrics'
   }
 }
 ```
+
+---
+
+## Reports
+
+### Menu Margins
+
+What each menu item costs to make, what it sells for, and what that left over the window.
+
+```
+GET /api/reports/menu-margins
+```
+
+Not under `/api/admin` — it is a report, and it is served by both the Express server and the
+on-device local server.
+
+**Query parameters:**
+
+| Parameter | Type    | Description                                                        |
+|-----------|---------|--------------------------------------------------------------------|
+| `since`   | integer | Epoch ms. Narrows the **volumes**, not the menu (see below).        |
+| `until`   | integer | Epoch ms. Same.                                                    |
+
+**Response:** an array, **worst margin first**, then rows whose cost is unknown.
+
+| Field                | Type              | Description                                                                                 |
+|----------------------|-------------------|---------------------------------------------------------------------------------------------|
+| `variantId`          | string            | The variant this row costs.                                                                 |
+| `productName`        | string            |                                                                                             |
+| `variantName`        | string            |                                                                                             |
+| `priceCents`         | integer           | `variants.basePrice`.                                                                       |
+| `costCents`          | integer           | Recipe cost at recorded ingredient prices. **Only meaningful when `costKnown` is true.**     |
+| `marginCents`        | integer           | `priceCents − costCents`. **Negative when an item sells below cost** — never clamped.        |
+| `marginPct`          | number \| null    | Margin as a percentage of price. `null` when the cost is unknown or the price is zero.       |
+| `costKnown`          | boolean           | False when any ingredient has no price, or the variant has no recipe at all.                 |
+| `unknownIngredients` | string[]          | The ingredients to go and price. Empty when `costKnown` is true.                             |
+| `quantity`           | integer           | Units sold in the window.                                                                   |
+| `contributionCents`  | integer           | `marginCents × quantity` — what the row actually contributed. `0` when the cost is unknown.  |
+
+**Two things that are deliberate:**
+
+- **An unknown cost is not a zero cost.** An ingredient with no `lastPurchasePrice`, or a variant
+  with no BOM rows, makes `costKnown` false — `costCents` is then a floor, not the answer, and
+  `marginPct` is `null`. Zero cost renders as a 100% margin, which is the most flattering possible
+  lie about a menu.
+- **The window narrows volumes, not the menu.** A variant that sold nothing in the window still gets
+  a row with `quantity: 0`: it is still priced wrong, and costing is a question about the menu.
+
+**Example Request:**
+
+```bash
+curl 'http://localhost:5000/api/reports/menu-margins?since=1770000000000'
+```
+
+**Example Response:**
+
+```json
+[
+  {
+    "variantId": "var-cookie",
+    "productName": "Cookie",
+    "variantName": "One",
+    "priceCents": 100,
+    "costCents": 150,
+    "marginCents": -50,
+    "marginPct": -50,
+    "costKnown": true,
+    "unknownIngredients": [],
+    "quantity": 4,
+    "contributionCents": -200
+  },
+  {
+    "variantId": "var-soup",
+    "productName": "Soup",
+    "variantName": "Bowl",
+    "priceCents": 600,
+    "costCents": 0,
+    "marginCents": 0,
+    "marginPct": null,
+    "costKnown": false,
+    "unknownIngredients": ["Stock"],
+    "quantity": 2,
+    "contributionCents": 0
+  }
+]
+```
+
+### For an agent: read margins before you touch a price
+
+This endpoint is the read that makes repricing safe. An agent that applies a 20% discount without
+seeing that the item runs a 15% margin is a liability.
+
+The loop is always the same — **read, propose, preview, apply on approval**:
+
+1. `GET /api/reports/menu-margins` — find the rows that are actually bad, worst first.
+2. Propose the change to the operator, in the operator's terms: *"the cookie sells for $1.00 and
+   costs $1.50 to make."*
+3. Preview it: `POST /api/admin/menu/apply` with `"dryRun": true` returns the change list without
+   writing anything (see [Menu Blueprint](#menu-blueprint)).
+4. Apply only after the operator approves, then read margins again — the endpoint recomputes from
+   the menu on every call, so a price change is reflected immediately, with no cache to invalidate
+   and no second call to make.
+
+Rows with `costKnown: false` are **not** a pricing finding — they are a data-entry task. Ask the
+operator to price the named ingredients (a supplier invoice sets `lastPurchasePrice`) rather than
+proposing a price change from a cost you do not have.
