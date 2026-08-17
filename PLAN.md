@@ -155,7 +155,12 @@ half-built than not started (Feature 3 T3 in particular).
 
 ## Feature 26 — Sales have two writers and no owner
 
-**Status:** planned
+**Status:** T1 done — the decision is recorded in `shared/sync-compare.ts` beside the conflict policy:
+`SALES_OWNER = "admin_sales"`, with the sync blob named as transport and bookkeeping rather than the
+record. The corollary is enforced rather than merely written: a test asserts `isAdminOwned("sales")` is
+false and that a device sale beats an older server copy on recency, so nobody can quietly add `sales`
+to `ADMIN_OWNED_TABLES` and let a stale server row overwrite a real transaction. No data moved — that
+is T2. T2–T4 remain.
 **Vision pillar:** #1 — "the best foundation". Sales records are the business's books, and half of
 them are currently invisible to the server that reports on them.
 **Depends on:** nothing. Feature 8 T1–T3 made sync converge, which is what made this measurable.

@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  ADMIN_OWNED_TABLES, SYNCED_FIELDS, isAdminOwned, resolveByRecency, resolveConflict,
-  sameDeletedState, sameSyncedFields,
+  ADMIN_OWNED_TABLES, SALES_OWNER, SALES_TABLE, SYNCED_FIELDS, isAdminOwned,
+  resolveByRecency, resolveConflict, sameDeletedState, sameSyncedFields,
 } from "./sync-compare";
 
 // An admin row as Drizzle returns it: every column, in schema-definition order, including
@@ -156,4 +156,17 @@ test("the admin-owned list is the one the client also uses", () => {
   for (const table of ADMIN_OWNED_TABLES) {
     assert.ok(SYNCED_FIELDS[table], `${table} has no field list`);
   }
+});
+
+test("sales are device-authored: admin never wins over a real transaction", () => {
+  // Feature 26 T1's decision, as a guard rather than a comment. If someone adds "sales" to
+  // ADMIN_OWNED_TABLES, a stale server copy starts overwriting sales that actually happened.
+  assert.equal(isAdminOwned(SALES_TABLE), false, `${SALES_TABLE} must not be admin-owned`);
+  assert.equal(SALES_OWNER, "admin_sales", "the authoritative sale is a row, not a sync blob");
+
+  const deviceSale = { data: { id: "s1", totalCents: 433 }, updatedAt: 2_000 };
+  const serverCopy = { data: { id: "s1", totalCents: 400 }, updatedAt: 1_000 };
+  const result = resolveConflict(SALES_TABLE, deviceSale, serverCopy);
+  assert.equal(result.winner, "pos", "the till recorded the money; it wins on recency");
+  assert.match(result.reason, /newer or equal/);
 });
