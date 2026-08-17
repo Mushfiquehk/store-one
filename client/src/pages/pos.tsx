@@ -17,8 +17,9 @@ import { format } from "date-fns";
 import type { Combo } from "@/lib/db";
 import {
   DEFAULT_TAX_RATE_PCT, DEFAULT_TENDER_METHODS, TAX_RATE_KEY, TENDER_METHODS_KEY,
-  changeDueCents, taxCentsFor, taxRatePct, tenderMethods, tenderSuggestions,
+  changeDueCents, taxRatePct, tenderMethods, tenderSuggestions,
 } from "@shared/schema";
+import { taxOnCart } from "@shared/pricing";
 import { computeInventoryDeductions } from "@shared/depletion";
 
 function formatMoney(cents: number) {
@@ -354,7 +355,19 @@ export default function PosPage() {
   }, 0);
 
   const subtotalCents = Math.max(0, subtotalCentsBeforeCombo - totalComboDiscount);
-  const taxCents = taxCentsFor(subtotalCents, taxRate);
+
+  // Tax on the taxable lines only, computed by shared/pricing.ts — not a second tax
+  // calculation living on this page. A product marked tax-exempt is out of the base, and the
+  // combo discount comes off the taxable share proportionally.
+  const cartTax = taxOnCart(
+    cart.map(item => ({
+      amountCents: getCartItemPrice(item) * item.qty,
+      exempt: products.find(p => p.id === item.productId)?.attributes?.tax_exempt === true,
+    })),
+    taxRate,
+    totalComboDiscount,
+  );
+  const taxCents = cartTax.taxCents;
   const totalCents = subtotalCents + taxCents;
 
   // A non-cash sale tenders exactly the total: the day's cash expectation is a sum over
@@ -798,7 +811,7 @@ export default function PosPage() {
                           </div>
                         )}
                         <div className="flex justify-between text-muted-foreground">
-                          <span>Tax ({taxRate}%)</span>
+                          <span>Tax ({taxRate}%{cartTax.exemptCents > 0 ? ", some items exempt" : ""})</span>
                           <span>{formatMoney(taxCents)}</span>
                         </div>
                         <Separator className="my-2" />

@@ -90,6 +90,8 @@ export default function ProductWizard({
   const [sku, setSku] = useState("");
   const [price, setPrice] = useState("");
   const [tags, setTags] = useState("");
+  // Default taxable, so every existing product keeps behaving exactly as it does today.
+  const [taxExempt, setTaxExempt] = useState(false);
   const [retailInventoryItemId, setRetailInventoryItemId] = useState<string>("");
   const [retailDeductQty, setRetailDeductQty] = useState("1");
   const [retailInvSearch, setRetailInvSearch] = useState("");
@@ -217,7 +219,7 @@ export default function ProductWizard({
           name: name.trim(),
           type: "RETAIL",
           isComposite: false,
-          attributes: { tax_exempt: false, tags: tagList },
+          attributes: { tax_exempt: taxExempt, tags: tagList },
         });
 
         if (hasRetailSizes) {
@@ -265,7 +267,7 @@ export default function ProductWizard({
           type: "RESTAURANT",
           isComposite: true,
           availableAsIngredient,
-          attributes: { tax_exempt: false, tags: tagList },
+          attributes: { tax_exempt: taxExempt, tags: tagList },
         });
 
         const variantIdMap: Record<string, string> = {};
@@ -641,6 +643,16 @@ export default function ProductWizard({
                   </div>
                 </>
               )}
+              <div className="sm:col-span-2 flex items-center justify-between rounded-xl border p-3">
+                <div>
+                  <Label className="text-sm">Tax exempt</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Leave off unless this item genuinely is not taxed. Exempt items are excluded from
+                    the tax base on every sale.
+                  </p>
+                </div>
+                <Switch checked={taxExempt} onCheckedChange={setTaxExempt} data-testid="wizard-switch-tax-exempt" />
+              </div>
               <div className={isRetail && !hasRetailSizes ? "" : "sm:col-span-2"}>
                 <Label className="text-xs text-muted-foreground" htmlFor="wizard-tags">Tags (comma separated)</Label>
                 <Input id="wizard-tags" value={tags} onChange={e => setTags(e.target.value)} className="mt-1 rounded-xl" placeholder="coffee, hot" data-testid="wizard-input-tags" />

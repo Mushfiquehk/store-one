@@ -763,7 +763,17 @@ pattern is visible before it becomes a habit.
 Settings field on blur and read by the till on load, with `taxCentsFor` as the one place the arithmetic
 lives. **Default 0, not 8.25** — an unconfigured store visibly charges nothing rather than a plausible
 wrong number. The API rejects a negative rate, a non-number, and `825` typed for `8.25`. The dead copy
-at `app-shell.tsx:51` is deleted; `home.tsx`'s went with the file in Feature 16 T4. T2–T4 remain.
+at `app-shell.tsx:51` is deleted; `home.tsx`'s went with the file in Feature 16 T4. T2 done — `taxOnCart` in `shared/pricing.ts` is the one tax computation: taxable lines only, with the
+cart discount reducing the taxable base proportionally. The till calls it instead of taxing the whole
+subtotal, and says "some items exempt" when any line is out of the base.
+T3–T4 remain.
+
+**Deviation from T2's wording, deliberately:** the task asks for a new `taxable: boolean` column across
+`shared/schema.ts`, Dexie and `server/schema.ts`. `ProductAttributes.tax_exempt` **already exists** and
+was already being written as `false` by the product wizard — declared and never read, the same pattern as
+`payRate`. So T2 reads that field instead of adding a fourth flag and three migrations. Same semantics
+(absent or false = taxable, so every existing row is unchanged), one source of truth, no schema change.
+The wizard's switch now sets it.
 
 **Not done here, and it needs Feature 6:** surfacing an unconfigured rate on a setup checklist. There is
 no checklist yet — Feature 6 is unbuilt — so a store that never sets a rate charges nothing silently.
