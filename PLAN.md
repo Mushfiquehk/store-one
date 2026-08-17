@@ -1102,7 +1102,20 @@ per-employee views T4 and Feature 14 want, plus an `ALTER … IF NOT EXISTS` aft
 T1's current employee at the till and explicitly `null` on the API order path and test orders — neither
 is a person at a till. Existing rows stay null and demo sales are unattributed rather than carrying an
 invented cashier. **This unblocks Feature 12 T3's void attribution and Feature 14's per-employee view.**
-T3–T4 remain.
+T3 done — an append-only `actionLog` (`shared/action-log.ts`, Dexie v17, `action_log` in Postgres) with
+`actorKind`/`actorId`, a short `action` constant, target, a human summary carrying **both** values on a
+price change, and nullable detail. **No update, no delete, no soft-delete field** — the table has nowhere
+to record an edit, and a test walks `client/src/lib`, `client/src/pages`, `shared` and `server` asserting
+nothing calls `update`/`delete`/`clear`/`modify` on it.
+
+Written at the choke points that already existed: `updateVariant` (one row per price change, attributed
+to whoever is on the till), `menu/apply` (**one row per apply with its change count**, not one per
+change), the settings `PUT` handler (and a secret's row records *that* it changed, never to what), and
+the restore path in `settings.tsx`. Inventory movements stay in Feature 15's ledger. A failed append
+warns and does not fail the write it was recording — the log is evidence, not a precondition for taking
+money, and that is tested too.
+T4 remains: the agent actor (still `AGENT` with a null id until Feature 2 has tokens) and somewhere to
+read the log.
 
 **On T1's testability:** T1 was React state plus `localStorage`, which this runner (glob `{shared,server}`)
 cannot reach. T2 is where attribution became testable, and it is tested against a real database: a sale

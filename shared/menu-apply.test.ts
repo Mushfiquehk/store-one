@@ -31,7 +31,10 @@ function fakeStore() {
   // The category order is a setting now (Feature 25 T2/T4), so apply reads and writes one.
   const settings = new Map<string, unknown>();
 
+  const log: Record<string, unknown>[] = [];
+
   const store = {
+    appendActionLog: async (entry: unknown) => { log.push(entry as Record<string, unknown>); return entry; },
     getSetting: async (k: string) =>
       settings.has(k) ? { key: k, value: settings.get(k), updatedAt: 1 } : null,
     setSetting: async (k: string, value: unknown) => {
@@ -60,7 +63,7 @@ function fakeStore() {
     },
   } as unknown as ApiAdminStorage;
 
-  return { store, rows, settings };
+  return { store, rows, settings, log };
 }
 
 const twoProducts = {
@@ -213,4 +216,27 @@ test("a blueprint that says nothing about layout moves nothing", async () => {
   assert.equal(rows.products[0].sortOrder, 3, "still in its position");
   assert.deepEqual(settings.get("menu.categories"), ["Drinks"], "and the bar order is untouched");
   assert.equal(priceOnly.changes.some((c: any) => c.entity === "menuCategories"), false, "no category change proposed");
+});
+
+test("one action-log row per apply, with its change count — not one per change", async () => {
+  // A 60-product menu would bury the log. What an autopsy needs is "the menu was applied, and
+  // it moved 12 things".
+  const { store, log } = fakeStore();
+
+  await apply(store, {
+    products: [
+      { name: "Latte", variants: [{ name: "Small", basePrice: 425 }] },
+      { name: "Bun", variants: [{ name: "Each", basePrice: 300 }] },
+    ],
+  });
+
+  assert.equal(log.length, 1, "one row for the whole apply");
+  assert.equal(log[0].action, "MENU_APPLIED");
+  assert.equal(log[0].actorKind, "AGENT");
+  assert.match(log[0].summary as string, /Menu applied: \d+ changes? across \d+ checked/);
+
+  // A re-apply that changes nothing still records that someone applied a menu, and says zero.
+  await apply(store, { products: [{ name: "Latte", variants: [{ name: "Small", basePrice: 425 }] }] });
+  assert.equal(log.length, 2);
+  assert.match(log[1].summary as string, /0 changes/);
 });

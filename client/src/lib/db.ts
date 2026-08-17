@@ -1,6 +1,7 @@
 import Dexie, { type Table } from "dexie";
 import type { StoreSetting } from "@shared/api-handlers";
 import type { InventoryLedgerEntry } from "@shared/ledger";
+import type { ActionLogEntry } from "@shared/action-log";
 import type {
   ProductAttributes,
   ModifierScaleFactors,
@@ -11,6 +12,7 @@ import type {
 } from "@shared/schema";
 
 export type { InventoryLedgerEntry };
+export type { ActionLogEntry };
 export type { ProductAttributes, ModifierScaleFactors, ScaleFactorMatrix, SaleLine, PricingStrategy, ComboItemType };
 
 export interface Product {
@@ -224,6 +226,8 @@ class PosDatabase extends Dexie {
   settings!: Table<StoreSetting, string>;
   // Append-only: why every quantity moved. See shared/ledger.ts.
   inventoryLedger!: Table<InventoryLedgerEntry, string>;
+  // Append-only: who decided what. No update, no delete — see shared/action-log.ts.
+  actionLog!: Table<ActionLogEntry, string>;
 
   constructor() {
     super("cornerpos");
@@ -513,6 +517,12 @@ class PosDatabase extends Dexie {
       await tx.table("sales").toCollection().modify(sale => {
         if (sale.employeeId === undefined) sale.employeeId = null;
       });
+    });
+
+    // Feature 19 T3: the action log. New table only; nothing to backfill, because there is no
+    // history of decisions to invent.
+    this.version(17).stores({
+      actionLog: "id, at, action, targetId, actorId",
     });
   }
 }

@@ -1,8 +1,9 @@
-import React, { createContext, useContext, useState, useCallback, useEffect } from "react";
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "./db";
 import { storage } from "./local-storage";
 import type { InventoryLedgerEntry, WasteReason } from "@shared/ledger";
+import type { ActionLogEntry, ActionLogInput } from "@shared/action-log";
 
 export const CURRENT_EMPLOYEE_KEY = "cornerpos_current_employee";
 import { toast } from "@/hooks/use-toast";
@@ -115,6 +116,8 @@ type StoreContextType = {
   recordWaste: (id: string, quantity: number, reason: WasteReason, note?: string) => Promise<InventoryItem | undefined>;
   recordCount: (id: string, counted: number, note?: string) => Promise<InventoryItem | undefined>;
   getLedger: (since?: number) => Promise<InventoryLedgerEntry[]>;
+  getActionLog: (limit?: number) => Promise<ActionLogEntry[]>;
+  logAction: (input: Omit<ActionLogInput, "actorKind" | "actorId"> & Partial<Pick<ActionLogInput, "actorKind" | "actorId">>) => Promise<ActionLogEntry>;
   updateSale: (id: string, data: Partial<Sale>) => void;
 
   createInvoiceWithLineItems: (invoiceData: Partial<Invoice>, lineItems: Partial<InvoiceLineItem>[]) => Promise<any>;
@@ -191,7 +194,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const addVariant = useCallback((data: Partial<Variant>) => { storage.createVariant(data); }, []);
   const addVariantAsync = useCallback((data: Partial<Variant>) => storage.createVariant(data), []);
-  const updateVariant = useCallback((id: string, data: Partial<Variant>) => { storage.updateVariant(id, data); }, []);
+  // The actor comes from the till, so a price change is attributed to whoever is on it.
+  const updateVariant = useCallback(
+    (id: string, data: Partial<Variant>) => {
+      storage.updateVariant(id, data, currentEmployeeIdRef.current
+        ? { kind: "EMPLOYEE", id: currentEmployeeIdRef.current }
+        : { kind: "SYSTEM", id: null });
+    },
+    [],
+  );
   const deleteVariant = useCallback((id: string) => { storage.deleteVariant(id); }, []);
 
   const addModifierGroup = useCallback((data: Partial<ModifierGroup>) => { storage.createModifierGroup(data); }, []);
@@ -232,6 +243,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const recordWaste = useCallback((id: string, quantity: number, reason: WasteReason, note?: string) => storage.recordWaste(id, quantity, reason, note), []);
   const recordCount = useCallback((id: string, counted: number, note?: string) => storage.recordCount(id, counted, note), []);
   const getLedger = useCallback((since?: number) => storage.getLedger(since), []);
+  const getActionLog = useCallback((limit?: number) => storage.getActionLog(limit), []);
+  const logAction = useCallback(
+    (input: Omit<ActionLogInput, "actorKind" | "actorId"> & Partial<Pick<ActionLogInput, "actorKind" | "actorId">>) =>
+      storage.appendActionLog({
+        actorKind: input.actorKind ?? (currentEmployeeIdRef.current ? "EMPLOYEE" : "SYSTEM"),
+        actorId: input.actorId ?? currentEmployeeIdRef.current,
+        ...input,
+      } as ActionLogInput),
+    [],
+  );
   const updateSale = useCallback((id: string, data: Partial<Sale>) => { storage.updateSale(id, data); }, []);
 
   const createInvoiceWithLineItems = useCallback((invoiceData: Partial<Invoice>, lineItems: Partial<InvoiceLineItem>[]) => storage.createInvoiceWithLineItems(invoiceData, lineItems), []);
@@ -257,7 +278,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     () => localStorage.getItem(CURRENT_EMPLOYEE_KEY),
   );
 
+  // A ref as well as state: callbacks that write rows must see the current value without
+  // being rebuilt (and re-rendering every consumer) each time the till changes hands.
+  const currentEmployeeIdRef = useRef<string | null>(localStorage.getItem(CURRENT_EMPLOYEE_KEY));
+
   const setCurrentEmployeeId = useCallback((id: string | null) => {
+    currentEmployeeIdRef.current = id;
     if (id) localStorage.setItem(CURRENT_EMPLOYEE_KEY, id);
     else localStorage.removeItem(CURRENT_EMPLOYEE_KEY);
     setCurrentEmployeeIdState(id);
@@ -336,6 +362,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     recordWaste,
     recordCount,
     getLedger,
+    getActionLog,
+    logAction,
     updateSale,
 
     createInvoiceWithLineItems,

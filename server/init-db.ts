@@ -205,6 +205,21 @@ async function initSchema() {
   await db.execute(sql`ALTER TABLE admin_sales ADD COLUMN IF NOT EXISTS tax_inclusive BOOLEAN`);
   // Feature 19 T2: the cashier. Null on existing rows, never guessed.
   await db.execute(sql`ALTER TABLE admin_sales ADD COLUMN IF NOT EXISTS employee_id TEXT`);
+  // Feature 19 T3: the action log. Deliberately without updated_at or deleted_at — the table
+  // has nowhere to record an edit because nothing may edit it.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS action_log (
+      id TEXT PRIMARY KEY,
+      at BIGINT NOT NULL,
+      actor_kind TEXT NOT NULL,
+      actor_id TEXT,
+      action TEXT NOT NULL,
+      target_type TEXT NOT NULL,
+      target_id TEXT,
+      summary TEXT NOT NULL,
+      detail JSONB
+    )
+  `);
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS store_settings (
       key TEXT PRIMARY KEY,

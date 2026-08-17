@@ -1,5 +1,6 @@
 import { parseMenuBlueprint, planMenuApply, type ExistingMenu, type FieldDiff, type MenuPlan } from "./menu-blueprint";
-import { MENU_CATEGORIES_KEY, mergeSettingSecrets, redactSetting, validateSetting } from "./schema";
+import { MENU_CATEGORIES_KEY, SECRET_SETTING_FIELDS, mergeSettingSecrets, redactSetting, validateSetting } from "./schema";
+import { ACTIONS, actionLogEntry, type ActionLogEntry, type ActionLogInput } from "./action-log";
 import type { Modifier, ModifierGroup, Product, ProductModifierGroup, Variant } from "./schema";
 import { productMix, salesSeries, salesSummary, type Granularity, type ReportSale } from "./reports";
 import { menuMargins, type MarginData, type MarginVariant } from "./pricing";
@@ -84,6 +85,12 @@ export interface ApiAdminStorage {
   updateEmployee(id: string, data: Record<string, unknown>): Promise<unknown | null>;
 
   listTimePunches(): Promise<unknown[]>;
+
+  /**
+   * Append one action-log row. Optional: a storage adapter that cannot log still serves the
+   * API — the log is evidence, not a precondition for taking money.
+   */
+  appendActionLog?(entry: ActionLogEntry): Promise<unknown>;
 
   listSettings(): Promise<StoreSetting[]>;
   getSetting(key: string): Promise<StoreSetting | null>;
@@ -292,6 +299,21 @@ function parseWindow(req: ApiRequest): { since?: number; until?: number } {
     return raw != null && raw !== "" && Number.isFinite(n) ? n : undefined;
   };
   return { since: num(req.query?.since), until: num(req.query?.until) };
+}
+
+/**
+ * Log an action without letting logging break the thing being logged.
+ *
+ * The log is evidence, not a precondition for taking money: an adapter that cannot append —
+ * or one that fails mid-write — must not turn an operator's save into a 500. It warns rather
+ * than swallowing silently, so a log that has stopped working is visible in the server output.
+ */
+async function tryLog(store: ApiAdminStorage, input: ActionLogInput): Promise<void> {
+  try {
+    await store.appendActionLog?.(actionLogEntry(input, Date.now(), () => uid("log")));
+  } catch (err) {
+    console.warn("action log append failed:", err instanceof Error ? err.message : err);
+  }
 }
 
 export function createApiHandlers(store: ApiAdminStorage) {
@@ -525,6 +547,17 @@ export function createApiHandlers(store: ApiAdminStorage) {
         const prev = await store.getSetting(req.params.key);
         const value = mergeSettingSecrets(req.params.key, body.value, prev ? prev.value : null);
         const r = await store.setSetting(req.params.key, value);
+        // Secrets are redacted on the way out, so the log records *that* the credential
+        // changed and never what it changed to.
+        await tryLog(store, {
+          actorKind: "SYSTEM",
+          actorId: null,
+          action: ACTIONS.SETTING_CHANGED,
+          targetType: "setting",
+          targetId: req.params.key,
+          summary: `Setting ${req.params.key} changed`,
+          detail: SECRET_SETTING_FIELDS[req.params.key] ? null : { value: redactSetting(req.params.key, value) },
+        });
         return { status: 200, data: { success: true, updatedAt: r.updatedAt } };
       } catch { return { status: 500, data: { error: "Failed to save setting" } }; }
     },
@@ -566,6 +599,18 @@ export function createApiHandlers(store: ApiAdminStorage) {
         }
 
         await applyMenuPlan(store, plan, existing);
+        // One row per apply, not per change: a 60-product menu would bury the log, and what an
+        // autopsy needs is "the menu was applied, and it moved 12 things".
+        const moved = plan.changes.filter(c => c.op !== "noop");
+        await tryLog(store, {
+          actorKind: "AGENT",
+          actorId: null,
+          action: ACTIONS.MENU_APPLIED,
+          targetType: "menu",
+          targetId: null,
+          summary: `Menu applied: ${moved.length} change${moved.length === 1 ? "" : "s"} across ${plan.changes.length} checked`,
+          detail: { changed: moved.map(c => `${c.entity}:${c.name}`) },
+        });
         return { status: 200, data: { data: { applied: true, changes: plan.changes, errors: [] } } };
       } catch {
         return { status: 500, data: { error: "Failed to apply menu blueprint" } };

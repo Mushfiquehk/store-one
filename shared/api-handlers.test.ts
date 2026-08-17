@@ -10,10 +10,13 @@ import {
 // else throws, so a test that accidentally reaches another entity fails loudly.
 function stubStore(): ApiAdminStorage {
   const settings = new Map<string, StoreSetting>();
+  const log: Record<string, unknown>[] = [];
   return new Proxy({
     // Exposed so a test can assert on what was *stored* — the API deliberately
     // never returns a secret, so there is no other way to check it survived a save.
     __settings: settings,
+    __log: log,
+    async appendActionLog(entry: unknown) { log.push(entry as Record<string, unknown>); return entry; },
     async listSettings() { return [...settings.values()]; },
     async getSetting(key: string) { return settings.get(key) ?? null; },
     async setSetting(key: string, value: unknown) {
@@ -312,4 +315,41 @@ test("the rate the operator set is the tax the till charges", async () => {
   assert.equal(taxCentsFor(1000, taxRatePct(null)), 0);
   assert.equal(taxCentsFor(1000, taxRatePct(-5)), 0, "a negative stored rate reads as unset");
   assert.equal(taxRatePct(6.5), 6.5);
+});
+
+const logOf = (store: ApiAdminStorage) => (store as unknown as { __log: Record<string, unknown>[] }).__log;
+
+test("a settings change writes one action-log row, and never the credential", async () => {
+  const store = stubStore();
+  const h = createApiHandlers(store);
+
+  await call(h, "PUT", `/api/settings/${TAX_RATE_KEY}`, { value: 6.5 });
+  assert.equal(logOf(store).length, 1, "exactly one row");
+  assert.equal(logOf(store)[0].action, "SETTING_CHANGED");
+  assert.equal(logOf(store)[0].targetId, TAX_RATE_KEY);
+  assert.deepEqual(logOf(store)[0].detail, { value: 6.5 });
+
+  // A secret's row records that it changed, not what it changed to.
+  await call(h, "PUT", "/api/settings/emailConfig", { value: { host: "smtp.example.com", password: "s3cret" } });
+  const secretRow = logOf(store)[1];
+  assert.equal(secretRow.action, "SETTING_CHANGED");
+  assert.equal(secretRow.detail, null);
+  assert.ok(!JSON.stringify(logOf(store)).includes("s3cret"), "the log must not leak a credential");
+});
+
+test("a failed log append does not fail the write it was recording", async () => {
+  // The log is evidence, not a precondition for taking money.
+  const store = new Proxy({
+    async getSetting() { return null; },
+    async setSetting(key: string, value: unknown) { return { key, value, updatedAt: 1 }; },
+    async appendActionLog() { throw new Error("disk full"); },
+  } as Record<string, unknown>, {
+    get(target: Record<string, unknown>, prop: string) {
+      if (prop in target) return target[prop];
+      return () => { throw new Error(`unexpected storage call: ${prop}`); };
+    },
+  }) as unknown as ApiAdminStorage;
+
+  const res = await call(createApiHandlers(store), "PUT", `/api/settings/${TAX_RATE_KEY}`, { value: 6.5 });
+  assert.equal(res.status, 200, "the setting still saved");
 });
