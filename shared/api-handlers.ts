@@ -670,6 +670,8 @@ export function createApiHandlers(store: ApiAdminStorage) {
           paymentMethod: body.paymentMethod || "cash",
           taxRatePct: taxRate * 100,
           taxInclusive: false,
+          // No cashier: this path is an API caller, not a person at a till.
+          employeeId: null,
           status: "completed",
           linesJson: lines.map(l => ({
             variantId: l.variantId,

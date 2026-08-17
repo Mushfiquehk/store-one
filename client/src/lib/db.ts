@@ -156,6 +156,8 @@ export interface Sale {
   changeCents: number | null;
   taxRatePct: number | null;
   taxInclusive: boolean | null;
+  /** Who rang it, or null when nobody was on the till. */
+  employeeId: string | null;
   status: string;
   linesJson: SaleLine[];
   customerName: string;
@@ -503,6 +505,14 @@ class PosDatabase extends Dexie {
         }
         position += 1;
       }
+    });
+
+    // Feature 19 T2: who rang the sale. Null on existing rows — nobody recorded it, and
+    // inventing a cashier for last week's takings is the kind of guess an audit hates.
+    this.version(16).stores({ sales: "id, createdAt, updatedAt, employeeId" }).upgrade(async tx => {
+      await tx.table("sales").toCollection().modify(sale => {
+        if (sale.employeeId === undefined) sale.employeeId = null;
+      });
     });
   }
 }

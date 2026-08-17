@@ -39,7 +39,7 @@ export default function PosPage() {
   const { toast } = useToast();
   const {
     products, variants, inventory, bom, sales, modifierGroups, modifiers,
-    productModifierLinks, productModifierScaleFactors, recordSale, updateSale, isLoading,
+    productModifierLinks, productModifierScaleFactors, recordSale, updateSale, isLoading, currentEmployee,
     combos, comboItems, productGroups, productGroupItems,
   } = useStore();
 
@@ -434,6 +434,8 @@ export default function PosPage() {
       // truth rather than silently rewriting itself.
       taxRatePct: taxRate,
       taxInclusive: cartTax.inclusive,
+      // Who rang it. Null when nobody is on the till, which is honest rather than blank.
+      employeeId: currentEmployee?.id ?? null,
       status: "completed",
       customerName: customerName.trim(),
       closedAt: null,

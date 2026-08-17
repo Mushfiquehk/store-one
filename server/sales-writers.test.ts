@@ -195,3 +195,38 @@ test("a test order is a visible sale and not revenue", async t => {
     await db.delete(adminSales).where(eq(adminSales.id, TEST_ORDER.id));
   }
 });
+
+test("a sale carries the cashier, and no cashier reads back as null rather than blank", async t => {
+  if (!DATABASE_URL) {
+    t.skip("set DATABASE_URL to a throwaway Postgres to run the sales-writer tests");
+    return;
+  }
+
+  const { initDb } = await import("./init-db");
+  const { db } = await import("./db");
+  const { adminStorage } = await import("./storage");
+  const { adminSales } = await import("./schema");
+  const { eq, inArray } = await import("drizzle-orm");
+  await initDb();
+
+  const rung = { ...SALE, id: "twow_attrib1", employeeId: "emp_ana" };
+  const unattributed = { ...SALE, id: "twow_attrib2" };
+  const ids = [rung.id, unattributed.id];
+
+  try {
+    await db.delete(adminSales).where(inArray(adminSales.id, ids));
+    await adminStorage.createSale(rung as unknown as Record<string, unknown>);
+    await adminStorage.createSale(unattributed as unknown as Record<string, unknown>);
+
+    const rows = (await adminStorage.listSales()) as Array<{ id: string; employeeId: string | null }>;
+    const byId = Object.fromEntries(rows.filter(r => ids.includes(r.id)).map(r => [r.id, r]));
+
+    assert.equal(byId[rung.id].employeeId, "emp_ana", "the cashier is on the sale");
+    // Null, not "": Feature 12's void attribution and Feature 14's per-employee view both branch
+    // on this, and an empty string is a cashier whose name is nothing.
+    assert.equal(byId[unattributed.id].employeeId, null);
+    assert.equal(rows.filter(r => ids.includes(r.id)).length, 2, "and both render");
+  } finally {
+    await db.delete(adminSales).where(inArray(adminSales.id, ids));
+  }
+});

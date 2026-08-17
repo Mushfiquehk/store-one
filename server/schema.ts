@@ -155,6 +155,9 @@ export const adminSales = pgTable("admin_sales", {
   // What this sale was charged at, not what the store charges now.
   taxRatePct: doublePrecision("tax_rate_pct"),
   taxInclusive: pgBoolean("tax_inclusive"),
+  // Who rang it. Nullable, and not a foreign key: employees are client-owned by Feature 7 T4,
+  // so the server holds the id without being able to resolve it.
+  employeeId: text("employee_id"),
   status: text("status").notNull().default("completed"),
   customerName: text("customer_name").notNull().default(""),
   linesJson: jsonb("lines_json").notNull(),

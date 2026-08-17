@@ -344,6 +344,12 @@ export type Sale = {
    */
   taxRatePct: number | null;
   taxInclusive: boolean | null;
+  /**
+   * Who rang it. Null when nobody was on the till — an honest answer that reports render as
+   * "unattributed", not a reason to drop the sale. Existing rows stay null: guessing who rang
+   * a sale from last week is worse than admitting nobody recorded it.
+   */
+  employeeId: string | null;
   status: string;
   linesJson: SaleLine[];
   customerName: string;

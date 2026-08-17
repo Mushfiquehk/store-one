@@ -438,6 +438,7 @@ export const dexieAdminStorage: ApiAdminStorage = {
       changeCents: (data.changeCents as number) ?? null,
       taxRatePct: (data.taxRatePct as number) ?? null,
       taxInclusive: (data.taxInclusive as boolean) ?? null,
+      employeeId: (data.employeeId as string) ?? null,
       status: (data.status as string) ?? "completed",
       linesJson: (data.linesJson as Sale["linesJson"]) ?? [],
       customerName: (data.customerName as string) ?? "",

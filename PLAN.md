@@ -29,7 +29,7 @@ its section. They are ordered by what they cost if left alone.
 | **17** | The stored SMTP password is returned by `GET /api/settings`, pre-filled into a form, and included in every backup | `api-handlers.ts:467-472`; `settings.tsx:109, 580`; `db.ts:462` → `backup.ts:32` | An operator's real mail credential leaks to anyone who can reach the server or fetch a backup |
 | ~~**16**~~ | ~~Whether the till can record a card sale depends on ephemeral React state~~ **Fixed** — `payments.methods`, a store setting | ~~`pos.tsx:133`~~ | — |
 | ~~**16**~~ | ~~"Integration Connected — Successfully linked to provider" is a toast over a no-op~~ **Fixed** — `shared/integrations.ts`, every provider `planned` | ~~`store.tsx:236-241`~~ | — |
-| **19** | No sale, price change, or adjustment records who made it; the only "current employee" is dialog state cleared on submit | `Sale` has no `employeeId` (`db.ts:142-156`); `app-shell.tsx:57, 85` | Feature 12's void attribution and Feature 15's ledger actor have nothing to record |
+| ~~**19**~~ | ~~No sale records who made it; the "current employee" is dialog state cleared on submit~~ **Fixed** (T1, T2) — device-persisted current employee, `employeeId` on the sale | ~~`app-shell.tsx:57, 85`~~ | — |
 | ~~**15**~~ | ~~Recipe depletion is implemented twice, and only the POS copy runs on real sales~~ **Fixed** — one engine in `shared/depletion.ts` | ~~`pos.tsx:373-436`~~ | — |
 | ~~**15**~~ | ~~Stock adjustments clamp at zero and record nothing~~ **Fixed** — `inventoryLedger` + unclamped quantities | ~~`local-storage.ts:257`~~ | — |
 | ~~**21**~~ | ~~The Settings tax-rate field is bound to `useState` and written nowhere~~ **Fixed** (T1) — `tax.ratePct`, default 0; the server order path is still Feature 5 T2's half | ~~`settings.tsx:89`~~ | — |
@@ -1097,11 +1097,17 @@ emailed copy that matches what they were charged to the cent, and every copy aft
 where an operator can see and change it. Clocking in sets it; **clocking out clears it, and closing the
 dialog does not** — that clearing on submit was the bug that made attribution impossible. Selling with
 nobody on the till still works, and an employee who has been deleted stops being current whatever
-`localStorage` says. T2–T4 remain.
+`localStorage` says. T2 done — `employeeId` (nullable) is on `Sale` in all three schemas (Dexie v16, indexed for the
+per-employee views T4 and Feature 14 want, plus an `ALTER … IF NOT EXISTS` after the `CREATE`), set from
+T1's current employee at the till and explicitly `null` on the API order path and test orders — neither
+is a person at a till. Existing rows stay null and demo sales are unattributed rather than carrying an
+invented cashier. **This unblocks Feature 12 T3's void attribution and Feature 14's per-employee view.**
+T3–T4 remain.
 
-**No automated test:** this is React state plus `localStorage`, and the test runner only covers
-`{shared,server}`. T2's `employeeId` on the sale is where attribution becomes testable, and it is the
-next task.
+**On T1's testability:** T1 was React state plus `localStorage`, which this runner (glob `{shared,server}`)
+cannot reach. T2 is where attribution became testable, and it is tested against a real database: a sale
+rung with a cashier reads back with their id, one rung with nobody reads back `null` rather than `""`,
+and both render.
 **Vision pillar:** #6 — *"an autopilot mode where an AI agent takes over… With enough logging, it
 produces autopsies of its decisions taken in the past **and even taken by the operator** to
 self-improve its decision making."* This is the only pillar with no coverage anywhere in the plan,

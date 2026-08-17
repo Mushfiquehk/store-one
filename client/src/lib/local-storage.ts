@@ -482,6 +482,7 @@ export const storage = {
       changeCents: data.changeCents ?? null,
       taxRatePct: data.taxRatePct ?? null,
       taxInclusive: data.taxInclusive ?? null,
+      employeeId: data.employeeId ?? null,
       status: data.status!,
       linesJson: data.linesJson!,
       customerName: data.customerName ?? "",
