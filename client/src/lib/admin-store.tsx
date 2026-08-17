@@ -27,7 +27,6 @@ type StoreContextType = {
   sales: Sale[];
   invoices: Invoice[];
   invoiceLineItems: InvoiceLineItem[];
-  integrations: string[];
   productModifierLinks: Record<string, string[]>;
   productModifierScaleFactors: Record<string, ModifierScaleFactors | null>;
   isLoading: boolean;
@@ -82,7 +81,6 @@ type StoreContextType = {
   updateInvoice: (id: string, data: Partial<Invoice>) => Promise<any>;
   deleteInvoice: (id: string) => Promise<void>;
 
-  toggleIntegration: (id: string) => void;
 };
 
 
@@ -126,7 +124,6 @@ export function AdminStoreProvider({ children }: { children: React.ReactNode }) 
   const [invoiceLineItems, setInvoiceLineItems] = useState<InvoiceLineItem[]>([]);
   const [pmgData, setPmgData] = useState<{ links: Record<string, string[]>; sf: Record<string, ModifierScaleFactors | null> }>({ links: {}, sf: {} });
   const [isLoading, setIsLoading] = useState(true);
-  const [integrations] = useState<string[]>([]);
   const mountedRef = useRef(true);
 
   const refresh = useCallback(async () => {
@@ -257,8 +254,6 @@ export function AdminStoreProvider({ children }: { children: React.ReactNode }) 
     await refresh();
   }, [refresh]);
 
-  const toggleIntegration = useCallback((_id: string) => {}, []);
-
   const value: StoreContextType = {
     products,
     variants,
@@ -271,7 +266,6 @@ export function AdminStoreProvider({ children }: { children: React.ReactNode }) 
     sales: [],
     invoices,
     invoiceLineItems,
-    integrations,
     productModifierLinks: pmgData.links,
     productModifierScaleFactors: pmgData.sf,
     isLoading,
@@ -288,7 +282,6 @@ export function AdminStoreProvider({ children }: { children: React.ReactNode }) 
     addSale,
     createInvoiceWithLineItems, createInvoiceLineItem, updateInvoiceLineItem, deleteInvoiceLineItem,
     updateInvoice, deleteInvoice,
-    toggleIntegration,
   };
 
   return (

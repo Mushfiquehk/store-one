@@ -28,7 +28,7 @@ its section. They are ordered by what they cost if left alone.
 | **8** | Conflict resolution reads `adminUpdatedAt` but never compares it | `storage.ts:215+` | Newer POS edits silently discarded |
 | **17** | The stored SMTP password is returned by `GET /api/settings`, pre-filled into a form, and included in every backup | `api-handlers.ts:467-472`; `settings.tsx:109, 580`; `db.ts:462` → `backup.ts:32` | An operator's real mail credential leaks to anyone who can reach the server or fetch a backup |
 | ~~**16**~~ | ~~Whether the till can record a card sale depends on ephemeral React state~~ **Fixed** — `payments.methods`, a store setting | ~~`pos.tsx:133`~~ | — |
-| **16** | "Integration Connected — Successfully linked to provider" is a toast over a no-op | `store.tsx:236-241` — no network call, no persistence | Pillar #3's only surface is a prop |
+| ~~**16**~~ | ~~"Integration Connected — Successfully linked to provider" is a toast over a no-op~~ **Fixed** — `shared/integrations.ts`, every provider `planned` | ~~`store.tsx:236-241`~~ | — |
 | **19** | No sale, price change, or adjustment records who made it; the only "current employee" is dialog state cleared on submit | `Sale` has no `employeeId` (`db.ts:142-156`); `app-shell.tsx:57, 85` | Feature 12's void attribution and Feature 15's ledger actor have nothing to record |
 | **15** | Recipe depletion is implemented twice — `pos.tsx:373-436` duplicates `bom-engine.ts:203-293`, and only the POS copy runs on real sales | the two already differ at `pos.tsx:367` vs `bom-engine.ts:224` | Pillar #4's accuracy claim rests on a copy nothing tests |
 | **15** | Stock adjustments clamp at zero and record nothing | `local-storage.ts:257`, `dexie-admin-storage.ts:266`; no ledger table in `db.ts:194-211` | Over-sales vanish; no answer to "where did it go" |
@@ -1328,7 +1328,10 @@ T2 done — `tenderedCents` / `changeCents` on `Sale` (Dexie v11, `admin_sales` 
 the bootstrap and an `ALTER … IF NOT EXISTS`), a cash sale asks what was handed over with quick
 amounts from `tenderSuggestions`, change comes from `changeDueCents` (never negative; an
 under-tender disables Record Sale), and a non-cash sale records `tendered = total, change = 0`.
-Tests in `shared/tender.test.ts`. T3–T4 remain.
+Tests in `shared/tender.test.ts`.
+T3 done — the six providers live in `shared/integrations.ts`, each `status: "planned"`, and each card
+says "Not available yet" with a disabled button. `toggleIntegration` and the `integrations` state are
+deleted from both stores, and the page points at Settings → Payment Methods for taking cards. T4 remains.
 **Vision pillar:** #3 — *"optional add-on features that the operator can setup and pay for later. The
 operator can optionally integrate 3rd party vendors."* This pillar has a page, a nav entry, and no
 implementation. Also #1: "setup **and operate**" — operating a till means taking the money.
