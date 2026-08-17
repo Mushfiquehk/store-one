@@ -137,6 +137,9 @@ test("both servers forward the query string to the shared handlers", () => {
 test("the Reports page contains no random numbers", () => {
   const page = readFileSync(new URL("../client/src/pages/reports.tsx", import.meta.url), "utf8");
   assert.ok(!page.includes("Math.random"), "Math.random is back in reports.tsx");
+  // Labour percent divides by revenue, so it is the figure most likely to be quietly
+  // re-derived on the page instead of coming from the tested function.
+  assert.ok(page.includes("laborPct("), "labour percent must come from shared/labor.ts");
 });
 
 test("averageOrderCents does not divide by zero", () => {
