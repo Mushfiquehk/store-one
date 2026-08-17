@@ -1,6 +1,6 @@
 import { db } from "./db";
 import { costPerStockUnit, stockUnitsReceived } from "@shared/units";
-import { ledgerRows, type LedgerContext, type LedgerReason } from "@shared/ledger";
+import { WASTE_REASONS, ledgerRows, type InventoryLedgerEntry, type LedgerContext, type LedgerReason, type WasteReason } from "@shared/ledger";
 import type {
   Product,
   Variant,
@@ -294,6 +294,50 @@ export const storage = {
       });
     });
     return db.inventoryItems.get(id);
+  },
+
+  /** Waste: stock leaves the shelf for a stated reason, never a blank one. */
+  async recordWaste(id: string, quantity: number, reason: WasteReason, note = ""): Promise<InventoryItem | undefined> {
+    if (!(quantity > 0)) throw new Error("Waste quantity must be greater than zero");
+    if (!WASTE_REASONS.includes(reason)) throw new Error(`Unknown waste reason: ${reason}`);
+    await db.transaction("rw", [db.inventoryItems, db.inventoryLedger], async () => {
+      const item = await db.inventoryItems.get(id);
+      if (!item) return;
+      await applyDeltas(new Map([[id, 0 - quantity]]), { [id]: item.currentQuantity }, {
+        reason: "WASTE",
+        note: note ? `${reason}: ${note}` : reason,
+        createdAt: Date.now(),
+        newId: itemId => uid(`led_${itemId}`),
+      });
+    });
+    return db.inventoryItems.get(id);
+  },
+
+  /**
+   * A physical count. What is on the shelf is the truth; the gap between it and
+   * currentQuantity is the finding, so it is written as the row's delta rather than
+   * silently overwriting the number.
+   */
+  async recordCount(id: string, countedQuantity: number, note = ""): Promise<InventoryItem | undefined> {
+    await db.transaction("rw", [db.inventoryItems, db.inventoryLedger], async () => {
+      const item = await db.inventoryItems.get(id);
+      if (!item) return;
+      await applyDeltas(new Map([[id, countedQuantity - item.currentQuantity]]), { [id]: item.currentQuantity }, {
+        reason: "COUNT",
+        note,
+        createdAt: Date.now(),
+        newId: itemId => uid(`led_${itemId}`),
+      });
+    });
+    return db.inventoryItems.get(id);
+  },
+
+  /** Ledger rows, newest first, optionally from a point in time. */
+  async getLedger(since?: number): Promise<InventoryLedgerEntry[]> {
+    const rows = since
+      ? await db.inventoryLedger.where("createdAt").aboveOrEqual(since).toArray()
+      : await db.inventoryLedger.toArray();
+    return rows.sort((a, b) => b.createdAt - a.createdAt);
   },
 
   /**

@@ -30,8 +30,8 @@ its section. They are ordered by what they cost if left alone.
 | ~~**16**~~ | ~~Whether the till can record a card sale depends on ephemeral React state~~ **Fixed** — `payments.methods`, a store setting | ~~`pos.tsx:133`~~ | — |
 | ~~**16**~~ | ~~"Integration Connected — Successfully linked to provider" is a toast over a no-op~~ **Fixed** — `shared/integrations.ts`, every provider `planned` | ~~`store.tsx:236-241`~~ | — |
 | **19** | No sale, price change, or adjustment records who made it; the only "current employee" is dialog state cleared on submit | `Sale` has no `employeeId` (`db.ts:142-156`); `app-shell.tsx:57, 85` | Feature 12's void attribution and Feature 15's ledger actor have nothing to record |
-| **15** | Recipe depletion is implemented twice — `pos.tsx:373-436` duplicates `bom-engine.ts:203-293`, and only the POS copy runs on real sales | the two already differ at `pos.tsx:367` vs `bom-engine.ts:224` | Pillar #4's accuracy claim rests on a copy nothing tests |
-| **15** | Stock adjustments clamp at zero and record nothing | `local-storage.ts:257`, `dexie-admin-storage.ts:266`; no ledger table in `db.ts:194-211` | Over-sales vanish; no answer to "where did it go" |
+| ~~**15**~~ | ~~Recipe depletion is implemented twice, and only the POS copy runs on real sales~~ **Fixed** — one engine in `shared/depletion.ts` | ~~`pos.tsx:373-436`~~ | — |
+| ~~**15**~~ | ~~Stock adjustments clamp at zero and record nothing~~ **Fixed** — `inventoryLedger` + unclamped quantities | ~~`local-storage.ts:257`~~ | — |
 | **21** | The Settings tax-rate field is bound to `useState` and written nowhere; the till charges a hardcoded 8.25% in every store | `settings.tsx:89, 411-412` (only three mentions of `taxRate` in the file); `pos.tsx:38` — `setTaxRatePct` is never called | Every operator charges the wrong tax and cannot change it |
 | **22** | Nothing ever asks how much cash is in the drawer — no float, no count, no over/short, no trading day | `grep -rin "drawer\|openingFloat\|cashCount\|endOfDay"` returns nothing | Every other defect in this table is undetectable in daily operation |
 | **25** | A product with no tags is unreachable on the till — the "show everything" branch is dead once any tagged product exists | `pos.tsx:98-116`; `activeTag` auto-sets at `:109` (during render), and `:114` filters by it | An operator adds an item, cannot find it, cannot tell whether it saved |
@@ -1479,7 +1479,11 @@ that nothing is connected yet, and there is exactly one POS page in the codebase
 
 ## Feature 15 — Depletion that leaves a record: one engine, one ledger
 
-**Status:** T1 done — the walk lives in `shared/depletion.ts`, called by both paths; `bom-engine.ts`
+**Status:** done — T1–T4 complete. One depletion engine, an append-only ledger written in the same
+transaction as the sale, quantities that are allowed to go negative and say so, and waste, physical
+counts and the unexplained remainder between them.
+
+T1 done — the walk lives in `shared/depletion.ts`, called by both paths; `bom-engine.ts`
 re-exports it and the till's copy (`resolveSubRecipe` + the walk in `handleRecordSale`) is deleted.
 The server's bare `else` is gone: a BOM row pointing at nothing deducts from nothing. Fixture
 assertions in `server/depletion.test.ts` pin a seeded drink's deltas, written out by hand from the
@@ -1497,7 +1501,11 @@ this was one line there plus the two server sites (`storage.ts:714`, and the sim
 projection in `bom-engine.ts`, which now warns "over-drawn" rather than "depleted"). Over-drawn is its
 own state on the inventory page and in the reports stock table — never folded into "Low" — and no sale
 is blocked on stock.
-T4 remains.
+T4 done — waste (item, quantity, **required** reason from `WASTE_REASONS`, optional note) and a
+physical count, both through the same ledger path; the count writes the gap as a `COUNT` row rather
+than overwriting the quantity. `reconcile` (`shared/ledger.ts`, tested against the plan's check)
+gives opening / received / sold / wasted / counted / unexplained per item, shown as "Where it went" on
+the inventory page. An item nobody counted reads "not counted", never a zero variance.
 
 **Found while doing T1, not fixed here:** BOM rows are attached only to a product's *small* variant
 (`seed-data.ts:208-224`, `sourceId: V("mocha_s")`) while their `scaleFactorMatrix` keys every size.
