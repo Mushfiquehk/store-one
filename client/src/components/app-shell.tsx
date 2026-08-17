@@ -49,11 +49,12 @@ export default function AppShell({
 }) {
   const [location, setLocation] = useLocation();
   const { toast } = useToast();
-  const { employees, timePunches, addTimePunch, updateTimePunch } = useStore();
+  const { employees, timePunches, addTimePunch, updateTimePunch, currentEmployee, setCurrentEmployeeId } = useStore();
   
   // Time Punch State
   const [isTimePunchOpen, setIsTimePunchOpen] = useState(false);
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>("");
+  // The dialog's own selection, defaulting to whoever is already on the till.
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>(currentEmployee?.id ?? "");
   
   // Check if selected employee is currently clocked in
   const activePunch = timePunches.find(tp => tp.employeeId === selectedEmployeeId && !tp.timeOut);
@@ -68,8 +69,9 @@ export default function AppShell({
     const emp = employees.find(e => e.id === selectedEmployeeId);
     
     if (isClockedIn && activePunch) {
-      // Clock Out
+      // Clock Out — and this is the one place clearing the current employee is correct.
       updateTimePunch(activePunch.id, { timeOut: Date.now() });
+      if (currentEmployee?.id === selectedEmployeeId) setCurrentEmployeeId(null);
       toast({ title: "Clocked Out", description: `Goodbye, ${emp?.name}! Session ended at ${new Date().toLocaleTimeString()}` });
     } else {
       // Clock In
@@ -78,11 +80,14 @@ export default function AppShell({
         employeeId: selectedEmployeeId,
         timeIn: Date.now()
       });
+      // Clocking in is what puts someone on the till, and it survives a reload.
+      setCurrentEmployeeId(selectedEmployeeId);
       toast({ title: "Clocked In", description: `Welcome, ${emp?.name}! Started at ${new Date().toLocaleTimeString()}` });
     }
-    
+
     setIsTimePunchOpen(false);
-    setSelectedEmployeeId("");
+    // Deliberately not clearing the current employee here: closing a dialog is not clocking
+    // out, and treating it as such is why nothing could ever be attributed to anyone.
   };
 
   return (
@@ -192,6 +197,17 @@ export default function AppShell({
           </div>
           
           <div className="flex items-center gap-4">
+            {/* Who is on the till, where the operator can see and change it. */}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="rounded-full"
+              onClick={() => { setSelectedEmployeeId(currentEmployee?.id ?? ""); setIsTimePunchOpen(true); }}
+              data-testid="button-current-employee"
+            >
+              <Clock className="mr-2 h-4 w-4" />
+              {currentEmployee ? currentEmployee.name : "No one on till"}
+            </Button>
             <div className="text-2xl font-serif font-bold tracking-tight text-primary sm:block">
               CornerShop
             </div>

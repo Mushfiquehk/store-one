@@ -1092,7 +1092,16 @@ emailed copy that matches what they were charged to the cent, and every copy aft
 
 ## Feature 19 — Who did that: attribution, and the log every autopsy needs
 
-**Status:** planned
+**Status:** T1 done — the current employee lives in the store, persisted under
+`cornerpos_current_employee` (the same convention `sync.ts` uses), and is shown in the app-shell header
+where an operator can see and change it. Clocking in sets it; **clocking out clears it, and closing the
+dialog does not** — that clearing on submit was the bug that made attribution impossible. Selling with
+nobody on the till still works, and an employee who has been deleted stops being current whatever
+`localStorage` says. T2–T4 remain.
+
+**No automated test:** this is React state plus `localStorage`, and the test runner only covers
+`{shared,server}`. T2's `employeeId` on the sale is where attribution becomes testable, and it is the
+next task.
 **Vision pillar:** #6 — *"an autopilot mode where an AI agent takes over… With enough logging, it
 produces autopsies of its decisions taken in the past **and even taken by the operator** to
 self-improve its decision making."* This is the only pillar with no coverage anywhere in the plan,
