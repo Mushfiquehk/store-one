@@ -50,6 +50,11 @@ const isTenderList = (v: unknown): v is string[] =>
  * till, so it is rejected at the API rather than trusted to the UI that sent it.
  */
 export function validateSetting(key: string, value: unknown): string | null {
+  if (key === DAY_START_HOUR_KEY) {
+    return Number.isInteger(value) && (value as number) >= 0 && (value as number) <= 23
+      ? null
+      : "day.startHour must be a whole hour from 0 to 23";
+  }
   if (key === MENU_CATEGORIES_KEY) {
     if (!Array.isArray(value)) return "menu.categories must be a list of category names";
     if (value.some(c => typeof c !== "string" || !c.trim())) return "A category name cannot be blank";
@@ -84,6 +89,11 @@ export function tenderMethods(value: unknown): string[] {
 // category has to be able to exist so the operator can see where things should go, and renaming
 // one has to be a single write rather than an edit to every product that happens to mention it.
 export const MENU_CATEGORIES_KEY = "menu.categories";
+
+// The trading-day rule lives in shared/drawer.ts; re-exported so settings validation and the
+// key itself stay in one import for callers.
+export { DAY_START_HOUR_KEY } from "./drawer";
+import { DAY_START_HOUR_KEY } from "./drawer";
 
 export const TAX_RATE_KEY = "tax.ratePct";
 

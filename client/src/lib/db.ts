@@ -2,6 +2,7 @@ import Dexie, { type Table } from "dexie";
 import type { StoreSetting } from "@shared/api-handlers";
 import type { InventoryLedgerEntry } from "@shared/ledger";
 import type { ActionLogEntry } from "@shared/action-log";
+import type { DrawerSession } from "@shared/drawer";
 import type {
   ProductAttributes,
   ModifierScaleFactors,
@@ -13,6 +14,7 @@ import type {
 
 export type { InventoryLedgerEntry };
 export type { ActionLogEntry };
+export type { DrawerSession };
 export type { ProductAttributes, ModifierScaleFactors, ScaleFactorMatrix, SaleLine, PricingStrategy, ComboItemType };
 
 export interface Product {
@@ -228,6 +230,8 @@ class PosDatabase extends Dexie {
   inventoryLedger!: Table<InventoryLedgerEntry, string>;
   // Append-only: who decided what. No update, no delete — see shared/action-log.ts.
   actionLog!: Table<ActionLogEntry, string>;
+  // What was in the drawer when it opened, and what was counted when it closed.
+  drawerSessions!: Table<DrawerSession, string>;
 
   constructor() {
     super("cornerpos");
@@ -523,6 +527,12 @@ class PosDatabase extends Dexie {
     // history of decisions to invent.
     this.version(17).stores({
       actionLog: "id, at, action, targetId, actorId",
+    });
+
+    // Feature 22 T1: the drawer session. openedAt is indexed because "which session covers this
+    // sale" is the query the whole feature turns on.
+    this.version(18).stores({
+      drawerSessions: "id, openedAt, closedAt",
     });
   }
 }

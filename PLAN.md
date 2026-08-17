@@ -663,7 +663,19 @@ tickets actually took.
 
 ## Feature 22 — Close of day: what should be in the drawer, and what is
 
-**Status:** planned
+**Status:** T1 done — `drawerSessions` (`shared/drawer.ts`, Dexie v18) with one row per session
+carrying both timestamps, who opened and closed it, the float, the count, the expected figure and the
+variance. `canOpenSession` refuses a second open while one is live — checked and written inside one
+Dexie transaction, so two taps cannot both win. Selling is **never** blocked on a session: a sale is
+attached by `sessionForSale` from its timestamp, so an unattached sale is claimed by a session opened
+later. `day.startHour` (default 4, validated 0–23) gives `tradingDayStart`, so a sale at 1am belongs to
+the day that began yesterday morning rather than to a new one. T2–T4 remain.
+
+**Not wired to the API surface yet:** T1 lists the `crudEntities` line in `shared/api-handlers.ts`, but
+generic CRUD is the wrong shape for this table — opening is a guarded operation and closing writes a
+computed variance, neither of which a `POST /:entity` expresses. T2 owns the expected figure; the
+endpoints should follow it as `open` / `close` operations rather than as CRUD, and that is a deliberate
+deviation rather than an omission.
 **Vision pillar:** #1 — "setup **and operate**". Counting the drawer is the one thing a cash business
 does every single day, and it is the only routine check that catches theft, mis-rings and
 mis-configuration at all.
