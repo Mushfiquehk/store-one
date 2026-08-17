@@ -646,6 +646,8 @@ export function createApiHandlers(store: ApiAdminStorage) {
           });
         }
 
+        // Feature 5 T2 owns replacing this constant with the tax.ratePct setting. Until then
+        // the stamp below records what was actually charged, which is the honest thing either way.
         const taxRate = 0.08;
         const taxCents = Math.round(subtotalCents * taxRate);
         const totalCents = subtotalCents + taxCents;
@@ -659,6 +661,8 @@ export function createApiHandlers(store: ApiAdminStorage) {
           taxCents,
           totalCents,
           paymentMethod: body.paymentMethod || "cash",
+          taxRatePct: taxRate * 100,
+          taxInclusive: false,
           status: "completed",
           linesJson: lines.map(l => ({
             variantId: l.variantId,

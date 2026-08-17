@@ -163,3 +163,24 @@ test("a test order is not revenue, in any report", () => {
     2,
   );
 });
+
+test("tax collected is the sum of what was recorded, not a rate applied to revenue", () => {
+  // Two sales rung at different rates — 8.25% and then 6.5% after the operator changed it.
+  const acrossARateChange: ReportSale[] = [
+    { createdAt: at(2026, 3, 1, 9), totalCents: 1083, taxCents: 83, taxRatePct: 8.25, linesJson: [] },
+    { createdAt: at(2026, 3, 2, 9), totalCents: 1065, taxCents: 65, taxRatePct: 6.5, linesJson: [] },
+  ];
+
+  const summary = salesSummary(acrossARateChange);
+  assert.equal(summary.totalTaxCents, 148, "83 + 65, exactly what was collected");
+  // Applying either rate to the revenue would give a different, wrong answer.
+  assert.notEqual(summary.totalTaxCents, Math.round(summary.totalRevenueCents * 0.0825));
+  assert.notEqual(summary.totalTaxCents, Math.round(summary.totalRevenueCents * 0.065));
+});
+
+test("a sale keeps the rate it was charged at, whatever the store charges now", () => {
+  // The stamp is a field on the row, so nothing about a later settings change can reach it.
+  const sale: ReportSale = { createdAt: at(2026, 3, 1), totalCents: 1083, taxCents: 83, taxRatePct: 8.25, taxInclusive: false };
+  assert.equal(sale.taxRatePct, 8.25);
+  assert.equal(salesSummary([sale]).totalTaxCents, 83, "and the report reads the stamped tax");
+});

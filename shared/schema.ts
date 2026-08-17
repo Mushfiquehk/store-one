@@ -311,6 +311,14 @@ export type Sale = {
   // because the day's cash expectation is a sum over tenderedCents.
   tenderedCents: number | null;
   changeCents: number | null;
+  /**
+   * The rate and mode this sale was actually charged at. Null on rows written before the till
+   * recorded them — never backfilled, because a guess about what an old sale charged is worse
+   * than an honest gap. A receipt reads these, not the current setting, so a reprint after a
+   * rate change still shows what the customer paid.
+   */
+  taxRatePct: number | null;
+  taxInclusive: boolean | null;
   status: string;
   linesJson: SaleLine[];
   customerName: string;

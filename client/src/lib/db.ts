@@ -150,6 +150,8 @@ export interface Sale {
   paymentMethod: string;
   tenderedCents: number | null;
   changeCents: number | null;
+  taxRatePct: number | null;
+  taxInclusive: boolean | null;
   status: string;
   linesJson: SaleLine[];
   customerName: string;
@@ -465,6 +467,15 @@ class PosDatabase extends Dexie {
     // history to invent. It starts explaining movements from here on.
     this.version(12).stores({
       inventoryLedger: "id, inventoryItemId, createdAt, reason, refId",
+    });
+
+    // Feature 21 T4: the rate a sale was charged at. Null on older rows — what they were
+    // charged is genuinely unknown, and inventing 8.25% would be a lie with a decimal point.
+    this.version(13).stores({}).upgrade(async tx => {
+      await tx.table("sales").toCollection().modify(sale => {
+        if (sale.taxRatePct === undefined) sale.taxRatePct = null;
+        if (sale.taxInclusive === undefined) sale.taxInclusive = null;
+      });
     });
   }
 }

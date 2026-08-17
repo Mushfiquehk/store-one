@@ -417,6 +417,8 @@ function generateSales(): Sale[] {
         paymentMethod: pm,
         tenderedCents: totalCents,
         changeCents: 0,
+        taxRatePct: TAX_RATE * 100,
+        taxInclusive: false,
         status: "completed",
         linesJson: lines,
         customerName: "",

@@ -23,6 +23,9 @@ export type ReportSale = {
    * same class of lie as an unpriced ingredient counted as free.
    */
   isTestOrder?: boolean | null;
+  /** What this sale was charged at. Reports read the stamped tax, never a current rate. */
+  taxRatePct?: number | null;
+  taxInclusive?: boolean | null;
 };
 
 /** Real trade only. Every report here starts from this, so none of them can forget. */

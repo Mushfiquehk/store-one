@@ -480,6 +480,8 @@ export const storage = {
       paymentMethod: data.paymentMethod!,
       tenderedCents: data.tenderedCents ?? null,
       changeCents: data.changeCents ?? null,
+      taxRatePct: data.taxRatePct ?? null,
+      taxInclusive: data.taxInclusive ?? null,
       status: data.status!,
       linesJson: data.linesJson!,
       customerName: data.customerName ?? "",

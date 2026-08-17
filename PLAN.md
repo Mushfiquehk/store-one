@@ -759,7 +759,11 @@ pattern is visible before it becomes a habit.
 
 ## Feature 21 — Tax: the rate the operator typed, on the items that are actually taxable
 
-**Status:** T1 done — one key (`TAX_RATE_KEY = "tax.ratePct"`, `shared/schema.ts`), persisted from the
+**Status:** done — T1–T4 complete. One rate the operator sets and the till charges, exempt items out of
+the base, inclusive pricing as one branch, and the rate stamped on every sale with tax collected on the
+reports page.
+
+T1 done — one key (`TAX_RATE_KEY = "tax.ratePct"`, `shared/schema.ts`), persisted from the
 Settings field on blur and read by the till on load, with `taxCentsFor` as the one place the arithmetic
 lives. **Default 0, not 8.25** — an unconfigured store visibly charges nothing rather than a plausible
 wrong number. The API rejects a negative rate, a non-number, and `825` typed for `8.25`. The dead copy
@@ -770,7 +774,16 @@ T3 done — `tax.inclusive` (`TAX_INCLUSIVE_KEY`) is one branch inside the same 
 the tax (`total × rate / (100 + rate)`) instead of adding it, and returning `totalCents` so no caller
 decides whether to add tax on. The till's summary says **"Tax included"** versus **"Tax"**, because
 those are different claims about what the customer paid. A switch in Settings sets the mode.
-T4 remains.
+T4 done — `taxRatePct` and `taxInclusive` are on the `Sale` row (nullable, no backfill: what an old
+sale charged is genuinely unknown) and stamped by all three writers — the till, the server order path,
+and `bom-engine`'s test orders. Dexie v13 and an `ALTER … IF NOT EXISTS` after the `CREATE`. Reports
+carry **Tax Collected** for the window, summed from the stored `taxCents` rather than recomputed from a
+rate, so a rate change cannot restate history.
+
+**Feature 21 is complete** (T1–T4). One thread stays open elsewhere: `shared/api-handlers.ts`'s
+hardcoded `0.08` on the server order path is **Feature 5 T2's** to replace with `tax.ratePct`; T4
+stamps what it actually charges so the record is honest until then. And Feature 20's receipt should read
+these two fields rather than the current setting when it is built.
 
 **Deviation from T2's wording, deliberately:** the task asks for a new `taxable: boolean` column across
 `shared/schema.ts`, Dexie and `server/schema.ts`. `ProductAttributes.tax_exempt` **already exists** and
