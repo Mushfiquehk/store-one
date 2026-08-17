@@ -257,15 +257,17 @@ export default function ReportsPage() {
                     <TableBody>
                       {inventory.map(item => {
                         const lowAlert = item.lowStockThreshold ?? 0;
-                        const isLow = lowAlert > 0 && item.currentQuantity <= lowAlert;
+                        // Same rule as the inventory page: over-drawn is its own state, not "Low".
+                        const isOverDrawn = item.currentQuantity < 0;
+                        const isLow = !isOverDrawn && lowAlert > 0 && item.currentQuantity <= lowAlert;
                         return (
                           <TableRow key={item.id}>
                             <TableCell className="font-medium">{item.name}</TableCell>
                             <TableCell className="text-right font-mono">{item.currentQuantity}</TableCell>
                             <TableCell className="text-right text-muted-foreground">{item.unitOfMeasure}</TableCell>
                             <TableCell className="text-center">
-                              <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${isLow ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
-                                {isLow ? "Low" : "OK"}
+                              <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${isOverDrawn ? 'bg-red-600 text-white' : isLow ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
+                                {isOverDrawn ? "Over-drawn" : isLow ? "Low" : "OK"}
                               </span>
                             </TableCell>
                           </TableRow>

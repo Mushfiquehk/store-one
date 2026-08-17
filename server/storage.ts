@@ -711,7 +711,9 @@ export const adminStorage: IAdminStorage = {
   async adjustInventoryQuantity(id: string, delta: number) {
     const existing = await db.select().from(adminInventoryItems).where(eq(adminInventoryItems.id, id)).limit(1);
     if (existing.length === 0) return null;
-    const newQty = Math.max(0, existing[0].currentQuantity + delta);
+    // Not clamped: the tablet and the server must agree on what "out of stock" means,
+    // and an over-draw is a fact worth keeping. See shared/ledger.ts.
+    const newQty = existing[0].currentQuantity + delta;
     const [r] = await db.update(adminInventoryItems)
       .set({ currentQuantity: newQty, updatedAt: Date.now() })
       .where(eq(adminInventoryItems.id, id)).returning();

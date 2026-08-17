@@ -34,8 +34,12 @@ export default function InventoryPage({ isTab = false }: { isTab?: boolean }) {
 
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string; deps: string[] } | null>(null);
 
+  // Over-drawn is a distinct, louder state than low, and must not be folded into it: low
+  // means "order more", negative means the count or the recipe is wrong.
+  const overDrawnCount = useMemo(() => inventory.filter(i => i.currentQuantity < 0).length, [inventory]);
+
   const lowStockCount = useMemo(() => {
-    return inventory.filter(i => i.lowStockThreshold != null && i.currentQuantity <= i.lowStockThreshold).length;
+    return inventory.filter(i => i.currentQuantity >= 0 && i.lowStockThreshold != null && i.currentQuantity <= i.lowStockThreshold).length;
   }, [inventory]);
 
   function handleAddItem() {
@@ -148,6 +152,11 @@ export default function InventoryPage({ isTab = false }: { isTab?: boolean }) {
             <p className="text-xs text-muted-foreground" data-testid="text-inventory-kpi">
               Low stock items: {lowStockCount}
             </p>
+            {overDrawnCount > 0 && (
+              <p className="text-xs font-medium text-destructive" data-testid="text-inventory-overdrawn">
+                Over-drawn items: {overDrawnCount} — sold more than was on hand, so the count or the recipe is wrong.
+              </p>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -172,7 +181,8 @@ export default function InventoryPage({ isTab = false }: { isTab?: boolean }) {
               <TableBody>
                 {inventory.map(i => {
                   const lowAlert = i.lowStockThreshold ?? 0;
-                  const isLow = lowAlert > 0 && i.currentQuantity <= lowAlert;
+                  const isOverDrawn = i.currentQuantity < 0;
+                  const isLow = !isOverDrawn && lowAlert > 0 && i.currentQuantity <= lowAlert;
 
                   return (
                     <TableRow key={i.id} data-testid={`row-inventory-${i.id}`} className="cursor-pointer hover:bg-muted/50 transition-colors" onClick={() => openEditItem(i)}>
@@ -183,18 +193,20 @@ export default function InventoryPage({ isTab = false }: { isTab?: boolean }) {
                             <p className="text-xs text-muted-foreground">Low alert: {lowAlert} {i.unitOfMeasure}</p>
                           </div>
                           <span
-                            className={isLow
-                              ? "rounded-full bg-destructive/10 px-2 py-1 text-xs font-medium text-destructive"
-                              : "rounded-full bg-accent/10 px-2 py-1 text-xs font-medium text-accent"
+                            className={isOverDrawn
+                              ? "rounded-full bg-destructive px-2 py-1 text-xs font-semibold text-destructive-foreground"
+                              : isLow
+                                ? "rounded-full bg-destructive/10 px-2 py-1 text-xs font-medium text-destructive"
+                                : "rounded-full bg-accent/10 px-2 py-1 text-xs font-medium text-accent"
                             }
                             data-testid={`status-inventory-level-${i.id}`}
                           >
-                            {isLow ? "Low" : "OK"}
+                            {isOverDrawn ? "Over-drawn" : isLow ? "Low" : "OK"}
                           </span>
                         </div>
                       </TableCell>
                       <TableCell className="text-center" onClick={e => e.stopPropagation()}>
-                        <span className="font-serif text-lg" data-testid={`text-inventory-onhand-${i.id}`}>
+                        <span className={`font-serif text-lg ${isOverDrawn ? "text-destructive" : ""}`} data-testid={`text-inventory-onhand-${i.id}`}>
                           {i.currentQuantity} <span className="text-sm text-muted-foreground font-sans">{i.unitOfMeasure}</span>
                         </span>
                       </TableCell>

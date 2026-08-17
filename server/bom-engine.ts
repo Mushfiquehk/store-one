@@ -301,12 +301,15 @@ export async function processTestOrder(
       continue;
     }
     const quantityBefore = item.currentQuantity;
-    const quantityAfter = Math.max(0, quantityBefore + delta);
+    // Projected, unclamped: a preview that hides an over-draw is worse than no preview.
+    const quantityAfter = quantityBefore + delta;
     const belowThreshold = item.lowStockThreshold != null && quantityAfter < item.lowStockThreshold;
     if (belowThreshold) {
       warnings.push(`'${item.name}' will drop below low-stock threshold (${quantityAfter} < ${item.lowStockThreshold})`);
     }
-    if (quantityAfter <= 0 && quantityBefore > 0) {
+    if (quantityAfter < 0) {
+      warnings.push(`'${item.name}' will be over-drawn (${quantityBefore} → ${quantityAfter}) — the count or the recipe is wrong`);
+    } else if (quantityAfter === 0 && quantityBefore > 0) {
       warnings.push(`'${item.name}' will be depleted (${quantityBefore} → ${quantityAfter})`);
     }
     inventoryEffects.push({

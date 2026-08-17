@@ -54,12 +54,19 @@ test("a receive is a positive delta through the same path", () => {
   assert.equal(rows[0].refId, "inv_9");
 });
 
-test("the ledger records the delta that was asked for, even where the quantity clamps", () => {
-  // Selling ten lattes against four ounces of milk leaves the column at 0 — but the row
-  // still says -36, which is the only place the over-draw survives today. Feature 15 T3
-  // takes the clamp off; until then this is what keeps the signal.
+test("an over-draw goes negative rather than clamping to zero", () => {
+  // Selling ten lattes against four ounces of milk means the recipe used 36 more than was
+  // on hand. The old clamp wrote 0 and deleted the question; -32 is the answer to it.
   const { rows, quantityAfter } = ledgerRows(new Map([["milk", -36]]), { milk: 4 }, ctx());
-  assert.equal(quantityAfter.milk, 0);
+  assert.equal(quantityAfter.milk, -32);
   assert.equal(rows[0].delta, -36);
-  assert.equal(rows[0].quantityAfter, 0);
+  assert.equal(rows[0].quantityAfter, -32, "the row must match the column, negative and all");
+});
+
+test("stock already negative keeps going, and receiving digs it back out", () => {
+  const down = ledgerRows(new Map([["milk", -8]]), { milk: -32 }, ctx());
+  assert.equal(down.quantityAfter.milk, -40);
+
+  const up = ledgerRows({ milk: 128 }, { milk: -40 }, ctx({ reason: "RECEIVE" }));
+  assert.equal(up.quantityAfter.milk, 88, "a receive nets against the shortfall, not against zero");
 });
