@@ -35,7 +35,7 @@ its section. They are ordered by what they cost if left alone.
 | **21** | The Settings tax-rate field is bound to `useState` and written nowhere; the till charges a hardcoded 8.25% in every store | `settings.tsx:89, 411-412` (only three mentions of `taxRate` in the file); `pos.tsx:38` — `setTaxRatePct` is never called | Every operator charges the wrong tax and cannot change it |
 | **22** | Nothing ever asks how much cash is in the drawer — no float, no count, no over/short, no trading day | `grep -rin "drawer\|openingFloat\|cashCount\|endOfDay"` returns nothing | Every other defect in this table is undetectable in daily operation |
 | **25** | A product with no tags is unreachable on the till — the "show everything" branch is dead once any tagged product exists | `pos.tsx:98-116`; `activeTag` auto-sets at `:109` (during render), and `:114` filters by it | An operator adds an item, cannot find it, cannot tell whether it saved |
-| ~~**26**~~ | ~~Synced POS sales never reach `admin_sales`, so no server-side report can see them~~ **Fixed** for new syncs (T2); blobs already stored still need T3's backfill | ~~`server/sales-writers.test.ts`~~ | — |
+| ~~**26**~~ | ~~Synced POS sales never reach `admin_sales`, so no server-side report can see them~~ **Fixed** — landed on sync (T2) and backfilled on boot (T3) | ~~`server/sales-writers.test.ts`~~ | — |
 | **5** | Combos are ignored by the live order path | `bom-engine.ts` is imported only by `routes.ts:16` for test orders; `/api/orders/simulate` prices inline with a hardcoded 8% tax | Combos charge full price; three different tax rates in the codebase |
 
 ~~**Suggested first session**~~ — **done.** Features 7, 9 and 11 have all landed, which clears the
@@ -166,7 +166,12 @@ T2 done — `processSyncChanges` lands a synced sale through `adminStorage.creat
 stays as the sync bookkeeping the `lastSyncedAt` window reads. A sale the device deleted is soft-deleted
 on the row rather than resurrected as live. `server/sales-writers.test.ts` — which used to pin the
 invisibility — now asserts the opposite, plus idempotency across repeated syncs and the delete path.
-T3–T4 remain (the backfill of blobs already stored, and `bom-engine`'s direct insert).
+T3 done — `server/backfillSyncedSales()` (`server/backfill-sales.ts`) promotes blob-only sales into
+`admin_sales` on boot, newest blob per id, soft-deleting the ones the device had voided rather than
+resurrecting them. Idempotent and silent after the first boot; it logs only when it actually moves
+something. Tested against a real database: revenue invisible before, correct after, unchanged by a
+second run.
+T4 remains (`bom-engine`'s direct insert into `adminSales`).
 **Vision pillar:** #1 — "the best foundation". Sales records are the business's books, and half of
 them are currently invisible to the server that reports on them.
 **Depends on:** nothing. Feature 8 T1–T3 made sync converge, which is what made this measurable.

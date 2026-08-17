@@ -4,6 +4,7 @@ import { fileURLToPath } from "url";
 import { router } from "./routes";
 import { db } from "./db";
 import { initDb } from "./init-db";
+import { backfillSyncedSales } from "./backfill-sales";
 import { sql } from "drizzle-orm";
 import { adminProducts } from "./schema";
 import { getDemoAdminData, getDemoSeedRecords, DEMO_PREFIX_VALUE } from "./seed-data";
@@ -110,6 +111,12 @@ async function autoSeedIfEmpty() {
 
 initDb()
   .then(() => autoSeedIfEmpty())
+  .then(async () => {
+    // Feature 26 T3: sales that only ever existed as sync blobs. Silent when there is
+    // nothing to do, which is every boot after the first.
+    const { promoted } = await backfillSyncedSales();
+    if (promoted > 0) console.log(`Promoted ${promoted} synced sale(s) into admin_sales`);
+  })
   .then(() => {
     app.listen(serverPort, "0.0.0.0", () => {
       console.log(`Server running on port ${serverPort}`);
