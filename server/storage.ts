@@ -169,6 +169,8 @@ export function buildSaleRow(data: Record<string, unknown>, now: number) {
     linesJson: data.linesJson ?? [],
     closedAt: (data.closedAt as number) ?? null,
     isTestOrder: (data.isTestOrder as boolean) ?? false,
+    taxRatePct: (data.taxRatePct as number) ?? null,
+    taxInclusive: (data.taxInclusive as boolean) ?? null,
     updatedAt: now,
     deletedAt: null as number | null,
   };

@@ -177,6 +177,8 @@ async function initSchema() {
       tendered_cents INTEGER,
       change_cents INTEGER,
       is_test_order BOOLEAN NOT NULL DEFAULT FALSE,
+      tax_rate_pct DOUBLE PRECISION,
+      tax_inclusive BOOLEAN,
       status TEXT NOT NULL DEFAULT 'completed',
       customer_name TEXT NOT NULL DEFAULT '',
       lines_json JSONB NOT NULL,
@@ -192,6 +194,9 @@ async function initSchema() {
   await db.execute(sql`ALTER TABLE admin_sales ADD COLUMN IF NOT EXISTS change_cents INTEGER`);
   // Feature 26 T4: test orders, so a recipe check cannot be counted as revenue.
   await db.execute(sql`ALTER TABLE admin_sales ADD COLUMN IF NOT EXISTS is_test_order BOOLEAN NOT NULL DEFAULT FALSE`);
+  // Feature 21 T4: the rate stamped on the sale. Nullable — an old row's rate is unknown.
+  await db.execute(sql`ALTER TABLE admin_sales ADD COLUMN IF NOT EXISTS tax_rate_pct DOUBLE PRECISION`);
+  await db.execute(sql`ALTER TABLE admin_sales ADD COLUMN IF NOT EXISTS tax_inclusive BOOLEAN`);
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS store_settings (
       key TEXT PRIMARY KEY,

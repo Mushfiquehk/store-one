@@ -30,7 +30,7 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Switch } from "@/components/ui/switch";
 import { useStore } from "@/lib/store";
-import { productMix, salesSeries, type Granularity } from "@shared/reports";
+import { productMix, salesSeries, salesSummary, type Granularity } from "@shared/reports";
 import { menuMargins } from "@shared/pricing";
 import { laborCost, laborPct, scheduledVsActual, type ScheduleShift } from "@shared/labor";
 import { Link } from "wouter";
@@ -159,6 +159,14 @@ export default function ReportsPage() {
 
   const revenueCents = Math.round(totals.sales * 100);
 
+  // Tax collected, for the return an operator files monthly or quarterly. A sum of the
+  // taxCents each sale actually recorded — never a rate applied to revenue, which would
+  // silently restate history the day the rate changes.
+  const taxCollectedCents = useMemo(
+    () => salesSummary(sales, { since: range.since }).totalTaxCents,
+    [sales, range],
+  );
+
   // Labour for the same window as the revenue above it, so the percentage divides two
   // numbers that mean the same period. Until Feature 13 landed, that denominator was
   // generateMockSalesData() and this figure would have changed on every render.
@@ -267,6 +275,13 @@ export default function ReportsPage() {
                   icon={<Percent className="h-4 w-4" />}
                 />
                 <KpiCard title={`Hours Worked (${range.label})`} value={labor.hours.toFixed(1)} icon={<Clock className="h-4 w-4" />} />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <KpiCard
+                  title={`Tax Collected (${range.label})`}
+                  value={formatMoney(taxCollectedCents)}
+                  icon={<Percent className="h-4 w-4" />}
+                />
               </div>
               {(labor.unclosedPunches.length > 0 || labor.hoursWithUnknownRate > 0 || labor.inProgress.length > 0) && (
                 <div className="rounded-2xl border bg-card p-4 text-sm space-y-2" data-testid="text-labour-caveats">

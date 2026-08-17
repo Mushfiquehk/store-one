@@ -148,6 +148,9 @@ export const adminSales = pgTable("admin_sales", {
   // Rung by /api/orders/simulate to check a recipe, not by a customer. Kept out of every
   // report by shared/reports.ts's realSales().
   isTestOrder: pgBoolean("is_test_order").notNull().default(false),
+  // What this sale was charged at, not what the store charges now.
+  taxRatePct: doublePrecision("tax_rate_pct"),
+  taxInclusive: pgBoolean("tax_inclusive"),
   status: text("status").notNull().default("completed"),
   customerName: text("customer_name").notNull().default(""),
   linesJson: jsonb("lines_json").notNull(),

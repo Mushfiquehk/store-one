@@ -425,6 +425,10 @@ export default function PosPage() {
       paymentMethod: paymentType,
       tenderedCents,
       changeCents,
+      // What this sale was charged at, so a reprint after a rate change still shows the
+      // truth rather than silently rewriting itself.
+      taxRatePct: taxRate,
+      taxInclusive: cartTax.inclusive,
       status: "completed",
       customerName: customerName.trim(),
       closedAt: null,

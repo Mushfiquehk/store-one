@@ -357,6 +357,8 @@ export async function processTestOrder(
     customerName,
     linesJson,
     isTestOrder: true,
+    taxRatePct,
+    taxInclusive: false,
   }, now);
 
   if (dryRun) {
