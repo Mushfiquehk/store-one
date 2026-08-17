@@ -32,7 +32,7 @@ import {
   setAutoSyncEnabled, getAutoSyncInterval, setAutoSyncIntervalMinutes,
   startAutoSync, stopAutoSync,
 } from "@/lib/sync";
-import type { SyncCategory } from "@shared/schema";
+import { DEFAULT_TENDER_METHODS, TENDER_METHODS_KEY, tenderMethods, type SyncCategory } from "@shared/schema";
 
 type SyncStatus = "idle" | "syncing" | "success" | "error";
 
@@ -96,6 +96,7 @@ export default function SettingsPage() {
   const [autoBackup, setAutoBackup] = useState(getAutoBackupEnabled());
   const [backupInterval, setBackupInterval] = useState(getAutoBackupInterval());
 
+  const [acceptedMethods, setAcceptedMethods] = useState<string[]>(DEFAULT_TENDER_METHODS);
   const [hours, setHours] = useState<HoursOfOperation>(DEFAULT_HOURS);
   const [hoursSaving, setHoursSaving] = useState(false);
   const [emailConfig, setEmailConfig] = useState<EmailConfig>(DEFAULT_EMAIL);
@@ -106,11 +107,38 @@ export default function SettingsPage() {
       .then(r => r.json())
       .then(d => { if (d.value) setHours(d.value as HoursOfOperation); })
       .catch(() => {});
+    fetch(`/api/settings/${TENDER_METHODS_KEY}`)
+      .then(r => r.json())
+      .then(d => setAcceptedMethods(tenderMethods(d.value)))
+      .catch(() => {});
     fetch("/api/settings/emailConfig")
       .then(r => r.json())
       .then(d => { if (d.value) setEmailConfig(d.value as EmailConfig); })
       .catch(() => {});
   }, []);
+
+  const saveTenderMethods = async (methods: string[]) => {
+    // The server rejects an empty list too — this is the same rule stated where the
+    // operator can see it, not the only thing standing between a till and cash-only.
+    if (!methods.length) {
+      toast({ title: "Not saved", description: "A store must accept at least one payment method.", variant: "destructive" });
+      return;
+    }
+    const ordered = DEFAULT_TENDER_METHODS.filter(m => methods.includes(m));
+    const previous = acceptedMethods;
+    setAcceptedMethods(ordered);
+    try {
+      const res = await fetch(`/api/settings/${TENDER_METHODS_KEY}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: ordered }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Save failed");
+    } catch (err) {
+      setAcceptedMethods(previous);
+      toast({ title: "Not saved", description: err instanceof Error ? err.message : "Save failed", variant: "destructive" });
+    }
+  };
 
   const saveHours = async () => {
     setHoursSaving(true);
@@ -418,6 +446,28 @@ export default function SettingsPage() {
                     <Percent className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground" />
                   </div>
                 </div>
+
+                <Separator />
+
+                <div className="space-y-0.5">
+                  <Label className="text-base">Payment Methods</Label>
+                  <p className="text-sm text-muted-foreground">
+                    What this store accepts. The till shows a button for each — cards taken on a
+                    terminal from your bank count, no integration required.
+                  </p>
+                </div>
+                {DEFAULT_TENDER_METHODS.map(method => (
+                  <div key={method} className="flex items-center justify-between">
+                    <Label className="font-normal">{method}</Label>
+                    <Switch
+                      checked={acceptedMethods.includes(method)}
+                      onCheckedChange={v => saveTenderMethods(
+                        v ? [...acceptedMethods, method] : acceptedMethods.filter(m => m !== method),
+                      )}
+                      data-testid={`switch-tender-${method.toLowerCase()}`}
+                    />
+                  </div>
+                ))}
               </div>
             </CardContent>
           </Card>

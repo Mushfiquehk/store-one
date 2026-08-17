@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createApiHandlers, type ApiAdminStorage, type StoreSetting } from "./api-handlers";
-import { SECRET_SETTING_FIELDS, SECRET_SET_MARKER } from "./schema";
+import { DEFAULT_TENDER_METHODS, SECRET_SETTING_FIELDS, SECRET_SET_MARKER, TENDER_METHODS_KEY, tenderMethods } from "./schema";
 
 // A storage stub backed by a Map. Only the settings methods are real; everything
 // else throws, so a test that accidentally reaches another entity fails loudly.
@@ -169,4 +169,27 @@ test("every secret field in the map is redacted, not just emailConfig's", async 
 test("PUT without a value is rejected", async () => {
   const h = createApiHandlers(stubStore());
   assert.equal((await call(h, "PUT", "/api/settings/foo", {})).status, 400);
+});
+
+test("a till cannot be saved into accepting nothing", async () => {
+  const store = stubStore();
+  const h = createApiHandlers(store);
+
+  assert.equal((await call(h, "PUT", `/api/settings/${TENDER_METHODS_KEY}`, { value: ["Cash"] })).status, 200);
+
+  // The one input that bricks a till. Rejected at the API, not left to the UI.
+  for (const bad of [[], ["", "Card"], "Cash", null, [1, 2]]) {
+    const r = await call(h, "PUT", `/api/settings/${TENDER_METHODS_KEY}`, { value: bad });
+    assert.equal(r.status, 400, `expected 400 for ${JSON.stringify(bad)}`);
+  }
+  // ...and the rejection left the working value in place.
+  assert.deepEqual((await call(h, "GET", `/api/settings/${TENDER_METHODS_KEY}`)).data, {
+    value: ["Cash"],
+    updatedAt: 1,
+  });
+
+  // An unset or unusable setting reads as the default rather than as "accepts nothing".
+  assert.deepEqual(tenderMethods(null), DEFAULT_TENDER_METHODS);
+  assert.deepEqual(tenderMethods([]), DEFAULT_TENDER_METHODS);
+  assert.deepEqual(tenderMethods(["Card"]), ["Card"]);
 });

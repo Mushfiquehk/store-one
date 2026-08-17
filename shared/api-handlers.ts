@@ -1,5 +1,5 @@
 import { parseMenuBlueprint, planMenuApply, type ExistingMenu, type FieldDiff, type MenuPlan } from "./menu-blueprint";
-import { mergeSettingSecrets, redactSetting } from "./schema";
+import { mergeSettingSecrets, redactSetting, validateSetting } from "./schema";
 import type { Modifier, ModifierGroup, Product, ProductModifierGroup, Variant } from "./schema";
 import { productMix, salesSeries, salesSummary, type Granularity, type ReportSale } from "./reports";
 
@@ -512,6 +512,8 @@ export function createApiHandlers(store: ApiAdminStorage) {
       if (!body || body.value === undefined) {
         return { status: 400, data: { error: "value is required" } };
       }
+      const invalid = validateSetting(req.params.key, body.value);
+      if (invalid) return { status: 400, data: { error: invalid } };
       try {
         // A redacted secret coming back from a form means "keep what is stored".
         const prev = await store.getSetting(req.params.key);
