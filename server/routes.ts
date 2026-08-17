@@ -721,6 +721,10 @@ router.get("/api/reports/product-mix", async (req: Request, res: Response) => {
 
 router.get("/api/reports/inventory-status", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
 
+// Costing reads the menu and the recipes, which this server owns, and sales — which it has
+// owned since Feature 7 T2. So unlike the two reports above, it is served here too.
+router.get("/api/reports/menu-margins", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
+
 router.get("/api/admin/all-data-with-deleted", async (_req: Request, res: Response) => {
   try { res.json({ data: await adminStorage.getAllAdminDataWithDeleted() }); } catch (err) { res.status(500).json({ error: "Failed to get all admin data" }); }
 });

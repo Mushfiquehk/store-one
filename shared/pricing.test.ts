@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { costVariant, marginPct, sumIngredientCosts } from "./pricing";
-import type { CostingData } from "./pricing";
+import { costVariant, marginPct, menuMargins, sumIngredientCosts } from "./pricing";
+import type { CostingData, MarginData } from "./pricing";
 
 // A latte: two ingredients through the variant's own recipe, one of them via a
 // sub-recipe, plus a modifier — so the cost comes off the real depletion walk rather
@@ -74,4 +74,75 @@ test("sumIngredientCosts rounds once, at the end, and names each unknown once", 
   ]);
   assert.equal(cost.costCents, 4, "4.2 rounds to 4, not 3 × 1 = 3");
   assert.deepEqual(cost.unknownIngredients, ["Butter"]);
+});
+
+
+const marginData = (): MarginData => ({
+  products: [{ id: "p_latte", name: "Latte" }, { id: "p_cookie", name: "Cookie" }, { id: "p_soup", name: "Soup" }],
+  variants: [
+    { id: "v_latte", name: "Small", productId: "p_latte", basePrice: 400, directInventoryId: null },
+    { id: "v_cookie", name: "One", productId: "p_cookie", basePrice: 100, directInventoryId: null },
+    { id: "v_soup", name: "Bowl", productId: "p_soup", basePrice: 600, directInventoryId: null },
+  ],
+  modifiers: [],
+  bomEntries: [
+    { sourceType: "VARIANT", sourceId: "v_latte", inventoryItemId: "i_milk", sourceProductId: null, quantityDeducted: 8, scaleFactorMatrix: null, overrideModifierGroupId: null },
+    // Priced at 150 against a 100 price: sold at a loss.
+    { sourceType: "VARIANT", sourceId: "v_cookie", inventoryItemId: "i_flour", sourceProductId: null, quantityDeducted: 1, scaleFactorMatrix: null, overrideModifierGroupId: null },
+    { sourceType: "VARIANT", sourceId: "v_soup", inventoryItemId: "i_stock", sourceProductId: null, quantityDeducted: 1, scaleFactorMatrix: null, overrideModifierGroupId: null },
+  ],
+  inventoryItems: [
+    { id: "i_milk", name: "Whole Milk", lastPurchasePrice: 3 },
+    { id: "i_flour", name: "Flour", lastPurchasePrice: 150 },
+    { id: "i_stock", name: "Stock", lastPurchasePrice: null },
+  ],
+});
+
+test("the loss-making item is the first row, and the unpriced one is last", () => {
+  const rows = menuMargins(marginData(), [{ variantId: "v_latte", quantity: 200 }, { variantId: "v_cookie", quantity: 10 }]);
+
+  assert.deepEqual(rows.map(r => r.variantId), ["v_cookie", "v_latte", "v_soup"]);
+
+  const cookie = rows[0];
+  assert.equal(cookie.productName, "Cookie");
+  assert.equal(cookie.costCents, 150);
+  assert.equal(cookie.marginCents, -50, "a below-cost item is negative, not clamped to zero");
+  assert.equal(cookie.marginPct, -50);
+  assert.equal(cookie.contributionCents, -500, "ten sold at a 50c loss is 5 dollars gone");
+
+  const latte = rows[1];
+  assert.equal(latte.marginCents, 376);
+  assert.equal(latte.contributionCents, 75200, "200 sold, weighted contribution");
+});
+
+test("an unknown cost states no margin and contributes nothing, rather than looking perfect", () => {
+  const soup = menuMargins(marginData())[2];
+  assert.equal(soup.costKnown, false);
+  assert.equal(soup.marginPct, null);
+  assert.equal(soup.marginCents, 0);
+  assert.equal(soup.contributionCents, 0);
+  assert.deepEqual(soup.unknownIngredients, ["Stock"], "and it says which ingredient to go price");
+});
+
+test("equal margins are ranked by what actually sells", () => {
+  const data = marginData();
+  data.variants = [
+    { id: "v_a", name: "A", productId: "p_latte", basePrice: 200, directInventoryId: null },
+    { id: "v_b", name: "B", productId: "p_latte", basePrice: 200, directInventoryId: null },
+  ];
+  data.bomEntries = ["v_a", "v_b"].map(id => ({
+    sourceType: "VARIANT", sourceId: id, inventoryItemId: "i_milk", sourceProductId: null,
+    quantityDeducted: 10, scaleFactorMatrix: null, overrideModifierGroupId: null,
+  }));
+
+  const rows = menuMargins(data, [{ variantId: "v_b", quantity: 500 }, { variantId: "v_a", quantity: 1 }]);
+  assert.deepEqual(rows.map(r => r.variantId), ["v_b", "v_a"]);
+});
+
+test("a variant nobody bought still gets a row", () => {
+  // Costing is about the menu, not about the window: an item that sold nothing in the
+  // period is still priced wrong, and its row is where an operator finds that out.
+  const rows = menuMargins(marginData(), []);
+  assert.equal(rows.length, 3);
+  assert.ok(rows.every(r => r.quantity === 0 && r.contributionCents === 0));
 });

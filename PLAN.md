@@ -2158,7 +2158,18 @@ built on Feature 15 T1's `shared/depletion.ts` rather than a second BOM walk. An
 is named, never treated as free, and `marginPct` returns null rather than stating a margin on an
 unknown cost. `product-wizard.tsx`'s `renderProfitability` now uses the same functions instead of its
 own arithmetic, so there is one costing implementation. Tests in `shared/pricing.test.ts`.
-T2–T4 remain.
+T2 done — `GET /api/reports/menu-margins` in `shared/api-handlers.ts` (so both servers expose it; the
+Express server serves it because sales have lived there since Feature 7 T2), one row per variant with
+`priceCents`, `costCents`, `marginCents`, `marginPct`, `costKnown` and the unknown ingredient names,
+worst margin first, unknown-cost rows last, ties broken by volume. `?since=`/`?until=` narrows the
+volumes through the same `productMix` the mix report uses, and carries `quantity` plus
+`contributionCents` — a variant that sold nothing still gets a row, because it is still priced wrong.
+T3–T4 remain.
+
+**Found while doing T2:** `server/routes.ts:708-720` still returns 501 for `sales-summary` and
+`product-mix` saying "sales data is stored client-side" — untrue since Feature 7 T2, and now
+inconsistent with `menu-margins`, which serves the same sales rows from the same server. One-line fix
+each, in whichever feature owns it next.
 **Vision pillar:** #1 — the guiding star itself, "boost their business into getting a second location"
 **Depends on:** ~~Feature 5 T1~~ — **satisfied**: Feature 15 T1 moved `computeInventoryDeductions`
 into `shared/depletion.ts`, which is the extraction this needed. Feature 5 T1 can still take the

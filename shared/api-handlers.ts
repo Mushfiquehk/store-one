@@ -2,6 +2,7 @@ import { parseMenuBlueprint, planMenuApply, type ExistingMenu, type FieldDiff, t
 import { mergeSettingSecrets, redactSetting, validateSetting } from "./schema";
 import type { Modifier, ModifierGroup, Product, ProductModifierGroup, Variant } from "./schema";
 import { productMix, salesSeries, salesSummary, type Granularity, type ReportSale } from "./reports";
+import { menuMargins, type MarginData, type MarginVariant } from "./pricing";
 
 export interface ApiRequest {
   method: string;
@@ -722,6 +723,41 @@ export function createApiHandlers(store: ApiAdminStorage) {
         return { status: 200, data: productMix(sales, parseWindow(req)) };
       } catch {
         return { status: 500, data: { error: "Failed to generate product mix report" } };
+      }
+    },
+  });
+
+  routes.push({
+    method: "GET",
+    pattern: "/api/reports/menu-margins",
+    handler: async (req) => {
+      try {
+        const [variants, products, modifiers, bomEntries, inventoryItems, sales] = await Promise.all([
+          store.listVariants(),
+          store.listProducts(),
+          store.listModifiers(),
+          store.listBom(),
+          store.listInventoryItems(),
+          store.listSales(),
+        ]);
+        // Volumes come from the same computation the product-mix report uses, over the
+        // same window, so the two reports cannot disagree about what sold.
+        const volumes = productMix(sales as ReportSale[], parseWindow(req));
+        return {
+          status: 200,
+          data: menuMargins(
+            {
+              variants: variants as MarginVariant[],
+              products: products as Array<{ id: string; name: string }>,
+              modifiers: modifiers as MarginData["modifiers"],
+              bomEntries: bomEntries as MarginData["bomEntries"],
+              inventoryItems: inventoryItems as MarginData["inventoryItems"],
+            },
+            volumes,
+          ),
+        };
+      } catch {
+        return { status: 500, data: { error: "Failed to generate menu margins report" } };
       }
     },
   });

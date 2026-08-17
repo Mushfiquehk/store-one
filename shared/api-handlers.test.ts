@@ -193,3 +193,65 @@ test("a till cannot be saved into accepting nothing", async () => {
   assert.deepEqual(tenderMethods([]), DEFAULT_TENDER_METHODS);
   assert.deepEqual(tenderMethods(["Card"]), ["Card"]);
 });
+
+// A store with a menu, a recipe and one sale, for the margins endpoint.
+function marginsStore(): ApiAdminStorage {
+  return new Proxy({
+    async listProducts() { return [{ id: "p1", name: "Cookie" }, { id: "p2", name: "Latte" }]; },
+    async listVariants() {
+      return [
+        { id: "v_cookie", name: "One", productId: "p1", basePrice: 100, directInventoryId: null },
+        { id: "v_latte", name: "Small", productId: "p2", basePrice: 400, directInventoryId: null },
+      ];
+    },
+    async listModifiers() { return []; },
+    async listBom() {
+      return [
+        { sourceType: "VARIANT", sourceId: "v_cookie", inventoryItemId: "i_flour", sourceProductId: null, quantityDeducted: 1, scaleFactorMatrix: null, overrideModifierGroupId: null },
+        { sourceType: "VARIANT", sourceId: "v_latte", inventoryItemId: "i_milk", sourceProductId: null, quantityDeducted: 8, scaleFactorMatrix: null, overrideModifierGroupId: null },
+      ];
+    },
+    async listInventoryItems() {
+      return [
+        { id: "i_flour", name: "Flour", lastPurchasePrice: 150 },
+        { id: "i_milk", name: "Whole Milk", lastPurchasePrice: 3 },
+      ];
+    },
+    async listSales() {
+      return [
+        { createdAt: new Date(2026, 2, 1).getTime(), linesJson: [{ variantId: "v_cookie", productId: "p1", productName: "Cookie", variantName: "One", qty: 4, unitPrice: 100 }] },
+        { createdAt: new Date(2026, 2, 9).getTime(), linesJson: [{ variantId: "v_latte", productId: "p2", productName: "Latte", variantName: "Small", qty: 2, unitPrice: 400 }] },
+      ];
+    },
+  } as Record<string, unknown>, {
+    get(target: Record<string, unknown>, prop: string) {
+      if (prop in target) return target[prop];
+      return () => { throw new Error(`unexpected storage call: ${prop}`); };
+    },
+  }) as unknown as ApiAdminStorage;
+}
+
+test("menu-margins opens on the item sold below cost", async () => {
+  const h = createApiHandlers(marginsStore());
+  const rows = (await call(h, "GET", "/api/reports/menu-margins")).data as Array<Record<string, unknown>>;
+
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].variantId, "v_cookie", "worst margin first, not the best seller");
+  assert.equal(rows[0].marginCents, -50);
+  assert.equal(rows[0].quantity, 4);
+  assert.equal(rows[0].contributionCents, -200);
+});
+
+test("menu-margins ?since= narrows the volumes but keeps every menu row", async () => {
+  const h = createApiHandlers(marginsStore());
+  const since = String(new Date(2026, 2, 5).getTime());
+  const rows = (await call(h, "GET", "/api/reports/menu-margins", undefined, { since })).data as Array<Record<string, unknown>>;
+
+  // The cookie sold before the window: no volume, no contribution — but still a row,
+  // because it is still priced below what it costs to make.
+  const cookie = rows.find(r => r.variantId === "v_cookie")!;
+  assert.equal(cookie.quantity, 0);
+  assert.equal(cookie.contributionCents, 0);
+  assert.equal(cookie.marginCents, -50);
+  assert.equal((rows.find(r => r.variantId === "v_latte")!).quantity, 2);
+});
