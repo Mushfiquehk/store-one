@@ -172,3 +172,69 @@ export function laborPct(summary: LaborSummary, revenueCents: number): number | 
   if (revenueCents <= 0 || summary.hoursWithUnknownRate > 0) return null;
   return (summary.costCents / revenueCents) * 100;
 }
+
+export type ScheduleShift = {
+  employeeId: string;
+  dayOfWeek: number;
+  startMinutes: number;
+  endMinutes: number;
+};
+
+export type EmployeeWeek = {
+  employeeId: string;
+  employeeName: string;
+  scheduledHours: number;
+  actualHours: number;
+  /** Actual minus scheduled: positive means more was paid than was rostered. */
+  varianceHours: number;
+  /** Null when nobody has set this person's rate — hours are still reported. */
+  scheduledCostCents: number | null;
+  actualCostCents: number | null;
+  /** Open punches for this person that were not counted, so the row is not read as final. */
+  unclosedPunches: OpenPunch[];
+};
+
+/**
+ * Rostered against paid, per employee, for one week.
+ *
+ * "You rostered 38 hours and paid 44" is the most actionable labour number a small
+ * operator gets. Everyone who appears in *either* list gets a row: a shift nobody turned
+ * up for is the whole point, so it shows as variance rather than being omitted, and a
+ * punch nobody rostered shows the other way.
+ */
+export function scheduledVsActual(
+  shifts: ScheduleShift[],
+  punches: LaborPunch[],
+  employees: LaborEmployee[],
+  window: LaborWindow,
+): EmployeeWeek[] {
+  const employeeIds: string[] = [];
+  for (const id of [...shifts.map(s => s.employeeId), ...punches.map(p => p.employeeId)]) {
+    if (!employeeIds.includes(id)) employeeIds.push(id);
+  }
+
+  return employeeIds
+    .map(employeeId => {
+      const employee = employees.find(e => e.id === employeeId);
+      const rate = employee?.payRate ?? null;
+
+      const scheduledHours = shifts
+        .filter(s => s.employeeId === employeeId)
+        .reduce((total, s) => total + Math.max(0, s.endMinutes - s.startMinutes) / 60, 0);
+
+      const actual = laborCost(punches.filter(p => p.employeeId === employeeId), employees, window);
+
+      return {
+        employeeId,
+        employeeName: employee?.name ?? employeeId,
+        scheduledHours,
+        actualHours: actual.hours,
+        varianceHours: actual.hours - scheduledHours,
+        scheduledCostCents: rate == null ? null : Math.round(scheduledHours * rate),
+        actualCostCents: rate == null ? null : actual.costCents,
+        unclosedPunches: actual.unclosedPunches,
+      };
+    })
+    // Biggest overrun first: the row that cost money nobody planned to spend.
+    .sort((a, b) => b.varianceHours - a.varianceHours);
+}
