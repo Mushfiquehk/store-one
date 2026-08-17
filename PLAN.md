@@ -1670,12 +1670,22 @@ unexplained.
 stored in cents through `shared/money.ts` (`parseDollarsToCents` / `centsToDollarsInput`, tested). The
 hardcoded `1500` is gone: a new employee cannot be saved without either a rate or an explicit
 **Unpaid** tick, and the rate is shown in the employee table so a wage nobody set is visible rather
-than assumed. Existing rows are not backfilled. T2–T4 remain.
+than assumed. Existing rows are not backfilled.
+T2 done — `shared/labor.ts`: `hoursWorked` and `laborCost` (named for what it returns — a record, not a
+bare number — plus `laborPct` for T3). Punches are clamped to the window, so a shift over midnight
+splits across the two days. An open punch inside the 16-hour cutoff counts to `now` and is listed as
+`inProgress`; one past the cutoff is **not billed** and comes back in `unclosedPunches` with the
+employee named. Hours belonging to someone with no wage set are reported as hours but not priced, in
+`hoursWithUnknownRate` / `unknownRateEmployees`, and `laborPct` returns null rather than a ratio built
+on them. Tests in `shared/labor.test.ts`, including the plan's 40-hour and midnight checks.
+T3–T4 remain.
 
-**Seam for T2:** `Employee.payRate` is a non-null number, so `0` is the only way to say "unpaid" *and*
-the value an old row with no rate already has — T1 reads `0` as a deliberate "Unpaid". If labour
-reporting needs to tell "chose zero" from "never set", `payRate` has to become nullable; that is a
-schema change T2 should decide, not something to guess at here.
+**Seam, decided in T2:** `Employee.payRate` is a non-null number, so `0` is the only way to say
+"unpaid" *and* the value an old row with no rate already has — T1 reads `0` as a deliberate "Unpaid".
+`shared/labor.ts` takes `payRate: number | null` so it already handles the distinction: `0` costs
+nothing knowingly, `null` is unknown and named. Making the schema field nullable is now a one-line
+change if an operator ever needs "never set" to read differently on screen — deliberately **not** done
+here, because it would rewrite every stored employee row for a display nicety.
 
 (The note that stood here described Feature 11 T1, not this feature — it has moved to Feature 11,
 which is now done.)
