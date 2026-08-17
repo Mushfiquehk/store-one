@@ -97,3 +97,110 @@ export function tradingDayStart(at: number, startHour: number): number {
   if (at < start.getTime()) start.setDate(start.getDate() - 1);
   return start.getTime();
 }
+
+/**
+ * Cash that moved without a sale: a supplier paid in cash at the door, a float top-up, petty
+ * cash, a bank drop. Cash leaving a drawer with no record is exactly the hole this feature
+ * exists to close, so the reason is required.
+ */
+export const CASH_MOVEMENT_REASONS = [
+  "Supplier COD",
+  "Float top-up",
+  "Petty cash",
+  "Bank drop",
+  "Correction",
+] as const;
+export type CashMovementReason = typeof CASH_MOVEMENT_REASONS[number];
+
+export type CashMovement = {
+  id: string;
+  /** The session it happened during. Null when nobody had a session open. */
+  sessionId: string | null;
+  at: number;
+  kind: "PAID_IN" | "PAID_OUT";
+  /** Always positive; `kind` carries the direction, so no row can be ambiguous about its sign. */
+  amountCents: number;
+  reason: CashMovementReason;
+  note: string;
+  employeeId: string | null;
+  updatedAt: number;
+  deletedAt: number | null;
+};
+
+/** Only what this calculation needs from a sale. */
+export type DrawerSale = {
+  createdAt?: number;
+  paymentMethod?: string;
+  totalCents?: number;
+  tenderedCents?: number | null;
+  changeCents?: number | null;
+  isTestOrder?: boolean | null;
+};
+
+export type ExpectedCash = {
+  expectedCents: number;
+  /**
+   * `TENDER` when every cash sale recorded what was handed over; `SALE_TOTALS` when at least
+   * one did not and its total had to stand in.
+   *
+   * The distinction matters: totals are right whenever change came out of the drawer, and blind
+   * to a cash sale settled from a pocket. An approximation must not be presented as a count.
+   */
+  basis: "TENDER" | "SALE_TOTALS";
+  cashSales: number;
+  cashInCents: number;
+  changeGivenCents: number;
+  paidInCents: number;
+  paidOutCents: number;
+};
+
+const isCash = (sale: DrawerSale) => (sale.paymentMethod ?? "").toLowerCase() === "cash";
+
+/**
+ * What should be in the drawer: `openingFloat + cash tendered − change given + paid in − paid out`.
+ *
+ * Pure, and given the same rows twice it returns the same number — a figure that moves between
+ * two reads of the same evening is not something an operator can be asked to explain.
+ */
+export function expectedCash(
+  session: DrawerSession,
+  sales: DrawerSale[],
+  movements: CashMovement[],
+  now: number = session.closedAt ?? Date.now(),
+): ExpectedCash {
+  const { since, until } = sessionWindow(session, now);
+  const inWindow = (at: number | undefined) => typeof at === "number" && at >= since && at <= until;
+
+  const cashSales = sales.filter(s => !s.isTestOrder && isCash(s) && inWindow(s.createdAt));
+
+  let cashInCents = 0;
+  let changeGivenCents = 0;
+  let basis: ExpectedCash["basis"] = "TENDER";
+
+  for (const sale of cashSales) {
+    if (typeof sale.tenderedCents === "number") {
+      cashInCents += sale.tenderedCents;
+      changeGivenCents += sale.changeCents ?? 0;
+    } else {
+      // Recorded before the till asked what was handed over: the total stands in, and the whole
+      // figure is flagged as an approximation rather than quietly mixing bases.
+      cashInCents += sale.totalCents ?? 0;
+      basis = "SALE_TOTALS";
+    }
+  }
+
+  const live = movements.filter(m => !m.deletedAt && inWindow(m.at));
+  const paidInCents = live.filter(m => m.kind === "PAID_IN").reduce((t, m) => t + m.amountCents, 0);
+  const paidOutCents = live.filter(m => m.kind === "PAID_OUT").reduce((t, m) => t + m.amountCents, 0);
+
+  return {
+    expectedCents:
+      session.openingFloatCents + cashInCents - changeGivenCents + paidInCents - paidOutCents,
+    basis,
+    cashSales: cashSales.length,
+    cashInCents,
+    changeGivenCents,
+    paidInCents,
+    paidOutCents,
+  };
+}

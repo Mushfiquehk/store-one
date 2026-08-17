@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  DEFAULT_DAY_START_HOUR, canOpenSession, dayStartHour, openSession, sessionForSale,
-  sessionWindow, tradingDayStart, type DrawerSession,
+  DEFAULT_DAY_START_HOUR, canOpenSession, dayStartHour, expectedCash, openSession, sessionForSale,
+  sessionWindow, tradingDayStart, type CashMovement, type DrawerSale, type DrawerSession,
 } from "./drawer";
 
 const session = (over: Partial<DrawerSession> = {}): DrawerSession => ({
@@ -96,4 +96,105 @@ test("a nonsense start hour falls back to the default rather than shifting the d
   for (const bad of [undefined, null, "morning", -1, 24, 4.5]) {
     assert.equal(dayStartHour(bad), DEFAULT_DAY_START_HOUR, `expected default for ${JSON.stringify(bad)}`);
   }
+});
+
+const cashSale = (at: number, over: Partial<DrawerSale> = {}): DrawerSale => ({
+  createdAt: at,
+  paymentMethod: "Cash",
+  totalCents: 1000,
+  tenderedCents: 1000,
+  changeCents: 0,
+  ...over,
+});
+
+const movement = (over: Partial<CashMovement>): CashMovement => ({
+  id: "m1",
+  sessionId: "ds1",
+  at: new Date(2026, 2, 2, 10).getTime(),
+  kind: "PAID_OUT",
+  amountCents: 0,
+  reason: "Supplier COD",
+  note: "",
+  employeeId: null,
+  updatedAt: 1,
+  deletedAt: null,
+  ...over,
+});
+
+test("the expected figure is the plan's arithmetic, twice over", () => {
+  // $200 float, three cash sales totalling $47.50 — one of them $12 tendered against $10.75 —
+  // and a $30 paid-out. Expect $217.50.
+  const open = session({ openingFloatCents: 20_000 });
+  const t = (h: number) => new Date(2026, 2, 2, h).getTime();
+  const sales = [
+    cashSale(t(9), { totalCents: 2_000, tenderedCents: 2_000, changeCents: 0 }),
+    cashSale(t(10), { totalCents: 1_675, tenderedCents: 1_675, changeCents: 0 }),
+    cashSale(t(11), { totalCents: 1_075, tenderedCents: 1_200, changeCents: 125 }),
+  ];
+  const movements = [movement({ kind: "PAID_OUT", amountCents: 3_000, at: t(12) })];
+
+  const first = expectedCash(open, sales, movements, t(13));
+  assert.equal(first.expectedCents, 21_750, "$217.50");
+  assert.equal(first.basis, "TENDER");
+  assert.equal(first.cashSales, 3);
+
+  // The same rows twice: a figure that moves between two reads of the same evening is not
+  // something an operator can be asked to explain.
+  const second = expectedCash(open, sales, movements, t(13));
+  assert.deepEqual(second, first);
+});
+
+test("a sale with no tender recorded falls back to its total and says so", () => {
+  const open = session({ openingFloatCents: 10_000 });
+  const t = (h: number) => new Date(2026, 2, 2, h).getTime();
+
+  const exact = expectedCash(open, [cashSale(t(9), { totalCents: 500, tenderedCents: 500 })], [], t(10));
+  assert.equal(exact.basis, "TENDER");
+
+  // Pre-Feature-16 rows: totals stand in, and the whole figure is flagged rather than quietly
+  // mixing an exact basis with an approximate one.
+  const approx = expectedCash(open, [
+    cashSale(t(9), { totalCents: 500, tenderedCents: 500 }),
+    cashSale(t(9), { totalCents: 700, tenderedCents: null, changeCents: null }),
+  ], [], t(10));
+  assert.equal(approx.basis, "SALE_TOTALS");
+  assert.equal(approx.expectedCents, 11_200, "float plus both sales");
+});
+
+test("card sales, test orders and out-of-window rows are not in the drawer", () => {
+  const open = session({ openingFloatCents: 5_000 });
+  const t = (h: number) => new Date(2026, 2, 2, h).getTime();
+
+  const result = expectedCash(open, [
+    cashSale(t(9), { totalCents: 1_000 }),
+    cashSale(t(9), { paymentMethod: "Card", totalCents: 9_999 }),
+    cashSale(t(9), { totalCents: 5_555, isTestOrder: true }),
+    cashSale(new Date(2026, 2, 1, 9).getTime(), { totalCents: 4_444 }),
+  ], [], t(10));
+
+  assert.equal(result.cashSales, 1);
+  assert.equal(result.expectedCents, 6_000, "only the cash sale inside the window");
+});
+
+test("paid in adds, paid out subtracts, and a deleted movement does neither", () => {
+  const open = session({ openingFloatCents: 10_000 });
+  const t = (h: number) => new Date(2026, 2, 2, h).getTime();
+
+  const result = expectedCash(open, [], [
+    movement({ id: "in", kind: "PAID_IN", amountCents: 2_500, reason: "Float top-up", at: t(9) }),
+    movement({ id: "out", kind: "PAID_OUT", amountCents: 1_000, at: t(10) }),
+    movement({ id: "gone", kind: "PAID_OUT", amountCents: 9_999, at: t(10), deletedAt: t(11) }),
+  ], t(12));
+
+  assert.equal(result.paidInCents, 2_500);
+  assert.equal(result.paidOutCents, 1_000);
+  assert.equal(result.expectedCents, 11_500);
+});
+
+test("an amount is always positive: the kind carries the direction", () => {
+  // No row can be ambiguous about its sign, so a paid-out cannot accidentally add.
+  const open = session({ openingFloatCents: 3_000 });
+  const out = movement({ kind: "PAID_OUT", amountCents: 3_000, at: open.openedAt + 60_000 });
+  assert.ok(out.amountCents > 0, "stored positive, whichever way it moved");
+  assert.equal(expectedCash(open, [], [out], open.openedAt + 120_000).expectedCents, 0, "the float went out the door");
 });
