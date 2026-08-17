@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 
 /**
@@ -36,7 +36,7 @@ test("a synced POS sale lands as a row, so server reporting can see it", async t
   }
 
   const { initDb } = await import("./init-db");
-  const { db, pool } = await import("./db");
+  const { db } = await import("./db");
   const { storage, adminStorage } = await import("./storage");
   const { adminSales, syncRecords } = await import("./schema");
   const { eq, and } = await import("drizzle-orm");
@@ -94,6 +94,70 @@ test("a synced POS sale lands as a row, so server reporting can see it", async t
     assert.equal(row[0].deletedAt, 1_700_000_500_000);
   } finally {
     await db.delete(adminSales).where(eq(adminSales.id, SALE.id));
-    await pool.end();
   }
+});
+
+test("sales that only ever existed as blobs are promoted once, and the total then holds", async t => {
+  if (!DATABASE_URL) {
+    t.skip("set DATABASE_URL to a throwaway Postgres to run the sales-writer tests");
+    return;
+  }
+
+  const { initDb } = await import("./init-db");
+  const { db } = await import("./db");
+  const { storage, adminStorage } = await import("./storage");
+  const { backfillSyncedSales } = await import("./backfill-sales");
+  const { adminSales, syncRecords } = await import("./schema");
+  const { eq, and, inArray } = await import("drizzle-orm");
+  await initDb();
+
+  const OLD = { ...SALE, id: "twow_old1" };
+  const VOIDED = { ...SALE, id: "twow_old2", totalCents: 900 };
+  const ids = [OLD.id, VOIDED.id];
+
+  const revenue = async () =>
+    ((await adminStorage.listSales()) as Array<{ id: string; totalCents: number }>)
+      .filter(s => ids.includes(s.id))
+      .reduce((total, s) => total + s.totalCents, 0);
+
+  try {
+    const client = await storage.getOrCreateClient("backfill-test", "Backfill Test");
+    await db.delete(adminSales).where(inArray(adminSales.id, ids));
+    await db.delete(syncRecords).where(
+      and(eq(syncRecords.clientId, client.id), eq(syncRecords.tableName, "sales")),
+    );
+
+    // An install from before Feature 26: real sales, blob only, nothing in admin_sales.
+    await db.insert(syncRecords).values([
+      { clientId: client.id, tableName: "sales", recordId: OLD.id, data: OLD, updatedAt: OLD.updatedAt, deletedAt: null },
+      { clientId: client.id, tableName: "sales", recordId: VOIDED.id, data: VOIDED, updatedAt: VOIDED.updatedAt, deletedAt: 1_700_000_600_000 },
+    ]);
+    assert.equal(await revenue(), 0, "before the backfill this revenue is invisible");
+
+    // The count is global (other blobs may be lying around), so assert on these two rows.
+    const first = await backfillSyncedSales();
+    assert.ok(first.promoted >= 2, `expected these two to be promoted, saw ${first.promoted}`);
+    const promotedRows = await db.select().from(adminSales).where(inArray(adminSales.id, ids));
+    assert.equal(promotedRows.length, 2, "both blob-only sales are rows now");
+    assert.equal(await revenue(), 433, "the live sale is counted; the voided one is not");
+
+    const voidedRow = await db.select().from(adminSales).where(eq(adminSales.id, VOIDED.id));
+    assert.equal(voidedRow.length, 1, "a voided sale is promoted as a soft-deleted row, not dropped");
+    assert.equal(voidedRow[0].deletedAt, 1_700_000_600_000);
+
+    // The check from the plan: same revenue after a restart. Running it again promotes nothing.
+    const second = await backfillSyncedSales();
+    assert.equal(second.promoted, 0, "idempotent — a second boot moves nothing");
+    assert.equal(await revenue(), 433, "and the number does not drift");
+  } finally {
+    await db.delete(adminSales).where(inArray(adminSales.id, ids));
+  }
+});
+
+// Both tests share the module-level pool in ./db, so it is closed once here rather than by
+// whichever test happens to finish first — that left the second one talking to a dead pool.
+after(async () => {
+  if (!DATABASE_URL) return;
+  const { pool } = await import("./db");
+  await pool.end();
 });
