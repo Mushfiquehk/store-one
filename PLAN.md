@@ -32,7 +32,7 @@ its section. They are ordered by what they cost if left alone.
 | **19** | No sale, price change, or adjustment records who made it; the only "current employee" is dialog state cleared on submit | `Sale` has no `employeeId` (`db.ts:142-156`); `app-shell.tsx:57, 85` | Feature 12's void attribution and Feature 15's ledger actor have nothing to record |
 | ~~**15**~~ | ~~Recipe depletion is implemented twice, and only the POS copy runs on real sales~~ **Fixed** — one engine in `shared/depletion.ts` | ~~`pos.tsx:373-436`~~ | — |
 | ~~**15**~~ | ~~Stock adjustments clamp at zero and record nothing~~ **Fixed** — `inventoryLedger` + unclamped quantities | ~~`local-storage.ts:257`~~ | — |
-| **21** | The Settings tax-rate field is bound to `useState` and written nowhere; the till charges a hardcoded 8.25% in every store | `settings.tsx:89, 411-412` (only three mentions of `taxRate` in the file); `pos.tsx:38` — `setTaxRatePct` is never called | Every operator charges the wrong tax and cannot change it |
+| ~~**21**~~ | ~~The Settings tax-rate field is bound to `useState` and written nowhere~~ **Fixed** (T1) — `tax.ratePct`, default 0; the server order path is still Feature 5 T2's half | ~~`settings.tsx:89`~~ | — |
 | **22** | Nothing ever asks how much cash is in the drawer — no float, no count, no over/short, no trading day | `grep -rin "drawer\|openingFloat\|cashCount\|endOfDay"` returns nothing | Every other defect in this table is undetectable in daily operation |
 | **25** | A product with no tags is unreachable on the till — the "show everything" branch is dead once any tagged product exists | `pos.tsx:98-116`; `activeTag` auto-sets at `:109` (during render), and `:114` filters by it | An operator adds an item, cannot find it, cannot tell whether it saved |
 | ~~**26**~~ | ~~Synced POS sales never reach `admin_sales`, so no server-side report can see them~~ **Fixed** — landed on sync (T2) and backfilled on boot (T3) | ~~`server/sales-writers.test.ts`~~ | — |
@@ -759,7 +759,20 @@ pattern is visible before it becomes a habit.
 
 ## Feature 21 — Tax: the rate the operator typed, on the items that are actually taxable
 
-**Status:** planned
+**Status:** T1 done — one key (`TAX_RATE_KEY = "tax.ratePct"`, `shared/schema.ts`), persisted from the
+Settings field on blur and read by the till on load, with `taxCentsFor` as the one place the arithmetic
+lives. **Default 0, not 8.25** — an unconfigured store visibly charges nothing rather than a plausible
+wrong number. The API rejects a negative rate, a non-number, and `825` typed for `8.25`. The dead copy
+at `app-shell.tsx:51` is deleted; `home.tsx`'s went with the file in Feature 16 T4. T2–T4 remain.
+
+**Not done here, and it needs Feature 6:** surfacing an unconfigured rate on a setup checklist. There is
+no checklist yet — Feature 6 is unbuilt — so a store that never sets a rate charges nothing silently.
+That is the deliberate trade (zero is visible in the till's own "Tax (0%)" line), but Feature 6 T1 should
+list `tax.ratePct` among the things it checks.
+
+**Still six sites, now five:** `shared/api-handlers.ts:451`'s `0.08` on the server order path is
+**Feature 5 T2's** half and still disagrees with the till. Both now read the same key name, so landing
+Feature 5 T2 is a substitution, not a negotiation.
 **Vision pillar:** #1 — a POS a new business can operate. Charging the wrong tax is not a rough edge;
 it is the operator's liability at the end of the quarter.
 **Depends on:** nothing. Feature 7 T3 shipped `GET`/`PUT /api/settings/:key`, which is where the rate

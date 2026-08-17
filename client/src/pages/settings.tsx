@@ -32,7 +32,10 @@ import {
   setAutoSyncEnabled, getAutoSyncInterval, setAutoSyncIntervalMinutes,
   startAutoSync, stopAutoSync,
 } from "@/lib/sync";
-import { DEFAULT_TENDER_METHODS, TENDER_METHODS_KEY, tenderMethods, type SyncCategory } from "@shared/schema";
+import {
+  DEFAULT_TAX_RATE_PCT, DEFAULT_TENDER_METHODS, TAX_RATE_KEY, TENDER_METHODS_KEY,
+  taxRatePct, tenderMethods, type SyncCategory,
+} from "@shared/schema";
 
 type SyncStatus = "idle" | "syncing" | "success" | "error";
 
@@ -86,7 +89,9 @@ const PROVIDER_PRESETS: Record<string, Partial<EmailConfig>> = {
 
 export default function SettingsPage() {
   const { toast } = useToast();
-  const [taxRate, setTaxRate] = useState(8.25);
+  // Zero until the operator says otherwise: an unconfigured rate must look unconfigured.
+  const [taxRate, setTaxRate] = useState(DEFAULT_TAX_RATE_PCT);
+  const [taxSaving, setTaxSaving] = useState(false);
   const [clientCode, setClientCode] = useState(() => localStorage.getItem("cornerpos_client_code") || "");
   const [backupStatus, setBackupStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [restoreStatus, setRestoreStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
@@ -107,6 +112,10 @@ export default function SettingsPage() {
       .then(r => r.json())
       .then(d => { if (d.value) setHours(d.value as HoursOfOperation); })
       .catch(() => {});
+    fetch(`/api/settings/${TAX_RATE_KEY}`)
+      .then(r => r.json())
+      .then(d => setTaxRate(taxRatePct(d.value)))
+      .catch(() => {});
     fetch(`/api/settings/${TENDER_METHODS_KEY}`)
       .then(r => r.json())
       .then(d => setAcceptedMethods(tenderMethods(d.value)))
@@ -116,6 +125,29 @@ export default function SettingsPage() {
       .then(d => { if (d.value) setEmailConfig(d.value as EmailConfig); })
       .catch(() => {});
   }, []);
+
+  const saveTaxRate = async (rate: number) => {
+    // The field used to be bound to useState and written nowhere: an operator typed their
+    // real rate, navigated away, and the till kept charging 8.25%.
+    if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
+      toast({ title: "Not saved", description: "Enter a rate between 0 and 100.", variant: "destructive" });
+      return;
+    }
+    setTaxSaving(true);
+    try {
+      const res = await fetch(`/api/settings/${TAX_RATE_KEY}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: rate }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Save failed");
+      toast({ title: "Saved", description: `Tax rate is now ${rate}%.` });
+    } catch (err) {
+      toast({ title: "Not saved", description: err instanceof Error ? err.message : "Save failed", variant: "destructive" });
+    } finally {
+      setTaxSaving(false);
+    }
+  };
 
   const saveTenderMethods = async (methods: string[]) => {
     // The server rejects an empty list too — this is the same rule stated where the
@@ -433,13 +465,18 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
                     <Label className="text-base">Tax Configuration</Label>
-                    <p className="text-sm text-muted-foreground">The default tax rate applied to all taxable items.</p>
+                    <p className="text-sm text-muted-foreground">
+                      The default tax rate applied to all taxable items. Saved when you leave the field —
+                      the till charges exactly this.
+                    </p>
                   </div>
                   <div className="relative w-32">
                     <Input
                       type="number"
                       value={taxRate}
                       onChange={(e) => setTaxRate(Number(e.target.value))}
+                      onBlur={(e) => saveTaxRate(Number(e.target.value))}
+                      disabled={taxSaving}
                       className="pr-8 rounded-xl"
                       data-testid="input-tax-rate"
                     />

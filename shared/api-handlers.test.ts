@@ -1,7 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createApiHandlers, type ApiAdminStorage, type StoreSetting } from "./api-handlers";
-import { DEFAULT_TENDER_METHODS, SECRET_SETTING_FIELDS, SECRET_SET_MARKER, TENDER_METHODS_KEY, tenderMethods } from "./schema";
+import {
+  DEFAULT_TENDER_METHODS, SECRET_SETTING_FIELDS, SECRET_SET_MARKER, TAX_RATE_KEY,
+  TENDER_METHODS_KEY, taxCentsFor, taxRatePct, tenderMethods,
+} from "./schema";
 
 // A storage stub backed by a Map. Only the settings methods are real; everything
 // else throws, so a test that accidentally reaches another entity fails loudly.
@@ -279,4 +282,34 @@ test("a price change is reflected by the next menu-margins call, with nothing in
   assert.equal(cookie.marginPct, 50);
   // Still the thinnest margin on this two-item menu, but no longer sold at a loss.
   assert.ok(after.every(r => (r.marginCents as number) >= 0), "nothing sells below cost now");
+});
+
+test("the tax rate is a percentage, and a nonsense one is refused", async () => {
+  const store = stubStore();
+  const h = createApiHandlers(store);
+
+  assert.equal((await call(h, "PUT", `/api/settings/${TAX_RATE_KEY}`, { value: 6.5 })).status, 200);
+  assert.equal(((await call(h, "GET", `/api/settings/${TAX_RATE_KEY}`)).data as { value: unknown }).value, 6.5);
+
+  // 825 instead of 8.25 charges eight times the bill; a negative rate refunds per item.
+  for (const bad of [-1, 825, "6.5", null]) {
+    const r = await call(h, "PUT", `/api/settings/${TAX_RATE_KEY}`, { value: bad });
+    assert.equal(r.status, 400, `expected 400 for ${JSON.stringify(bad)}`);
+  }
+  // The rejected writes left the working rate in place.
+  assert.equal(storedValue(store, TAX_RATE_KEY) as unknown as number, 6.5);
+
+  // Zero is a real answer: a store that charges no tax says so.
+  assert.equal((await call(h, "PUT", `/api/settings/${TAX_RATE_KEY}`, { value: 0 })).status, 200);
+});
+
+test("the rate the operator set is the tax the till charges", async () => {
+  // The plan's check, as arithmetic: 6.5% on a $10.00 item is 65 cents, not 82.
+  assert.equal(taxCentsFor(1000, 6.5), 65);
+  assert.equal(taxCentsFor(1000, 8.25), 83);
+  // An unconfigured store charges nothing rather than a plausible 8.25%.
+  assert.equal(taxCentsFor(1000, taxRatePct(undefined)), 0);
+  assert.equal(taxCentsFor(1000, taxRatePct(null)), 0);
+  assert.equal(taxCentsFor(1000, taxRatePct(-5)), 0, "a negative stored rate reads as unset");
+  assert.equal(taxRatePct(6.5), 6.5);
 });

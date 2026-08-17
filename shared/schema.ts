@@ -50,6 +50,13 @@ const isTenderList = (v: unknown): v is string[] =>
  * till, so it is rejected at the API rather than trusted to the UI that sent it.
  */
 export function validateSetting(key: string, value: unknown): string | null {
+  if (key === TAX_RATE_KEY) {
+    // A negative rate is a refund per item, and 8.25 typed as 825 charges eight times the bill.
+    const rate = typeof value === "number" ? value : NaN;
+    if (!Number.isFinite(rate) || rate < 0) return "Tax rate must be a percentage of zero or more";
+    if (rate > 100) return "Tax rate must be a percentage, not a multiplier (0-100)";
+    return null;
+  }
   if (key !== TENDER_METHODS_KEY) return null;
   if (Array.isArray(value) && value.length === 0) return "A store must accept at least one payment method";
   return isTenderList(value) ? null : "payments.methods must be a non-empty list of method names";
@@ -58,6 +65,29 @@ export function validateSetting(key: string, value: unknown): string | null {
 /** The accepted methods, falling back to the default for an unset or unusable value. */
 export function tenderMethods(value: unknown): string[] {
   return isTenderList(value) ? value : [...DEFAULT_TENDER_METHODS];
+}
+
+// The tax rate the operator set, in percent. One key, shared by the till and the server's
+// order path — if the two ever read different keys they charge different amounts.
+export const TAX_RATE_KEY = "tax.ratePct";
+
+/**
+ * **Zero, not 8.25.** A store with no configured rate charging 8.25% is the same class of
+ * error as a zero cost rendering a 100% margin: a plausible wrong number nobody checks.
+ * Zero is visibly unconfigured, and charging no tax is a question an operator answers on
+ * their first day rather than a liability they discover at the end of the quarter.
+ */
+export const DEFAULT_TAX_RATE_PCT = 0;
+
+/** The stored rate, or zero for anything unset or unusable. */
+export function taxRatePct(value: unknown): number {
+  const rate = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(rate) && rate >= 0 ? rate : DEFAULT_TAX_RATE_PCT;
+}
+
+/** Tax on a subtotal, rounded once. The one place the arithmetic lives. */
+export function taxCentsFor(subtotalCents: number, ratePct: number): number {
+  return Math.round((subtotalCents * taxRatePct(ratePct)) / 100);
 }
 
 /**
