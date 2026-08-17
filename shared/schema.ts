@@ -35,6 +35,31 @@ export const SYNC_CATEGORY_TABLES: Record<SyncCategory, string[]> = {
   invoices: ["invoices", "invoiceLineItems"],
 };
 
+// What a store accepts is configuration, not an integration status: a plain setting
+// and a string on the sale. Most operators take cards on a terminal from their bank,
+// which is a supported setup rather than a missing feature.
+export const TENDER_METHODS_KEY = "payments.methods";
+export const DEFAULT_TENDER_METHODS = ["Cash", "Card"];
+
+const isTenderList = (v: unknown): v is string[] =>
+  Array.isArray(v) && v.length > 0 && v.every(m => typeof m === "string" && m.trim().length > 0);
+
+/**
+ * Per-key validation for settings writes. Returns an error string, or null when the
+ * value is acceptable. Saving no payment methods is the one input here that bricks a
+ * till, so it is rejected at the API rather than trusted to the UI that sent it.
+ */
+export function validateSetting(key: string, value: unknown): string | null {
+  if (key !== TENDER_METHODS_KEY) return null;
+  if (Array.isArray(value) && value.length === 0) return "A store must accept at least one payment method";
+  return isTenderList(value) ? null : "payments.methods must be a non-empty list of method names";
+}
+
+/** The accepted methods, falling back to the default for an unset or unusable value. */
+export function tenderMethods(value: unknown): string[] {
+  return isTenderList(value) ? value : [...DEFAULT_TENDER_METHODS];
+}
+
 // A secret is write-only through the API: settable, never readable back. One map,
 // applied at every exit (settings responses, backup snapshots), so a new credential
 // is one line here rather than a new leak.

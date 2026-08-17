@@ -27,7 +27,7 @@ its section. They are ordered by what they cost if left alone.
 | **8** | Sync compares Drizzle rows to Dexie records via `JSON.stringify`, so they never match | `storage.ts:~270` vs `sync.ts:97` — differing key order and field set | Every menu record re-pushed to every client on every sync, forever |
 | **8** | Conflict resolution reads `adminUpdatedAt` but never compares it | `storage.ts:215+` | Newer POS edits silently discarded |
 | **17** | The stored SMTP password is returned by `GET /api/settings`, pre-filled into a form, and included in every backup | `api-handlers.ts:467-472`; `settings.tsx:109, 580`; `db.ts:462` → `backup.ts:32` | An operator's real mail credential leaks to anyone who can reach the server or fetch a backup |
-| **16** | Whether the till can record a card sale depends on ephemeral React state | `pos.tsx:133` reads `integrations`, which is `useState([])` at `store.tsx:129` | Every reload puts the store back to cash-only |
+| ~~**16**~~ | ~~Whether the till can record a card sale depends on ephemeral React state~~ **Fixed** — `payments.methods`, a store setting | ~~`pos.tsx:133`~~ | — |
 | **16** | "Integration Connected — Successfully linked to provider" is a toast over a no-op | `store.tsx:236-241` — no network call, no persistence | Pillar #3's only surface is a prop |
 | **19** | No sale, price change, or adjustment records who made it; the only "current employee" is dialog state cleared on submit | `Sale` has no `employeeId` (`db.ts:142-156`); `app-shell.tsx:57, 85` | Feature 12's void attribution and Feature 15's ledger actor have nothing to record |
 | **15** | Recipe depletion is implemented twice — `pos.tsx:373-436` duplicates `bom-engine.ts:203-293`, and only the POS copy runs on real sales | the two already differ at `pos.tsx:367` vs `bom-engine.ts:224` | Pillar #4's accuracy claim rests on a copy nothing tests |
@@ -1319,7 +1319,11 @@ as a plain setting.
 
 ## Feature 16 — Taking money: a card button that survives a reload, and an integrations page that does not lie
 
-**Status:** planned
+**Status:** T1 done — accepted tender is the `payments.methods` setting (`TENDER_METHODS_KEY`,
+`tenderMethods`, `validateSetting` in `shared/schema.ts`), the payment dialog renders one button per
+accepted method with no `(Setup Integration)` label, and the API rejects an empty list
+(`shared/api-handlers.test.ts`). `pos.tsx` no longer reads `integrations` at all — T3 still has to
+delete the state and its fake toggle. T2–T4 remain.
 **Vision pillar:** #3 — *"optional add-on features that the operator can setup and pay for later. The
 operator can optionally integrate 3rd party vendors."* This pillar has a page, a nav entry, and no
 implementation. Also #1: "setup **and operate**" — operating a till means taking the money.

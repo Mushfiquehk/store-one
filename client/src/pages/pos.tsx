@@ -15,6 +15,7 @@ import ModifierSelector, { type SelectedModifier } from "@/components/modifier-s
 import OrderReceipts from "@/components/order-receipts";
 import { format } from "date-fns";
 import type { Combo } from "@/lib/db";
+import { DEFAULT_TENDER_METHODS, TENDER_METHODS_KEY, tenderMethods } from "@shared/schema";
 
 function formatMoney(cents: number) {
   return new Intl.NumberFormat(undefined, {
@@ -31,7 +32,7 @@ export default function PosPage() {
   const { toast } = useToast();
   const {
     products, variants, inventory, bom, sales, modifierGroups, modifiers,
-    productModifierLinks, productModifierScaleFactors, addSale, updateSale, adjustInventory, integrations, isLoading,
+    productModifierLinks, productModifierScaleFactors, addSale, updateSale, adjustInventory, isLoading,
     combos, comboItems, productGroups, productGroupItems,
   } = useStore();
 
@@ -40,7 +41,17 @@ export default function PosPage() {
   const [appliedCombos, setAppliedCombos] = useState<Map<string, string>>(new Map());
   const [dismissedCombos, setDismissedCombos] = useState<Set<string>>(new Set());
   const [isPaymentOpen, setIsPaymentOpen] = useState(false);
-  const [paymentType, setPaymentType] = useState<"Cash" | "Card">("Cash");
+  // What this store accepts is a setting, so it survives a reload. It used to be
+  // React state that reset to "cash only" every time the tablet restarted.
+  const [acceptedMethods, setAcceptedMethods] = useState<string[]>(DEFAULT_TENDER_METHODS);
+  const [paymentType, setPaymentType] = useState<string>(DEFAULT_TENDER_METHODS[0]);
+
+  useEffect(() => {
+    fetch(`/api/settings/${TENDER_METHODS_KEY}`)
+      .then(r => r.json())
+      .then(d => setAcceptedMethods(tenderMethods(d.value)))
+      .catch(() => {});
+  }, []);
 
   const [modSelectorOpen, setModSelectorOpen] = useState(false);
   const [modSelectorProduct, setModSelectorProduct] = useState<typeof products[0] | null>(null);
@@ -130,7 +141,6 @@ export default function PosPage() {
     return map;
   }, [variants]);
 
-  const hasPaymentIntegration = useMemo(() => integrations.some(id => id.startsWith('pay_')), [integrations]);
 
   const comboVariantMap = useMemo(() => {
     const map = new Map<string, Set<string>>();
@@ -347,7 +357,8 @@ export default function PosPage() {
       toast({ title: "Cart is empty", description: "Add items first." });
       return;
     }
-    if (!hasPaymentIntegration) setPaymentType("Cash");
+    // A method the store has since stopped accepting must not stay selected.
+    if (!acceptedMethods.includes(paymentType)) setPaymentType(acceptedMethods[0]);
     setIsPaymentOpen(true);
   }
 
@@ -917,23 +928,20 @@ export default function PosPage() {
                 <p className="text-sm text-muted-foreground uppercase tracking-wider">Total Due</p>
                 <p className="text-4xl font-serif mt-1">{formatMoney(totalCents)}</p>
               </div>
+              {/* One button per method the store accepts — no disabled button pointing
+                  at an Integrations page that cannot deliver what it promises. */}
               <div className="grid grid-cols-2 gap-3">
-                <Button
-                  variant={paymentType === "Card" ? "default" : "outline"}
-                  className="h-16 rounded-2xl flex flex-col gap-1"
-                  onClick={() => hasPaymentIntegration && setPaymentType("Card")}
-                  disabled={!hasPaymentIntegration}
-                >
-                  <span className="font-semibold text-lg">Card</span>
-                  {!hasPaymentIntegration && <span className="text-[10px] font-normal opacity-70">(Setup Integration)</span>}
-                </Button>
-                <Button
-                  variant={paymentType === "Cash" ? "default" : "outline"}
-                  className="h-16 rounded-2xl flex flex-col gap-1"
-                  onClick={() => setPaymentType("Cash")}
-                >
-                  <span className="font-semibold text-lg">Cash</span>
-                </Button>
+                {acceptedMethods.map(method => (
+                  <Button
+                    key={method}
+                    variant={paymentType === method ? "default" : "outline"}
+                    className="h-16 rounded-2xl flex flex-col gap-1"
+                    onClick={() => setPaymentType(method)}
+                    data-testid={`button-tender-${method.toLowerCase()}`}
+                  >
+                    <span className="font-semibold text-lg">{method}</span>
+                  </Button>
+                ))}
               </div>
               <div className="rounded-xl bg-muted/30 p-4 border border-border/50 text-sm">
                 <div className="flex justify-between mb-1">
