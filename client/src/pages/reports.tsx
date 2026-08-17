@@ -7,6 +7,7 @@ import {
   Wallet,
   Percent,
   AlertTriangle,
+  Clock,
 } from "lucide-react";
 import {
   LineChart,
@@ -31,6 +32,7 @@ import { Switch } from "@/components/ui/switch";
 import { useStore } from "@/lib/store";
 import { productMix, salesSeries, type Granularity } from "@shared/reports";
 import { menuMargins } from "@shared/pricing";
+import { laborCost, laborPct } from "@shared/labor";
 import { Link } from "wouter";
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
@@ -88,7 +90,7 @@ function ChartCard({ title, data, dataKey, format: fmt }: { title: string; data:
 }
 
 export default function ReportsPage() {
-  const { products, variants, inventory, bom, modifiers, sales, employees } = useStore();
+  const { products, variants, inventory, bom, modifiers, sales, employees, timePunches } = useStore();
 
   const [granularityIndex, setGranularityIndex] = useState([1]);
   const granularities = ['hourly', 'daily', 'monthly'] as const;
@@ -155,6 +157,17 @@ export default function ReportsPage() {
     return Array.from(byProduct.values()).sort((a, b) => b.revenueCents - a.revenueCents);
   }, [sales, products, variants, showIngredientProducts, range]);
 
+  const revenueCents = Math.round(totals.sales * 100);
+
+  // Labour for the same window as the revenue above it, so the percentage divides two
+  // numbers that mean the same period. Until Feature 13 landed, that denominator was
+  // generateMockSalesData() and this figure would have changed on every render.
+  const labor = useMemo(
+    () => laborCost(timePunches, employees, { since: range.since, now: Date.now() }),
+    [timePunches, employees, range],
+  );
+  const laborPercent = laborPct(labor, revenueCents);
+
   // Margins, from the same costing the API's menu-margins endpoint uses and the same
   // volumes as the mix tab above. Worst first; unknown-cost rows are flagged, never
   // sorted as though a missing ingredient price were a 100% margin.
@@ -213,6 +226,51 @@ export default function ReportsPage() {
                 <KpiCard title={`Avg Ticket (${range.label})`} value={hasSales ? formatMoney(totals.avgCheck * 100) : "\u2014"} icon={<TrendingUp className="h-4 w-4" />} />
                 <KpiCard title={`Transactions (${range.label})`} value={hasSales ? totals.txns.toString() : "\u2014"} icon={<Users className="h-4 w-4" />} />
               </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <KpiCard
+                  title={`Labour Cost (${range.label})`}
+                  value={labor.hoursWithUnknownRate > 0 ? "\u2014" : formatMoney(labor.costCents)}
+                  icon={<Wallet className="h-4 w-4" />}
+                />
+                {/* The form operators actually manage against. Null rather than a number
+                    whose numerator is a guess. */}
+                <KpiCard
+                  title={`Labour % of Revenue (${range.label})`}
+                  value={laborPercent == null ? "\u2014" : `${laborPercent.toFixed(1)}%`}
+                  icon={<Percent className="h-4 w-4" />}
+                />
+                <KpiCard title={`Hours Worked (${range.label})`} value={labor.hours.toFixed(1)} icon={<Clock className="h-4 w-4" />} />
+              </div>
+              {(labor.unclosedPunches.length > 0 || labor.hoursWithUnknownRate > 0 || labor.inProgress.length > 0) && (
+                <div className="rounded-2xl border bg-card p-4 text-sm space-y-2" data-testid="text-labour-caveats">
+                  {labor.unclosedPunches.length > 0 && (
+                    <p className="flex items-start gap-2 text-destructive" data-testid="text-labour-unclosed">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                      <span>
+                        <strong>{labor.unclosedPunches.length} punch{labor.unclosedPunches.length > 1 ? "es" : ""} never clocked out</strong>{" "}
+                        ({labor.unclosedPunches.map(p => `${p.employeeName}, ${p.hoursOpen.toFixed(0)}h open`).join("; ")}).
+                        Those hours are <em>not</em> in the figures above — close them and this number will change.
+                      </span>
+                    </p>
+                  )}
+                  {labor.hoursWithUnknownRate > 0 && (
+                    <p className="flex items-start gap-2 text-amber-700 dark:text-amber-500" data-testid="text-labour-unknown-rate">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                      <span>
+                        {labor.hoursWithUnknownRate.toFixed(1)} hours worked by {labor.unknownRateEmployees.join(", ")} have no pay
+                        rate set, so no labour cost or percentage can be stated. Set a rate on the{" "}
+                        <Link href="/employees" className="underline">employees page</Link>.
+                      </span>
+                    </p>
+                  )}
+                  {labor.inProgress.length > 0 && (
+                    <p className="text-muted-foreground" data-testid="text-labour-in-progress">
+                      {labor.inProgress.length} shift{labor.inProgress.length > 1 ? "s" : ""} still in progress
+                      ({labor.inProgress.map(p => p.employeeName).join(", ")}), counted up to now.
+                    </p>
+                  )}
+                </div>
+              )}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <ChartCard title="Sales Overview" data={salesData} dataKey="sales" format="currency" />
                 <ChartCard title="Transaction Volume" data={salesData} dataKey="transactions" />

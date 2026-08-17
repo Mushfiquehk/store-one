@@ -1678,7 +1678,11 @@ splits across the two days. An open punch inside the 16-hour cutoff counts to `n
 employee named. Hours belonging to someone with no wage set are reported as hours but not priced, in
 `hoursWithUnknownRate` / `unknownRateEmployees`, and `laborPct` returns null rather than a ratio built
 on them. Tests in `shared/labor.test.ts`, including the plan's 40-hour and midnight checks.
-T3–T4 remain.
+T3 done — the Sales Trends tab carries **Labour Cost**, **Labour % of Revenue** and **Hours Worked**
+for the same window as the revenue above them, from `laborCost`/`laborPct`. Any window with an
+unclosed punch says so beside the numbers, names who and for how long, and states that those hours are
+*not* included; unset pay rates get their own caveat with a link to the employees page; shifts still
+running are called out as counted-to-now. T4 remains.
 
 **Seam, decided in T2:** `Employee.payRate` is a non-null number, so `0` is the only way to say
 "unpaid" *and* the value an old row with no rate already has — T1 reads `0` as a deliberate "Unpaid".

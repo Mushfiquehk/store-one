@@ -98,3 +98,22 @@ test("labour percentage refuses to be stated on unknown cost or no revenue", () 
   const partly = laborCost([{ id: "p_cy", employeeId: "e_cy", timeIn: day(2, 9), timeOut: day(2, 12) }], staff, { now: day(3) });
   assert.equal(laborPct(partly, 88000), null, "some hours are unpriced, so the ratio would be a lie");
 });
+
+test("the labour percentage is exactly cost over revenue, and repeats itself", () => {
+  // The plan's check for T3: the figure on the page is this identity, and two consecutive
+  // reads of the same data agree — which the Math.random() denominator it replaced never did.
+  const punches: LaborPunch[] = [
+    { id: "p1", employeeId: "e_ana", timeIn: day(2, 9), timeOut: day(2, 17) },
+    { id: "p2", employeeId: "e_bo", timeIn: day(2, 12), timeOut: day(2, 16) },
+  ];
+  const window = { now: day(3), since: day(2) };
+  const revenueCents = 123456;
+
+  const first = laborCost(punches, staff, window);
+  const second = laborCost(punches, staff, window);
+  assert.deepEqual(first, second, "same inputs, same numbers");
+
+  assert.equal(laborPct(first, revenueCents), (first.costCents / revenueCents) * 100);
+  assert.equal(first.costCents, 17600, "8 paid hours at $22, plus 4 unpaid ones");
+  assert.equal(first.hours, 12, "and the unpaid hours are still hours");
+});
