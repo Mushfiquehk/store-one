@@ -161,3 +161,37 @@ after(async () => {
   const { pool } = await import("./db");
   await pool.end();
 });
+
+test("a test order is a visible sale and not revenue", async t => {
+  if (!DATABASE_URL) {
+    t.skip("set DATABASE_URL to a throwaway Postgres to run the sales-writer tests");
+    return;
+  }
+
+  const { initDb } = await import("./init-db");
+  const { db } = await import("./db");
+  const { adminStorage } = await import("./storage");
+  const { adminSales } = await import("./schema");
+  const { eq } = await import("drizzle-orm");
+  const { salesSummary } = await import("../shared/reports");
+  await initDb();
+
+  const TEST_ORDER = { ...SALE, id: "twow_test1", totalCents: 5_000, isTestOrder: true };
+
+  try {
+    await db.delete(adminSales).where(eq(adminSales.id, TEST_ORDER.id));
+    await adminStorage.createSale(TEST_ORDER as unknown as Record<string, unknown>);
+
+    const rows = (await adminStorage.listSales()) as Array<{ id: string; isTestOrder: boolean }>;
+    const mine = rows.filter(s => s.id === TEST_ORDER.id);
+    assert.equal(mine.length, 1, "visible as a sale — it did happen, and it moved stock");
+    assert.equal(mine[0].isTestOrder, true, "and it is marked as what it is");
+
+    // The plan's check: visible, but not revenue. Every report goes through realSales().
+    const summary = salesSummary(rows.filter(s => s.id === TEST_ORDER.id));
+    assert.equal(summary.totalRevenueCents, 0, "a recipe check is not money the business took");
+    assert.equal(summary.totalSales, 0);
+  } finally {
+    await db.delete(adminSales).where(eq(adminSales.id, TEST_ORDER.id));
+  }
+});

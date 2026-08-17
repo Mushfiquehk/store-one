@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { productMix, salesSeries, salesSummary, type ReportSale } from "./reports";
+import { productMix, realSales, salesSeries, salesSummary, type ReportSale } from "./reports";
 
 // Local time on purpose — the functions bucket by the operator's trading day, so the
 // fixtures have to be built the same way or the test asserts the timezone, not the logic.
@@ -145,4 +145,21 @@ test("the Reports page contains no random numbers", () => {
 test("averageOrderCents does not divide by zero", () => {
   assert.equal(salesSummary([]).averageOrderCents, 0);
   assert.equal(salesSummary(twoSales).averageOrderCents, Math.round(1475 / 2));
+});
+
+test("a test order is not revenue, in any report", () => {
+  // /api/orders/simulate writes a real admin_sales row to prove the recipe deducts correctly.
+  // Counting it as revenue would inflate every number an operator manages against.
+  const withTest: ReportSale[] = [
+    ...twoSales,
+    { createdAt: at(2026, 3, 1, 16), totalCents: 99_999, taxCents: 0, isTestOrder: true, linesJson: [{ ...latte, qty: 50, unitPrice: 425 }] },
+  ];
+
+  assert.equal(salesSummary(withTest).totalRevenueCents, 1475, "the same as without it");
+  assert.equal(salesSummary(withTest).totalSales, 2);
+  assert.equal(productMix(withTest).find(r => r.variantId === "v_latte_s")!.quantity, 3, "not 53");
+  assert.equal(
+    salesSeries(withTest, { granularity: "daily" }).reduce((sum, b) => sum + b.transactions, 0),
+    2,
+  );
 });

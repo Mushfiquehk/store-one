@@ -155,7 +155,10 @@ half-built than not started (Feature 3 T3 in particular).
 
 ## Feature 26 — Sales have two writers and no owner
 
-**Status:** T1 done — the decision is recorded in `shared/sync-compare.ts` beside the conflict policy:
+**Status:** done — T1–T4 complete. One owner (`admin_sales`), synced sales landed as rows, history
+backfilled on boot, one row builder, and test orders marked and excluded from revenue.
+
+T1 done — the decision is recorded in `shared/sync-compare.ts` beside the conflict policy:
 `SALES_OWNER = "admin_sales"`, with the sync blob named as transport and bookkeeping rather than the
 record. The corollary is enforced rather than merely written: a test asserts `isAdminOwned("sales")` is
 false and that a device sale beats an older server copy on recency, so nobody can quietly add `sales`
@@ -171,7 +174,14 @@ T3 done — `server/backfillSyncedSales()` (`server/backfill-sales.ts`) promotes
 resurrecting them. Idempotent and silent after the first boot; it logs only when it actually moves
 something. Tested against a real database: revenue invisible before, correct after, unchanged by a
 second run.
-T4 remains (`bom-engine`'s direct insert into `adminSales`).
+T4 done — one row builder (`buildSaleRow`, `server/storage.ts`) is used by both `createSale` and
+`bom-engine`, which keeps its own transaction because it rolls it back for dry runs. Test orders carry
+`isTestOrder` and are filtered out by `realSales()` in `shared/reports.ts`, so every report inherits the
+exclusion rather than each one remembering it. `initDb` now takes an advisory lock, after two DB test
+files racing inside `CREATE TABLE IF NOT EXISTS` produced a flaky failure — the same race two server
+instances booting together would hit.
+
+**Feature 26 is complete** (T1–T4).
 **Vision pillar:** #1 — "the best foundation". Sales records are the business's books, and half of
 them are currently invisible to the server that reports on them.
 **Depends on:** nothing. Feature 8 T1–T3 made sync converge, which is what made this measurable.
