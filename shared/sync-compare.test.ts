@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { SYNCED_FIELDS, sameDeletedState, sameSyncedFields } from "./sync-compare";
+import {
+  ADMIN_OWNED_TABLES, SYNCED_FIELDS, isAdminOwned, resolveByRecency, resolveConflict,
+  sameDeletedState, sameSyncedFields,
+} from "./sync-compare";
 
 // An admin row as Drizzle returns it: every column, in schema-definition order, including
 // the server-only createdAt.
@@ -104,4 +107,53 @@ test("deleted state compares as a flag, not as an equal timestamp", () => {
   assert.ok(sameDeletedState(1700, 1800));
   assert.equal(sameDeletedState(null, 1800), false);
   assert.equal(sameDeletedState(1700, null), false);
+});
+
+
+test("an admin-owned table resolves to admin even when the device edit is newer", () => {
+  // The rule that was previously invisible: adminUpdatedAt was read and never compared.
+  const pos = { data: { id: "p1", name: "Renamed on the till" }, updatedAt: 9_000, deletedAt: null };
+  const admin = { data: { id: "p1", name: "Latte" }, updatedAt: 1_000, deletedAt: null };
+
+  const result = resolveConflict("products", pos, admin);
+  assert.equal(result.winner, "admin");
+  assert.match(result.reason, /owns this table/);
+});
+
+test("agreement is not a conflict, which is the whole point of the feature", () => {
+  const row = { id: "p1", name: "Latte", type: "RESTAURANT", isComposite: false, availableAsIngredient: false, attributes: null };
+  const result = resolveConflict("products", { data: { ...row }, updatedAt: 5 }, { data: { ...row, createdAt: "x" }, updatedAt: 9 });
+  assert.equal(result.winner, "equal", "nothing to push");
+});
+
+test("a table with no admin counterpart is last-write-wins, and says so", () => {
+  const newer = resolveConflict("sales", { data: { id: "s1", totalCents: 500 }, updatedAt: 200 }, { data: { id: "s1", totalCents: 400 }, updatedAt: 100 });
+  assert.equal(newer.winner, "pos");
+  assert.match(newer.reason, /newer or equal/);
+
+  const older = resolveConflict("sales", { data: { id: "s1", totalCents: 500 }, updatedAt: 50 }, { data: { id: "s1", totalCents: 400 }, updatedAt: 100 });
+  assert.equal(older.winner, "admin", "the stored record stands");
+});
+
+test("a missing updatedAt is the oldest thing in the system, not the newest", () => {
+  // The bug this pins: sync.ts stamped a record with no updatedAt as Date.now(), so the
+  // oldest data in the system won every last-write-wins comparison.
+  assert.equal(resolveByRecency({ updatedAt: undefined }, { updatedAt: 1 }).winner, "admin");
+  assert.equal(resolveByRecency({ updatedAt: null }, { updatedAt: 1 }).winner, "admin");
+  assert.equal(resolveByRecency({ updatedAt: 0 }, { updatedAt: 0 }).winner, "pos", "a tie goes to the incoming record");
+});
+
+test("a row with no admin counterpart keeps the device's copy", () => {
+  const result = resolveConflict("products", { data: { id: "p_new" }, updatedAt: 5 }, null);
+  assert.equal(result.winner, "pos");
+});
+
+test("the admin-owned list is the one the client also uses", () => {
+  assert.ok(isAdminOwned("products"));
+  assert.ok(isAdminOwned("invoiceLineItems"));
+  assert.equal(isAdminOwned("sales"), false, "sales are authored on the device");
+  // Every admin-owned table must have a field list, or resolveConflict can never see agreement.
+  for (const table of ADMIN_OWNED_TABLES) {
+    assert.ok(SYNCED_FIELDS[table], `${table} has no field list`);
+  }
 });
