@@ -21,7 +21,7 @@ import {
   changeDueCents, taxRatePct, tenderMethods, tenderSuggestions,
 } from "@shared/schema";
 import { taxOnCart } from "@shared/pricing";
-import { ALL_CATEGORY, UNCATEGORISED, menuCategories, productsInCategory } from "@shared/menu-grid";
+import { ALL_CATEGORY, UNCATEGORISED, menuCategories, productsInCategory, sortProducts } from "@shared/menu-grid";
 import { computeInventoryDeductions } from "@shared/depletion";
 
 function formatMoney(cents: number) {
@@ -142,7 +142,7 @@ export default function PosPage() {
   const activeCategory = categories.includes(activeTag) ? activeTag : ALL_CATEGORY;
 
   const filteredProducts = useMemo(
-    () => productsInCategory(products, activeCategory),
+    () => sortProducts(productsInCategory(products, activeCategory)),
     [products, activeCategory],
   );
 

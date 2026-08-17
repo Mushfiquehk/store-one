@@ -33,6 +33,8 @@ export const adminProducts = pgTable("admin_products", {
   name: text("name").notNull(),
   // Till category. Nullable: an existing row's category is its first tag until an operator says.
   category: text("category"),
+  // Position within its category on the till. Nullable: seeded from existing order.
+  sortOrder: integer("sort_order"),
   type: text("type").notNull().default("RETAIL"),
   isComposite: pgBoolean("is_composite").notNull().default(false),
   availableAsIngredient: pgBoolean("available_as_ingredient").notNull().default(false),

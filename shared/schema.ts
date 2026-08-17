@@ -200,6 +200,12 @@ export type Product = {
    * has to be re-tagged.
    */
   category?: string | null;
+  /**
+   * Position within its category on the till. Optional: rows written before Feature 25 T3
+   * are seeded from the order they were already in, so nothing jumps to alphabetical on
+   * upgrade.
+   */
+  sortOrder?: number | null;
   type: "RETAIL" | "RESTAURANT";
   isComposite: boolean;
   availableAsIngredient: boolean;

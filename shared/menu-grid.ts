@@ -81,3 +81,46 @@ export function renameCategory<T extends GridProduct & { id: string }>(
     productIds: products.filter(p => categoryOf(p) === from).map(p => p.id),
   };
 }
+
+/**
+ * The grid's own order: the arrangement an operator dragged, then name for anything that has
+ * never been positioned. Products with no `sortOrder` sort last rather than first, so a newly
+ * added item lands at the end of its category instead of in the middle of the layout.
+ */
+export function sortProducts<T extends GridProduct & { name: string; sortOrder?: number | null }>(products: T[]): T[] {
+  return [...products].sort((a, b) => {
+    const aOrder = a.sortOrder ?? Number.MAX_SAFE_INTEGER;
+    const bOrder = b.sortOrder ?? Number.MAX_SAFE_INTEGER;
+    if (aOrder !== bOrder) return aOrder - bOrder;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+/**
+ * Moving one product to another's position: the rows to write, and nothing else.
+ *
+ * Every product in the list gets a contiguous `sortOrder`, which is what stops an arrangement
+ * from degrading into ties after a few moves — but only the rows whose position actually
+ * changed are returned, so a drop writes two or three records rather than the whole menu.
+ */
+export function reorderProducts<T extends GridProduct & { id: string; name: string; sortOrder?: number | null }>(
+  products: T[],
+  movedId: string,
+  targetId: string,
+): Array<{ id: string; sortOrder: number }> {
+  if (movedId === targetId) return [];
+
+  const ordered = sortProducts(products);
+  const from = ordered.findIndex(p => p.id === movedId);
+  const to = ordered.findIndex(p => p.id === targetId);
+  if (from === -1 || to === -1) return [];
+
+  const moved = ordered[from];
+  ordered.splice(from, 1);
+  ordered.splice(to, 0, moved);
+
+  return ordered
+    .map((product, index) => ({ id: product.id, sortOrder: index, was: product.sortOrder }))
+    .filter(row => row.was !== row.sortOrder)
+    .map(({ id, sortOrder }) => ({ id, sortOrder }));
+}

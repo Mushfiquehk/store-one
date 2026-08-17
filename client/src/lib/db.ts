@@ -18,6 +18,8 @@ export interface Product {
   name: string;
   /** Till category. Absent on rows written before Feature 25 T2 — see categoryOf(). */
   category?: string | null;
+  /** Position within its category. Absent on older rows — see sortProducts(). */
+  sortOrder?: number | null;
   type: "RETAIL" | "RESTAURANT";
   isComposite: boolean;
   availableAsIngredient: boolean;
@@ -488,6 +490,19 @@ class PosDatabase extends Dexie {
           product.category = (product.attributes?.tags || [])[0] ?? null;
         }
       });
+    });
+
+    // Feature 25 T3: grid arrangement. Seeded from the order rows already come back in, so an
+    // upgrade preserves what the operator was looking at instead of resorting the menu.
+    this.version(15).stores({}).upgrade(async tx => {
+      const products = await tx.table("products").toArray();
+      let position = 0;
+      for (const product of products) {
+        if (product.sortOrder === undefined || product.sortOrder === null) {
+          await tx.table("products").update(product.id, { sortOrder: position });
+        }
+        position += 1;
+      }
     });
   }
 }
