@@ -31,6 +31,8 @@ export const syncRecords = pgTable("sync_records", {
 export const adminProducts = pgTable("admin_products", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
+  // Till category. Nullable: an existing row's category is its first tag until an operator says.
+  category: text("category"),
   type: text("type").notNull().default("RETAIL"),
   isComposite: pgBoolean("is_composite").notNull().default(false),
   availableAsIngredient: pgBoolean("available_as_ingredient").notNull().default(false),

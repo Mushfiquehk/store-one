@@ -16,7 +16,8 @@ import OrderReceipts from "@/components/order-receipts";
 import { format } from "date-fns";
 import type { Combo } from "@/lib/db";
 import {
-  DEFAULT_TAX_RATE_PCT, DEFAULT_TENDER_METHODS, TAX_INCLUSIVE_KEY, TAX_RATE_KEY, TENDER_METHODS_KEY,
+  DEFAULT_TAX_RATE_PCT, DEFAULT_TENDER_METHODS, MENU_CATEGORIES_KEY, TAX_INCLUSIVE_KEY, TAX_RATE_KEY,
+  TENDER_METHODS_KEY,
   changeDueCents, taxRatePct, tenderMethods, tenderSuggestions,
 } from "@shared/schema";
 import { taxOnCart } from "@shared/pricing";
@@ -67,6 +68,12 @@ export default function PosPage() {
     fetch(`/api/settings/${TAX_INCLUSIVE_KEY}`)
       .then(r => r.json())
       .then(d => setTaxInclusive(d.value === true))
+      .catch(() => {});
+    // The bar follows the operator's order, so it cannot silently reorder itself when a
+    // product is edited.
+    fetch(`/api/settings/${MENU_CATEGORIES_KEY}`)
+      .then(r => r.json())
+      .then(d => setConfiguredCategories(Array.isArray(d.value) ? d.value as string[] : []))
       .catch(() => {});
   }, []);
 
@@ -125,7 +132,8 @@ export default function PosPage() {
 
   // The category bar and its filter live in shared/menu-grid.ts, where they are tested: the
   // bug they replace made a product with no tags unreachable on the till.
-  const categories = useMemo(() => menuCategories(products), [products]);
+  const [configuredCategories, setConfiguredCategories] = useState<string[]>([]);
+  const categories = useMemo(() => menuCategories(products, configuredCategories), [products, configuredCategories]);
 
   // Defaults to All, so nothing is hidden before the operator picks anything. And note there
   // is no setState during render: the old code wrote activeTag from the render body, which

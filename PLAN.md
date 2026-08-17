@@ -262,7 +262,15 @@ can exist in one store and not the other.
 tags, then **Uncategorised** when something needs a home; a product with no tags is reachable without
 searching. The logic moved to `shared/menu-grid.ts` where it is tested, and the render-phase
 `setActiveTag` is gone — the active category is derived, falling back to All when a category disappears
-because its last product was retagged. T2–T4 remain.
+because its last product was retagged.
+T2 done — products carry `category` (nullable, all three schemas, Dexie v14 seeding it from each
+product's first tag with `tags` untouched), the bar is built from the ordered `menu.categories` setting
+rather than a `Set` over products, an empty configured category still shows, and a product claiming a
+category the list has not been told about is appended rather than hidden. `renameCategory` returns the
+new list **and** the product ids to rewrite, in one function, so a rename cannot empty a category and
+orphan its products. `categoryOf` falls back to the first tag, which is what makes the migration free.
+T3–T4 remain — including the operator-facing reorder/rename UI: T2 ships the model, the till's use of
+it, and the rename primitive, but the only way to reorder today is a `PUT /api/settings/menu.categories`.
 **Vision pillar:** #1 — "the easiest path". Setting up a menu is the first thing an operator does and
 the till layout is what they live in afterwards.
 **Depends on:** nothing. **T1 is a bug fix and should be taken on its own** regardless of the rest.

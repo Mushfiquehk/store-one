@@ -16,6 +16,8 @@ export type { ProductAttributes, ModifierScaleFactors, ScaleFactorMatrix, SaleLi
 export interface Product {
   id: string;
   name: string;
+  /** Till category. Absent on rows written before Feature 25 T2 — see categoryOf(). */
+  category?: string | null;
   type: "RETAIL" | "RESTAURANT";
   isComposite: boolean;
   availableAsIngredient: boolean;
@@ -475,6 +477,16 @@ class PosDatabase extends Dexie {
       await tx.table("sales").toCollection().modify(sale => {
         if (sale.taxRatePct === undefined) sale.taxRatePct = null;
         if (sale.taxInclusive === undefined) sale.taxInclusive = null;
+      });
+    });
+
+    // Feature 25 T2: a category of its own. Seeded from each product's first tag, with tags
+    // left exactly as they were — no data is lost and nothing needs re-tagging.
+    this.version(14).stores({}).upgrade(async tx => {
+      await tx.table("products").toCollection().modify(product => {
+        if (product.category === undefined) {
+          product.category = (product.attributes?.tags || [])[0] ?? null;
+        }
       });
     });
   }
