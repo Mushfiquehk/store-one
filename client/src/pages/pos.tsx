@@ -16,6 +16,7 @@ import OrderReceipts from "@/components/order-receipts";
 import { format } from "date-fns";
 import type { Combo } from "@/lib/db";
 import { DEFAULT_TENDER_METHODS, TENDER_METHODS_KEY, changeDueCents, tenderMethods, tenderSuggestions } from "@shared/schema";
+import { computeInventoryDeductions } from "@shared/depletion";
 
 function formatMoney(cents: number) {
   return new Intl.NumberFormat(undefined, {
@@ -371,89 +372,14 @@ export default function PosPage() {
     setIsPaymentOpen(true);
   }
 
-  function resolveSubRecipe(sourceProductId: string, multiplier: number, depth: number, ancestors: Set<string> = new Set()) {
-    if (depth > 5 || ancestors.has(sourceProductId)) return;
-    const subProduct = products.find(p => p.id === sourceProductId);
-    if (!subProduct) return;
-    const subVariants = variants.filter(v => v.productId === sourceProductId);
-    const defaultVariant = subVariants[0];
-    if (!defaultVariant) return;
-    const pathAncestors = new Set(ancestors);
-    pathAncestors.add(sourceProductId);
-    const subBom = bom.filter(b => b.sourceType === "VARIANT" && b.sourceId === defaultVariant.id);
-    subBom.forEach(subEntry => {
-      if (subEntry.sourceProductId) {
-        resolveSubRecipe(subEntry.sourceProductId, subEntry.quantityDeducted * multiplier, depth + 1, pathAncestors);
-      } else if (subEntry.inventoryItemId) {
-        adjustInventory(subEntry.inventoryItemId, -(subEntry.quantityDeducted * multiplier));
-      }
-    });
-  }
-
   function handleRecordSale() {
-    cart.forEach(line => {
-      const bomEntries = bom.filter(b => b.sourceType === "VARIANT" && b.sourceId === line.variantId);
-      const selectedModGroupIds = new Set(
-        line.modifiers.map(sel => {
-          const mod = modifiers.find(m => m.id === sel.modifierId);
-          return mod?.modifierGroupId;
-        }).filter(Boolean)
-      );
-
-      if (bomEntries.length === 0) {
-        const variant = variants.find(v => v.id === line.variantId);
-        if (variant?.directInventoryId) {
-          adjustInventory(variant.directInventoryId, -line.qty);
-        }
-      } else {
-        bomEntries.forEach(entry => {
-          if (entry.overrideModifierGroupId && selectedModGroupIds.has(entry.overrideModifierGroupId)) {
-            return;
-          }
-          let qty = entry.quantityDeducted * line.qty;
-          if (entry.scaleFactorMatrix) {
-            const sfm = entry.scaleFactorMatrix;
-            const variant = variants.find(v => v.id === line.variantId);
-            if (variant) {
-              const scale = sfm[variant.id] ?? sfm[variant.name] ?? 1;
-              qty = entry.quantityDeducted * scale * line.qty;
-            }
-          }
-          if (entry.sourceProductId) {
-            resolveSubRecipe(entry.sourceProductId, qty, 0);
-          } else {
-            adjustInventory(entry.inventoryItemId, -qty);
-          }
-        });
-      }
-
-      line.modifiers.forEach(sel => {
-        const modBomEntries = bom.filter(b => b.sourceType === "MODIFIER" && b.sourceId === sel.modifierId);
-        if (modBomEntries.length > 0) {
-          modBomEntries.forEach(entry => {
-            let qty = entry.quantityDeducted * sel.qty * line.qty;
-            if (entry.scaleFactorMatrix) {
-              const sfm = entry.scaleFactorMatrix;
-              const variant = variants.find(v => v.id === line.variantId);
-              if (variant) {
-                const scale = sfm[variant.id] ?? sfm[variant.name] ?? 1;
-                qty = entry.quantityDeducted * scale * sel.qty * line.qty;
-              }
-            }
-            if (entry.sourceProductId) {
-              resolveSubRecipe(entry.sourceProductId, qty, 0);
-            } else {
-              adjustInventory(entry.inventoryItemId, -qty);
-            }
-          });
-        } else {
-          const mod = modifiers.find(m => m.id === sel.modifierId);
-          if (mod?.inventoryItemId && mod.quantityPerUse) {
-            adjustInventory(mod.inventoryItemId, -(mod.quantityPerUse * sel.qty * line.qty));
-          }
-        }
-      });
-    });
+    // One walk, shared with the server's test-order path. The till used to carry its own
+    // copy of this algorithm, and the two had already drifted.
+    const deltas = computeInventoryDeductions(
+      cart.map(line => ({ variantId: line.variantId, qty: line.qty, modifiers: line.modifiers })),
+      { products, variants, modifiers, bomEntries: bom },
+    );
+    deltas.forEach((delta, inventoryItemId) => adjustInventory(inventoryItemId, delta));
 
     const itemComboMap = new Map<string, { comboId: string; comboName: string }>();
     comboDiscounts.forEach(({ combo, discount, items }) => {

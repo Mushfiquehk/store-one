@@ -4,6 +4,10 @@ import {
   adminBillOfMaterials, adminProductModifierGroups, adminSales,
 } from "./schema";
 import { eq, isNull } from "drizzle-orm";
+// One depletion walk, shared with the till. This file kept its own copy until Feature 15 T1.
+import { computeInventoryDeductions } from "../shared/depletion";
+
+export { computeInventoryDeductions };
 
 export type LineItemInput = {
   variantId: string;
@@ -198,101 +202,6 @@ export function validateLineItems(
     }
   }
   return errors;
-}
-
-export function computeInventoryDeductions(
-  lineItems: LineItemInput[],
-  data: {
-    products: Product[]; variants: Variant[]; modifiers: Modifier[];
-    inventoryItems: InventoryItem[]; bomEntries: BomEntry[];
-  }
-): Map<string, number> {
-  const deltas = new Map<string, number>();
-
-  function addDelta(inventoryItemId: string, amount: number) {
-    deltas.set(inventoryItemId, (deltas.get(inventoryItemId) || 0) + amount);
-  }
-
-  function resolveSubRecipe(sourceProductId: string, multiplier: number, depth: number, ancestors: Set<string>) {
-    if (depth > 5 || ancestors.has(sourceProductId)) return;
-    const subProduct = data.products.find(p => p.id === sourceProductId);
-    if (!subProduct) return;
-    const subVariants = data.variants.filter(v => v.productId === sourceProductId);
-    const defaultVariant = subVariants[0];
-    if (!defaultVariant) return;
-    const pathAncestors = new Set(ancestors);
-    pathAncestors.add(sourceProductId);
-    const subBom = data.bomEntries.filter(b => b.sourceType === "VARIANT" && b.sourceId === defaultVariant.id);
-    subBom.forEach(subEntry => {
-      if (subEntry.sourceProductId) {
-        resolveSubRecipe(subEntry.sourceProductId, subEntry.quantityDeducted * multiplier, depth + 1, pathAncestors);
-      } else {
-        addDelta(subEntry.inventoryItemId, -(subEntry.quantityDeducted * multiplier));
-      }
-    });
-  }
-
-  for (const line of lineItems) {
-    const variant = data.variants.find(v => v.id === line.variantId);
-    if (!variant) continue;
-
-    const bomEntries = data.bomEntries.filter(b => b.sourceType === "VARIANT" && b.sourceId === line.variantId);
-    const selectedModGroupIds = new Set(
-      (line.modifiers || []).map(sel => {
-        const mod = data.modifiers.find(m => m.id === sel.modifierId);
-        return mod?.modifierGroupId;
-      }).filter(Boolean)
-    );
-
-    if (bomEntries.length === 0) {
-      if (variant.directInventoryId) {
-        addDelta(variant.directInventoryId, -line.qty);
-      }
-    } else {
-      bomEntries.forEach(entry => {
-        if (entry.overrideModifierGroupId && selectedModGroupIds.has(entry.overrideModifierGroupId)) {
-          return;
-        }
-        let qty = entry.quantityDeducted * line.qty;
-        if (entry.scaleFactorMatrix) {
-          const sfm = entry.scaleFactorMatrix as Record<string, number>;
-          const scale = sfm[variant.id] ?? sfm[variant.name] ?? 1;
-          qty = entry.quantityDeducted * scale * line.qty;
-        }
-        if (entry.sourceProductId) {
-          resolveSubRecipe(entry.sourceProductId, qty, 0, new Set());
-        } else {
-          addDelta(entry.inventoryItemId, -qty);
-        }
-      });
-    }
-
-    (line.modifiers || []).forEach(sel => {
-      const modBomEntries = data.bomEntries.filter(b => b.sourceType === "MODIFIER" && b.sourceId === sel.modifierId);
-      if (modBomEntries.length > 0) {
-        modBomEntries.forEach(entry => {
-          let qty = entry.quantityDeducted * sel.qty * line.qty;
-          if (entry.scaleFactorMatrix) {
-            const sfm = entry.scaleFactorMatrix as Record<string, number>;
-            const scale = sfm[variant.id] ?? sfm[variant.name] ?? 1;
-            qty = entry.quantityDeducted * scale * sel.qty * line.qty;
-          }
-          if (entry.sourceProductId) {
-            resolveSubRecipe(entry.sourceProductId, qty, 0, new Set());
-          } else {
-            addDelta(entry.inventoryItemId, -qty);
-          }
-        });
-      } else {
-        const mod = data.modifiers.find(m => m.id === sel.modifierId);
-        if (mod?.inventoryItemId && mod.quantityPerUse) {
-          addDelta(mod.inventoryItemId, -(mod.quantityPerUse * sel.qty * line.qty));
-        }
-      }
-    });
-  }
-
-  return deltas;
 }
 
 function applyComboDiscounts(
