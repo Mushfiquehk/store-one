@@ -166,6 +166,20 @@ export const adminSales = pgTable("admin_sales", {
   deletedAt: bigint("deleted_at", { mode: "number" }),
 });
 
+// Append-only: no updated_at, no deleted_at, and nothing in the codebase writes to a row twice.
+// See shared/action-log.ts.
+export const actionLog = pgTable("action_log", {
+  id: text("id").primaryKey(),
+  at: bigint("at", { mode: "number" }).notNull(),
+  actorKind: text("actor_kind").notNull(),
+  actorId: text("actor_id"),
+  action: text("action").notNull(),
+  targetType: text("target_type").notNull(),
+  targetId: text("target_id"),
+  summary: text("summary").notNull(),
+  detail: jsonb("detail"),
+});
+
 export const storeSettings = pgTable("store_settings", {
   key: text("key").primaryKey(),
   value: jsonb("value").notNull(),

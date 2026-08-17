@@ -1,6 +1,10 @@
 import { db } from "./db";
 import { costPerStockUnit, stockUnitsReceived } from "@shared/units";
 import { WASTE_REASONS, ledgerRows, type InventoryLedgerEntry, type LedgerContext, type LedgerReason, type WasteReason } from "@shared/ledger";
+import {
+  ACTIONS, actionLogEntry, priceChangeSummary,
+  type ActionLogEntry, type ActionLogInput, type ActorKind,
+} from "@shared/action-log";
 import type {
   Product,
   Variant,
@@ -109,9 +113,46 @@ export const storage = {
     return variant;
   },
 
-  async updateVariant(id: string, data: Partial<Variant>): Promise<Variant | undefined> {
+  async updateVariant(
+    id: string,
+    data: Partial<Variant>,
+    actor: { kind: ActorKind; id: string | null } = { kind: "SYSTEM", id: null },
+  ): Promise<Variant | undefined> {
+    const before = await db.variants.get(id);
     await db.variants.update(id, { ...data, updatedAt: Date.now() });
+
+    // The choke point every price change already goes through, so there is no interception
+    // layer: one row, with both prices in the summary.
+    if (before && data.basePrice !== undefined && data.basePrice !== before.basePrice) {
+      const product = await db.products.get(before.productId);
+      await storage.appendActionLog({
+        actorKind: actor.kind,
+        actorId: actor.id,
+        action: ACTIONS.PRICE_CHANGED,
+        targetType: "variant",
+        targetId: id,
+        summary: priceChangeSummary(
+          `${product?.name ?? "Unknown"} / ${before.name}`,
+          before.basePrice,
+          data.basePrice,
+        ),
+        detail: null,
+      });
+    }
+
     return db.variants.get(id);
+  },
+
+  /** Append-only: put() with a fresh id, and nothing anywhere updates or deletes these rows. */
+  async appendActionLog(input: ActionLogInput): Promise<ActionLogEntry> {
+    const entry = actionLogEntry(input, Date.now(), () => uid("log"));
+    await db.actionLog.put(entry);
+    return entry;
+  },
+
+  async getActionLog(limit = 200): Promise<ActionLogEntry[]> {
+    const rows = await db.actionLog.toArray();
+    return rows.sort((a, b) => b.at - a.at).slice(0, limit);
   },
 
   async deleteVariant(id: string): Promise<void> {

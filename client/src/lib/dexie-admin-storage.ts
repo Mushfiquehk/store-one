@@ -1,4 +1,5 @@
 import { ledgerRows } from "@shared/ledger";
+import type { ActionLogEntry } from "@shared/action-log";
 import { db } from "./db";
 import type {
   Product,
@@ -502,6 +503,12 @@ export const dexieAdminStorage: ApiAdminStorage = {
 
   async listTimePunches() {
     return notDeleted(await db.timePunches.toArray());
+  },
+
+  async appendActionLog(entry: ActionLogEntry) {
+    // put(), never update(): a new id every time, and nothing rewrites an existing row.
+    await db.actionLog.put(entry);
+    return entry;
   },
 
   async listSettings() {

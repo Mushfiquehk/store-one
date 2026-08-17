@@ -89,6 +89,7 @@ const PROVIDER_PRESETS: Record<string, Partial<EmailConfig>> = {
 
 export default function SettingsPage() {
   const { toast } = useToast();
+  const { logAction } = useStore();
   // Zero until the operator says otherwise: an unconfigured rate must look unconfigured.
   const [taxRate, setTaxRate] = useState(DEFAULT_TAX_RATE_PCT);
   const [taxSaving, setTaxSaving] = useState(false);
@@ -431,6 +432,16 @@ export default function SettingsPage() {
           await db.table(name).clear();
           if (rows.length) await db.table(name).bulkPut(rows);
         }
+      });
+
+      // One row for the whole restore, written after the transaction commits: a log entry for a
+      // restore that failed would be a claim about data that was never replaced.
+      await logAction({
+        action: "BACKUP_RESTORED",
+        targetType: "database",
+        targetId: null,
+        summary: `Restored backup from ${new Date(pendingRestore.createdAt).toLocaleString()} — replaced ${plan.restore.length} tables`,
+        detail: { tables: plan.restore },
       });
 
       setRestoreStatus("success");
