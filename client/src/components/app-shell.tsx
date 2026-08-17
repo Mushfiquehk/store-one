@@ -14,7 +14,8 @@ import {
   Sliders,
   Users,
   Clock,
-  LogOut
+  LogOut,
+  Banknote
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -22,10 +23,16 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { PinProtection } from "@/components/pin-protection";
 import { useToast } from "@/hooks/use-toast";
 import { useStore } from "@/lib/store";
+import { parseDollarsToCents } from "@shared/money";
+import {
+  DEFAULT_VARIANCE_NOTE_THRESHOLD_CENTS, VARIANCE_NOTE_THRESHOLD_KEY, closeSummary, expectedCash,
+  openSession, varianceNeedsNote, varianceNoteThresholdCents,
+  type DrawerSale, type DrawerSession, type ExpectedCash,
+} from "@shared/drawer";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
@@ -49,8 +56,98 @@ export default function AppShell({
 }) {
   const [location, setLocation] = useLocation();
   const { toast } = useToast();
-  const { employees, timePunches, addTimePunch, updateTimePunch, currentEmployee, setCurrentEmployeeId } = useStore();
+  const {
+    employees, timePunches, addTimePunch, updateTimePunch, currentEmployee, setCurrentEmployeeId,
+    sales, getDrawerSessions, openDrawerSession, closeDrawerSession, getCashMovements, logAction,
+  } = useStore();
   
+  // Drawer state. The count is entered before anything else is shown — see the dialog below.
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [session, setSession] = useState<DrawerSession | null>(null);
+  const [floatInput, setFloatInput] = useState("");
+  const [countInput, setCountInput] = useState("");
+  const [countNote, setCountNote] = useState("");
+  const [reveal, setReveal] = useState<{ counted: number; expected: ExpectedCash } | null>(null);
+  const [threshold, setThreshold] = useState(DEFAULT_VARIANCE_NOTE_THRESHOLD_CENTS);
+
+  const refreshSession = useCallback(async () => {
+    const sessions = await getDrawerSessions();
+    setSession(openSession(sessions));
+  }, [getDrawerSessions]);
+
+  useEffect(() => { refreshSession().catch(() => {}); }, [refreshSession]);
+
+  useEffect(() => {
+    fetch(`/api/settings/${VARIANCE_NOTE_THRESHOLD_KEY}`)
+      .then(r => r.json())
+      .then(d => setThreshold(varianceNoteThresholdCents(d.value)))
+      .catch(() => {});
+  }, []);
+
+  const handleOpenDrawer = async () => {
+    const cents = parseDollarsToCents(floatInput);
+    if (cents == null) {
+      toast({ title: "Opening float required", description: "Enter what is in the drawer to start with.", variant: "destructive" });
+      return;
+    }
+    try {
+      await openDrawerSession(cents);
+      await refreshSession();
+      setFloatInput("");
+      toast({ title: "Drawer open", description: `Starting with ${(cents / 100).toFixed(2)}.` });
+    } catch (err) {
+      // Refused rather than opening a second session: two make every sale ambiguous.
+      toast({ title: "Not opened", description: err instanceof Error ? err.message : "Failed", variant: "destructive" });
+    }
+  };
+
+  // Step one: the count, with nothing else on screen. Only then is expected computed and shown —
+  // a count taken with the target visible is not a count.
+  const handleSubmitCount = async () => {
+    if (!session) return;
+    const counted = parseDollarsToCents(countInput);
+    if (counted == null) {
+      toast({ title: "Enter the counted total", variant: "destructive" });
+      return;
+    }
+    const expected = expectedCash(session, sales as DrawerSale[], await getCashMovements(), Date.now());
+    setReveal({ counted, expected });
+  };
+
+  const handleConfirmClose = async () => {
+    if (!session || !reveal) return;
+    const variance = reveal.counted - reveal.expected.expectedCents;
+    if (varianceNeedsNote(variance, threshold) && !countNote.trim()) {
+      toast({
+        title: "A note is required",
+        description: "Say what you think happened while you still remember it.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    await closeDrawerSession(session.id, {
+      countedCents: reveal.counted,
+      expectedCents: reveal.expected.expectedCents,
+      note: countNote.trim(),
+    });
+    // A closed drawer is a decision with money attached: it belongs in the same list as the voids.
+    await logAction({
+      action: "DRAWER_CLOSED",
+      targetType: "drawerSession",
+      targetId: session.id,
+      summary: closeSummary(reveal.counted, reveal.expected.expectedCents, reveal.expected.basis),
+      detail: { varianceCents: variance, basis: reveal.expected.basis, note: countNote.trim() || null },
+    });
+
+    setReveal(null);
+    setCountInput("");
+    setCountNote("");
+    setIsDrawerOpen(false);
+    await refreshSession();
+    toast({ title: "Drawer closed", description: closeSummary(reveal.counted, reveal.expected.expectedCents, reveal.expected.basis) });
+  };
+
   // Time Punch State
   const [isTimePunchOpen, setIsTimePunchOpen] = useState(false);
   // The dialog's own selection, defaulting to whoever is already on the till.
@@ -92,6 +189,81 @@ export default function AppShell({
 
   return (
     <div className="min-h-screen app-shell">
+      {/* Drawer Dialog — the count is entered before the expected figure exists on screen. */}
+      <Dialog open={isDrawerOpen} onOpenChange={open => { setIsDrawerOpen(open); if (!open) { setReveal(null); setCountNote(""); setCountInput(""); } }}>
+        <DialogContent className="sm:max-w-md" data-testid="dialog-drawer">
+          <DialogHeader>
+            <DialogTitle>{session ? "Close the drawer" : "Open the drawer"}</DialogTitle>
+          </DialogHeader>
+
+          {!session ? (
+            <div className="space-y-3 py-2">
+              <Label htmlFor="drawer-float">Opening float</Label>
+              <Input
+                id="drawer-float"
+                inputMode="decimal"
+                value={floatInput}
+                onChange={e => setFloatInput(e.target.value)}
+                placeholder="200.00"
+                data-testid="input-drawer-float"
+              />
+              <Button className="w-full" onClick={handleOpenDrawer} data-testid="button-open-drawer">Open drawer</Button>
+            </div>
+          ) : !reveal ? (
+            <div className="space-y-3 py-2">
+              <p className="text-sm text-muted-foreground">
+                Count the drawer and enter the total. What the sales say should be there is shown after —
+                a count taken with the target on screen is not a count.
+              </p>
+              <Label htmlFor="drawer-count">Counted total</Label>
+              <Input
+                id="drawer-count"
+                inputMode="decimal"
+                value={countInput}
+                onChange={e => setCountInput(e.target.value)}
+                placeholder="0.00"
+                autoFocus
+                data-testid="input-drawer-count"
+              />
+              <Button className="w-full" onClick={handleSubmitCount} data-testid="button-submit-count">
+                Submit count
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-3 py-2" data-testid="drawer-reveal">
+              <div className="rounded-xl border p-3 text-sm space-y-1">
+                <div className="flex justify-between"><span className="text-muted-foreground">Counted</span><span className="font-mono">{(reveal.counted / 100).toFixed(2)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Expected</span><span className="font-mono" data-testid="text-drawer-expected">{(reveal.expected.expectedCents / 100).toFixed(2)}</span></div>
+                <div className="flex justify-between font-medium">
+                  <span>Variance</span>
+                  <span className={reveal.counted - reveal.expected.expectedCents === 0 ? "font-mono" : "font-mono text-destructive"} data-testid="text-drawer-variance">
+                    {((reveal.counted - reveal.expected.expectedCents) / 100).toFixed(2)}
+                  </span>
+                </div>
+                {reveal.expected.basis === "SALE_TOTALS" && (
+                  <p className="pt-1 text-xs text-amber-700 dark:text-amber-500">
+                    Expected is approximate: some cash sales did not record what was handed over.
+                  </p>
+                )}
+              </div>
+              <Label htmlFor="drawer-note">
+                Note{varianceNeedsNote(reveal.counted - reveal.expected.expectedCents, threshold) ? " (required)" : " (optional)"}
+              </Label>
+              <Input
+                id="drawer-note"
+                value={countNote}
+                onChange={e => setCountNote(e.target.value)}
+                placeholder="What do you think happened?"
+                data-testid="input-drawer-note"
+              />
+              <Button className="w-full" onClick={handleConfirmClose} data-testid="button-confirm-close-drawer">
+                Close drawer
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* Time Punch Dialog */}
       <Dialog open={isTimePunchOpen} onOpenChange={setIsTimePunchOpen}>
         <DialogContent className="sm:max-w-md">
@@ -183,6 +355,15 @@ export default function AppShell({
                     >
                       <Clock className="mr-3 h-5 w-5" />
                       Time Punch
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="mt-2 w-full justify-start rounded-xl text-base h-12 text-primary border-primary/20 hover:bg-primary/5"
+                      onClick={() => setIsDrawerOpen(true)}
+                      data-testid="button-drawer"
+                    >
+                      <Banknote className="mr-3 h-5 w-5" />
+                      {session ? "Close drawer" : "Open drawer"}
                     </Button>
                   </div>
                 </div>

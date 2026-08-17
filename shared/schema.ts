@@ -50,6 +50,11 @@ const isTenderList = (v: unknown): v is string[] =>
  * till, so it is rejected at the API rather than trusted to the UI that sent it.
  */
 export function validateSetting(key: string, value: unknown): string | null {
+  if (key === VARIANCE_NOTE_THRESHOLD_KEY) {
+    return Number.isInteger(value) && (value as number) >= 0
+      ? null
+      : "drawer.varianceNoteThresholdCents must be whole cents, zero or more";
+  }
   if (key === DAY_START_HOUR_KEY) {
     return Number.isInteger(value) && (value as number) >= 0 && (value as number) <= 23
       ? null
@@ -92,8 +97,8 @@ export const MENU_CATEGORIES_KEY = "menu.categories";
 
 // The trading-day rule lives in shared/drawer.ts; re-exported so settings validation and the
 // key itself stay in one import for callers.
-export { DAY_START_HOUR_KEY } from "./drawer";
-import { DAY_START_HOUR_KEY } from "./drawer";
+export { DAY_START_HOUR_KEY, VARIANCE_NOTE_THRESHOLD_KEY } from "./drawer";
+import { DAY_START_HOUR_KEY, VARIANCE_NOTE_THRESHOLD_KEY } from "./drawer";
 
 export const TAX_RATE_KEY = "tax.ratePct";
 

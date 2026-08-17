@@ -1,8 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   DEFAULT_DAY_START_HOUR, canOpenSession, dayStartHour, expectedCash, openSession, sessionForSale,
-  sessionWindow, tradingDayStart, type CashMovement, type DrawerSale, type DrawerSession,
+  sessionWindow, tradingDayStart, DEFAULT_VARIANCE_NOTE_THRESHOLD_CENTS, closeSummary,
+  varianceNeedsNote, varianceNoteThresholdCents,
+  type CashMovement, type DrawerSale, type DrawerSession,
 } from "./drawer";
 
 const session = (over: Partial<DrawerSession> = {}): DrawerSession => ({
@@ -197,4 +200,53 @@ test("an amount is always positive: the kind carries the direction", () => {
   const out = movement({ kind: "PAID_OUT", amountCents: 3_000, at: open.openedAt + 60_000 });
   assert.ok(out.amountCents > 0, "stored positive, whichever way it moved");
   assert.equal(expectedCash(open, [], [out], open.openedAt + 120_000).expectedCents, 0, "the float went out the door");
+});
+
+test("a variance beyond the threshold needs a note — over as well as short", () => {
+  // $8 short, default $5 threshold: the plan's check.
+  assert.equal(varianceNeedsNote(-800, DEFAULT_VARIANCE_NOTE_THRESHOLD_CENTS), true);
+  // A drawer $40 up is as much a finding as one $40 down.
+  assert.equal(varianceNeedsNote(4_000, DEFAULT_VARIANCE_NOTE_THRESHOLD_CENTS), true);
+
+  assert.equal(varianceNeedsNote(0, DEFAULT_VARIANCE_NOTE_THRESHOLD_CENTS), false);
+  assert.equal(varianceNeedsNote(-500, DEFAULT_VARIANCE_NOTE_THRESHOLD_CENTS), false, "exactly the threshold is fine");
+  assert.equal(varianceNeedsNote(-501, DEFAULT_VARIANCE_NOTE_THRESHOLD_CENTS), true);
+
+  // A zero threshold means every non-zero variance is explained, which is a real choice.
+  assert.equal(varianceNeedsNote(-1, 0), true);
+  // Nonsense falls back to the default rather than turning the requirement off.
+  assert.equal(varianceNeedsNote(-800, NaN), true);
+  assert.equal(varianceNoteThresholdCents("500" as unknown), DEFAULT_VARIANCE_NOTE_THRESHOLD_CENTS);
+});
+
+test("the action-log summary reads on its own", () => {
+  assert.equal(
+    closeSummary(51_250, 52_050, "TENDER"),
+    "$512.50 counted against $520.50 expected — $8.00 short",
+  );
+  assert.equal(
+    closeSummary(52_050, 51_250, "TENDER"),
+    "$520.50 counted against $512.50 expected — $8.00 over",
+  );
+  assert.match(closeSummary(1_000, 1_000, "TENDER"), /exact$/);
+  // An approximated expectation says so in the row itself, not just on the screen that made it.
+  assert.match(closeSummary(1_000, 900, "SALE_TOTALS"), /approximated from sale totals/);
+});
+
+// The integrity of this whole feature is one UI decision: the expected figure must not exist on
+// screen until the count is submitted. A source check is a blunt instrument, but it is the only
+// thing this runner can hold — and what it pins is exactly the mistake that would undo the
+// feature (rendering expected in the counting step, or pre-filling the field from it).
+test("the drawer dialog cannot show the expected figure before the count", () => {
+  const shell = readFileSync(new URL("../client/src/components/app-shell.tsx", import.meta.url), "utf8");
+
+  // The expected figure is rendered only inside the reveal branch, which exists after submit.
+  const revealAt = shell.indexOf('data-testid="drawer-reveal"');
+  const expectedAt = shell.indexOf('data-testid="text-drawer-expected"');
+  assert.ok(revealAt > 0 && expectedAt > revealAt, "expected must render inside the post-count reveal");
+
+  // The count field is never seeded from the expectation, and there is no shortcut for it.
+  const countField = shell.slice(shell.indexOf('id="drawer-count"'), shell.indexOf('button-submit-count'));
+  assert.ok(!/expected/i.test(countField), "the counted field must not be pre-filled from expected");
+  assert.ok(!/use expected/i.test(shell), 'no "use expected" shortcut');
 });
