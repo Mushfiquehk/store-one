@@ -35,6 +35,7 @@ its section. They are ordered by what they cost if left alone.
 | **21** | The Settings tax-rate field is bound to `useState` and written nowhere; the till charges a hardcoded 8.25% in every store | `settings.tsx:89, 411-412` (only three mentions of `taxRate` in the file); `pos.tsx:38` — `setTaxRatePct` is never called | Every operator charges the wrong tax and cannot change it |
 | **22** | Nothing ever asks how much cash is in the drawer — no float, no count, no over/short, no trading day | `grep -rin "drawer\|openingFloat\|cashCount\|endOfDay"` returns nothing | Every other defect in this table is undetectable in daily operation |
 | **25** | A product with no tags is unreachable on the till — the "show everything" branch is dead once any tagged product exists | `pos.tsx:98-116`; `activeTag` auto-sets at `:109` (during render), and `:114` filters by it | An operator adds an item, cannot find it, cannot tell whether it saved |
+| **26** | Synced POS sales never reach `admin_sales`, so no server-side report can see them | `server/sales-writers.test.ts` proves it; `sales` has no `adminLookups` entry | Revenue reports omit every sale that arrived by sync |
 | **5** | Combos are ignored by the live order path | `bom-engine.ts` is imported only by `routes.ts:16` for test orders; `/api/orders/simulate` prices inline with a hardcoded 8% tax | Combos charge full price; three different tax rates in the codebase |
 
 ~~**Suggested first session**~~ — **done.** Features 7, 9 and 11 have all landed, which clears the
@@ -149,6 +150,83 @@ All four tasks complete, every `Check:` passing, `npm run check` (tsc) clean, an
 stated "Definition of done" demonstrably true. A feature with three of four tasks done is not
 partially shipped — it is unshipped, and several of these leave the system in a worse state
 half-built than not started (Feature 3 T3 in particular).
+
+---
+
+## Feature 26 — Sales have two writers and no owner
+
+**Status:** planned
+**Vision pillar:** #1 — "the best foundation". Sales records are the business's books, and half of
+them are currently invisible to the server that reports on them.
+**Depends on:** nothing. Feature 8 T1–T3 made sync converge, which is what made this measurable.
+**Added:** 2026-08-17 (found by Feature 8 T4's investigation)
+
+### The finding, verified against a real database
+
+`server/sales-writers.test.ts` asserts all of this today:
+
+1. **A synced POS sale never reaches `admin_sales`.** The `sales` sync group stores the row as a JSON
+   blob in `syncRecords`. `sales` has no entry in `processSyncChanges`'s `adminLookups` and no branch
+   in `applyChanges`, so nothing ever promotes the blob into a real row.
+2. **Every server-side report reads `admin_sales` only** (`adminStorage.listSales()`), so
+   `sales-summary`, `product-mix` and Feature 10's `menu-margins` **cannot see a single synced POS
+   sale**. They see admin-API sales (Feature 7 T2) and `bom-engine` test orders.
+3. **The same sale arriving by both paths leaves two disconnected copies** — one `admin_sales` row and
+   one orphaned sync blob. Not a double count today, because nothing unions the two; it becomes one
+   the moment anything does.
+4. `getClientSyncData` has no `sales` key in its result map at all, so a client that rebuilds from that
+   endpoint gets no sales back.
+
+The device is not wrong and the server is not wrong: nobody ever decided which one owns a sale.
+
+### The shape
+
+```
+ponytail: one owner, one write path. admin_sales is the row; the sales sync group
+becomes transport that lands rows through createSale instead of storing blobs.
+No reconciliation job between two writers — that is a second system to keep
+correct, and the thing it would reconcile is revenue.
+```
+
+### Tasks
+
+**T1 — Decide and write down who owns a sale** (~15 min)
+- One owner: `admin_sales`. A sale is authored on the device and *lands* server-side as a row, not as
+  a blob. Record it beside the conflict policy in `shared/sync-compare.ts`, which is now where sync
+  policy lives.
+- State the corollary: sales are **append-mostly and device-authored**, so admin-wins must not apply
+  to them — the existing last-write-wins fallback is correct for this table and must stay.
+- Check: the policy note names `admin_sales` as the owner and the test above still passes unchanged
+  (this task decides, it does not move data).
+
+**T2 — Land synced sales as rows** (~15 min)
+- Give `sales` a branch in the sync path that writes through `adminStorage.createSale` (idempotent on
+  `id` already, via `onConflictDoUpdate`) instead of only storing a `syncRecords` blob.
+- Keep the blob as the sync bookkeeping it is — `lastSyncedAt` windows depend on it — but the
+  authoritative row must exist.
+- Check: a device syncs a sale and `listSales()` returns it; syncing the same sale twice leaves one
+  row.
+
+**T3 — Backfill the blobs already stored** (~15 min)
+- Existing installs have real sales sitting only in `syncRecords`. Promote them once, idempotently,
+  and log how many moved.
+- Check: a database seeded with blob-only sales reports the same revenue before and after a restart.
+
+**T4 — Stop the third writer diverging** (~15 min)
+- `bom-engine.ts` inserts into `adminSales` directly for test orders. Route it through the same
+  `createSale` so there is one insert path, and mark test-order sales so they can be excluded from
+  reports rather than being indistinguishable from real ones.
+- Check: a test order is visible as a sale but excluded from revenue reporting.
+
+### Non-goals
+
+Moving sales into `SYNC_CATEGORY_TABLES`' admin-lookup machinery (they are device-authored, not
+admin-owned), a reconciliation job between the two stores, and multi-device sale merging.
+
+### Definition of done
+
+One write path for sales, every synced sale visible to every report, and a test that fails if a sale
+can exist in one store and not the other.
 
 ---
 
@@ -2505,7 +2583,16 @@ can create the schema without starting a listener. Verified load-bearing by rest
 `ALTER TABLE admin_sales ADD COLUMN …` *before* `CREATE TABLE IF NOT EXISTS admin_sales`, so on a
 **fresh** database `initDb()` threw `relation "admin_sales" does not exist` and the server never
 finished booting. Nothing in the suite could have caught it; the first actual `initDb()` run did.
-T4 remains.
+T4 done as the investigation it was framed as — **finding written, fix deferred to Feature 26.**
+`server/sales-writers.test.ts` pins today's behaviour against a real database: a POS sale synced under
+the `sales` group is stored as a `syncRecords` blob and **never reaches `admin_sales`**, which is the
+only table `adminStorage.listSales()` reads — so it is invisible to `sales-summary`, `product-mix` and
+the `menu-margins` endpoint. Arriving by both paths leaves one `admin_sales` row and one orphaned blob
+with no link in either direction. Routing that through one owner touches the code path carrying the
+business's revenue records, which is more than a 15-minute change, so per this task's own instruction
+the deliverable is the finding plus **Feature 26** below rather than a rushed fix.
+
+**Feature 8 is complete** (T1–T4).
 
 **Confirmation, and one correction to the analysis above.** A live sync could not be run here (no
 Postgres in this environment), so the failure is reproduced deterministically in
