@@ -40,9 +40,10 @@ export type LedgerContext = {
  * An item the caller did not supply a quantity for is skipped rather than created: a
  * ledger row about an item that does not exist explains nothing.
  *
- * ponytail: quantities still clamp at zero here, exactly as both adjusters did before.
- * Feature 15 T3 is where the clamp comes off and an over-draw becomes visible — this
- * task moves the clamp into one place so that change is one line.
+ * Quantities are **not** clamped at zero. A negative quantity is information: the recipe
+ * says more was used than was on hand, so either the count is stale or the recipe is
+ * wrong. Clamping deleted the question — and deleted precisely the signal pillar #4 is
+ * about, how far the recipe's prediction sits from reality.
  */
 export function ledgerRows(
   deltas: Map<string, number> | Record<string, number>,
@@ -58,7 +59,7 @@ export function ledgerRows(
   for (const [inventoryItemId, delta] of entries) {
     const before = quantityBefore[inventoryItemId];
     if (before === undefined) continue;
-    const after = Math.max(0, before + delta);
+    const after = before + delta;
     quantityAfter[inventoryItemId] = after;
     rows.push({
       id: ctx.newId(inventoryItemId),

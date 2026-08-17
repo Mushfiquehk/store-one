@@ -1492,7 +1492,12 @@ receives log `RECEIVE`, manual adjustments log `MANUAL`, on both the till and th
 Still unlogged, for a later task: `updateInventoryItem` with an explicit `currentQuantity`
 (`dexie-admin-storage.ts:260`) sets stock directly rather than by delta, and creating an item with an
 opening quantity (`inventory.tsx:55`) writes stock with no opening row.
-T3–T4 remain.
+T3 done — the clamp is gone. T2 had already funnelled every quantity write through `ledgerRows`, so
+this was one line there plus the two server sites (`storage.ts:714`, and the simulate preview's
+projection in `bom-engine.ts`, which now warns "over-drawn" rather than "depleted"). Over-drawn is its
+own state on the inventory page and in the reports stock table — never folded into "Low" — and no sale
+is blocked on stock.
+T4 remains.
 
 **Found while doing T1, not fixed here:** BOM rows are attached only to a product's *small* variant
 (`seed-data.ts:208-224`, `sourceId: V("mocha_s")`) while their `scaleFactorMatrix` keys every size.
