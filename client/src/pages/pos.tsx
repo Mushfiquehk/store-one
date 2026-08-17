@@ -20,6 +20,7 @@ import {
   changeDueCents, taxRatePct, tenderMethods, tenderSuggestions,
 } from "@shared/schema";
 import { taxOnCart } from "@shared/pricing";
+import { ALL_CATEGORY, UNCATEGORISED, menuCategories, productsInCategory } from "@shared/menu-grid";
 import { computeInventoryDeductions } from "@shared/depletion";
 
 function formatMoney(cents: number) {
@@ -122,24 +123,20 @@ export default function PosPage() {
     return products.filter(p => p.name.toLowerCase().includes(q));
   }, [products, searchQuery]);
 
-  const tags = useMemo(() => {
-    const tagSet = new Set<string>();
-    products.forEach(p => {
-      (p.attributes?.tags || []).forEach(t => tagSet.add(t));
-    });
-    return Array.from(tagSet);
-  }, [products]);
+  // The category bar and its filter live in shared/menu-grid.ts, where they are tested: the
+  // bug they replace made a product with no tags unreachable on the till.
+  const categories = useMemo(() => menuCategories(products), [products]);
 
-  const [activeTag, setActiveTag] = useState<string | null>(null);
+  // Defaults to All, so nothing is hidden before the operator picks anything. And note there
+  // is no setState during render: the old code wrote activeTag from the render body, which
+  // works until a concurrent render or a StrictMode double-invoke says otherwise.
+  const [activeTag, setActiveTag] = useState<string>(ALL_CATEGORY);
+  const activeCategory = categories.includes(activeTag) ? activeTag : ALL_CATEGORY;
 
-  if (!activeTag && tags.length > 0) {
-    setActiveTag(tags[0]);
-  }
-
-  const filteredProducts = useMemo(() => {
-    if (!activeTag) return products;
-    return products.filter(p => (p.attributes?.tags || []).includes(activeTag));
-  }, [products, activeTag]);
+  const filteredProducts = useMemo(
+    () => productsInCategory(products, activeCategory),
+    [products, activeCategory],
+  );
 
   const displayProducts = useMemo(() => {
     if (searchQuery.trim()) {
@@ -575,16 +572,16 @@ export default function PosPage() {
             {!searchQuery.trim() && (
               <div className="px-6 pb-2">
                 <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide" data-testid="nav-menu-categories">
-                  {tags.map(tag => (
+                  {categories.map(category => (
                     <Button
-                      key={tag}
-                      variant={activeTag === tag ? "default" : "secondary"}
-                      onClick={() => setActiveTag(tag)}
+                      key={category}
+                      variant={activeCategory === category ? "default" : "secondary"}
+                      onClick={() => setActiveTag(category)}
                       className="rounded-full flex-shrink-0 capitalize"
                       size="sm"
-                      data-testid={`tab-category-${tag}`}
+                      data-testid={`tab-category-${category === ALL_CATEGORY ? "all" : category === UNCATEGORISED ? "uncategorised" : category}`}
                     >
-                      {tag}
+                      {category === ALL_CATEGORY ? "All" : category === UNCATEGORISED ? "Uncategorised" : category}
                     </Button>
                   ))}
                 </div>

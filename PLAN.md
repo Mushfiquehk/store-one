@@ -34,7 +34,7 @@ its section. They are ordered by what they cost if left alone.
 | ~~**15**~~ | ~~Stock adjustments clamp at zero and record nothing~~ **Fixed** — `inventoryLedger` + unclamped quantities | ~~`local-storage.ts:257`~~ | — |
 | ~~**21**~~ | ~~The Settings tax-rate field is bound to `useState` and written nowhere~~ **Fixed** (T1) — `tax.ratePct`, default 0; the server order path is still Feature 5 T2's half | ~~`settings.tsx:89`~~ | — |
 | **22** | Nothing ever asks how much cash is in the drawer — no float, no count, no over/short, no trading day | `grep -rin "drawer\|openingFloat\|cashCount\|endOfDay"` returns nothing | Every other defect in this table is undetectable in daily operation |
-| **25** | A product with no tags is unreachable on the till — the "show everything" branch is dead once any tagged product exists | `pos.tsx:98-116`; `activeTag` auto-sets at `:109` (during render), and `:114` filters by it | An operator adds an item, cannot find it, cannot tell whether it saved |
+| ~~**25**~~ | ~~A product with no tags is unreachable on the till~~ **Fixed** (T1) — `shared/menu-grid.ts`, All by default plus Uncategorised | ~~`pos.tsx:98-116`~~ | — |
 | ~~**26**~~ | ~~Synced POS sales never reach `admin_sales`, so no server-side report can see them~~ **Fixed** — landed on sync (T2) and backfilled on boot (T3) | ~~`server/sales-writers.test.ts`~~ | — |
 | **5** | Combos are ignored by the live order path | `bom-engine.ts` is imported only by `routes.ts:16` for test orders; `/api/orders/simulate` prices inline with a hardcoded 8% tax | Combos charge full price; three different tax rates in the codebase |
 
@@ -258,7 +258,11 @@ can exist in one store and not the other.
 
 ## Feature 25 — The menu grid: a product you add can currently become unreachable
 
-**Status:** planned
+**Status:** T1 done — the category bar leads with **All** (the default, so nothing is hidden), then the
+tags, then **Uncategorised** when something needs a home; a product with no tags is reachable without
+searching. The logic moved to `shared/menu-grid.ts` where it is tested, and the render-phase
+`setActiveTag` is gone — the active category is derived, falling back to All when a category disappears
+because its last product was retagged. T2–T4 remain.
 **Vision pillar:** #1 — "the easiest path". Setting up a menu is the first thing an operator does and
 the till layout is what they live in afterwards.
 **Depends on:** nothing. **T1 is a bug fix and should be taken on its own** regardless of the rest.
