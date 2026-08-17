@@ -78,3 +78,75 @@ export function ledgerRows(
 
   return { rows, quantityAfter };
 }
+
+/**
+ * Waste needs a reason, and the reason has to be one of these. An optional reason field
+ * is an empty one, and "the recipes must be wrong" is the only bucket the system had for
+ * a dropped tray.
+ */
+export const WASTE_REASONS = ["Spoiled", "Dropped", "Comped", "Prep loss"] as const;
+export type WasteReason = typeof WASTE_REASONS[number];
+
+export type ItemReconciliation = {
+  inventoryItemId: string;
+  /** Quantity before the first row in the window. */
+  opening: number;
+  received: number;
+  /** Positive numbers: what the recipes say left the shelf, and what was thrown away. */
+  sold: number;
+  wasted: number;
+  /** Net of manual edits and voids — movements that are neither sales nor deliveries. */
+  manual: number;
+  /** What the last physical count in the window found, or null if nobody counted. */
+  counted: number | null;
+  closing: number;
+  /**
+   * What a count could not explain: positive means stock went missing beyond sales,
+   * waste and deliveries. It is exactly the correction the count had to make, which is
+   * why it is zero — honestly zero — until somebody counts.
+   */
+  unexplained: number;
+};
+
+/**
+ * Per-item movement summary from ledger rows. The caller filters to its window and
+ * passes the rows in `createdAt` order; this only adds up.
+ *
+ * The unexplained remainder is the number pillar #4 claims to be best at, and it is
+ * unavailable today at any price.
+ */
+export function reconcile(rows: InventoryLedgerEntry[]): ItemReconciliation[] {
+  const byItem = new Map<string, InventoryLedgerEntry[]>();
+  for (const row of rows) {
+    const list = byItem.get(row.inventoryItemId);
+    if (list) list.push(row);
+    else byItem.set(row.inventoryItemId, [row]);
+  }
+
+  const out: ItemReconciliation[] = [];
+  byItem.forEach((itemRows, inventoryItemId) => {
+    const ordered = [...itemRows].sort((a, b) => a.createdAt - b.createdAt);
+    const sum = (reason: LedgerReason) =>
+      ordered.filter(r => r.reason === reason).reduce((t, r) => t + r.delta, 0);
+    // `0 - n` rather than `-n`: negating zero gives -0, which reads oddly in a report and
+    // is not deepEqual to 0.
+    const outflow = (reason: LedgerReason) => 0 - sum(reason);
+
+    const counts = ordered.filter(r => r.reason === "COUNT");
+    const countAdjustment = counts.reduce((t, r) => t + r.delta, 0);
+
+    out.push({
+      inventoryItemId,
+      opening: ordered[0].quantityAfter - ordered[0].delta,
+      received: sum("RECEIVE"),
+      sold: outflow("SALE"),
+      wasted: outflow("WASTE"),
+      manual: sum("MANUAL") + sum("VOID"),
+      counted: counts.length ? counts[counts.length - 1].quantityAfter : null,
+      closing: ordered[ordered.length - 1].quantityAfter,
+      unexplained: 0 - countAdjustment,
+    });
+  });
+
+  return out;
+}

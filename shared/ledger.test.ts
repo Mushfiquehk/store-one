@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ledgerRows } from "./ledger";
+import { ledgerRows, reconcile, WASTE_REASONS, type InventoryLedgerEntry } from "./ledger";
 
 const ctx = (over: Partial<Parameters<typeof ledgerRows>[2]> = {}) => ({
   reason: "SALE" as const,
@@ -69,4 +69,70 @@ test("stock already negative keeps going, and receiving digs it back out", () =>
 
   const up = ledgerRows({ milk: 128 }, { milk: -40 }, ctx({ reason: "RECEIVE" }));
   assert.equal(up.quantityAfter.milk, 88, "a receive nets against the shortfall, not against zero");
+});
+
+
+const row = (over: Partial<InventoryLedgerEntry>): InventoryLedgerEntry => ({
+  id: "r", inventoryItemId: "milk", delta: 0, quantityAfter: 0, reason: "SALE",
+  refType: null, refId: null, note: "", employeeId: null, createdAt: 0, updatedAt: 0,
+  ...over,
+});
+
+test("received 100, sold 40, wasted 5, counted at 50 is an unexplained 5", () => {
+  // The plan's check, exactly: not 0, and not an error. Five ounces left the building
+  // without a sale, a delivery or a waste row to explain them.
+  const [r] = reconcile([
+    row({ reason: "RECEIVE", delta: 100, quantityAfter: 100, createdAt: 1 }),
+    row({ reason: "SALE", delta: -40, quantityAfter: 60, createdAt: 2 }),
+    row({ reason: "WASTE", delta: -5, quantityAfter: 55, createdAt: 3 }),
+    row({ reason: "COUNT", delta: -5, quantityAfter: 50, createdAt: 4 }),
+  ]);
+
+  assert.deepEqual(r, {
+    inventoryItemId: "milk",
+    opening: 0,
+    received: 100,
+    sold: 40,
+    wasted: 5,
+    manual: 0,
+    counted: 50,
+    closing: 50,
+    unexplained: 5,
+  });
+});
+
+test("nobody counted, so nothing is unexplained — honestly zero", () => {
+  const [r] = reconcile([
+    row({ reason: "RECEIVE", delta: 100, quantityAfter: 100, createdAt: 1 }),
+    row({ reason: "SALE", delta: -40, quantityAfter: 60, createdAt: 2 }),
+  ]);
+  assert.equal(r.counted, null);
+  assert.equal(r.unexplained, 0);
+  assert.equal(r.closing, 60);
+});
+
+test("a count that finds more than expected is a negative variance, not an error", () => {
+  const [r] = reconcile([
+    row({ reason: "SALE", delta: -10, quantityAfter: 40, createdAt: 1 }),
+    row({ reason: "COUNT", delta: 3, quantityAfter: 43, createdAt: 2 }),
+  ]);
+  assert.equal(r.opening, 50);
+  assert.equal(r.unexplained, -3, "found more than the books said");
+});
+
+test("items are reconciled independently, in whatever order the rows arrive", () => {
+  const rows = reconcile([
+    row({ inventoryItemId: "beans", reason: "SALE", delta: -2, quantityAfter: 8, createdAt: 5 }),
+    row({ reason: "SALE", delta: -1, quantityAfter: 9, createdAt: 9 }),
+    row({ reason: "RECEIVE", delta: 10, quantityAfter: 10, createdAt: 2 }),
+  ]);
+  const byId = Object.fromEntries(rows.map(r => [r.inventoryItemId, r]));
+  assert.equal(byId.milk.opening, 0, "the earliest row is the opening, not the first supplied");
+  assert.equal(byId.milk.closing, 9);
+  assert.equal(byId.beans.sold, 2);
+});
+
+test("every waste reason is a real choice, not a free-text box", () => {
+  assert.ok(WASTE_REASONS.length >= 4);
+  assert.ok(WASTE_REASONS.every(r => r.trim().length > 0));
 });

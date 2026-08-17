@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Package, Plus, Pencil, Trash2 } from "lucide-react";
+import { Package, Plus, Pencil, Trash2, Trash, ClipboardCheck } from "lucide-react";
 import AppShell from "@/components/app-shell";
 import HelpDialog from "@/components/help-dialog";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,8 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { useToast } from "@/hooks/use-toast";
 import { useStore, type InventoryItem } from "@/lib/store";
 import { formatCostPerStockUnit } from "@shared/units";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { WASTE_REASONS, reconcile, type InventoryLedgerEntry, type WasteReason } from "@shared/ledger";
 
 function uid(prefix: string) {
   return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`;
@@ -21,7 +23,7 @@ function uid(prefix: string) {
 
 export default function InventoryPage({ isTab = false }: { isTab?: boolean }) {
   const { toast } = useToast();
-  const { inventory, bom, modifiers, variants, addInventoryItem, updateInventoryItem, adjustInventory, deleteInventoryItem } = useStore();
+  const { inventory, bom, modifiers, variants, addInventoryItem, updateInventoryItem, adjustInventory, deleteInventoryItem, recordWaste, recordCount, getLedger } = useStore();
 
   const [draftName, setDraftName] = useState("");
   const [draftUnit, setDraftUnit] = useState("each");
@@ -33,6 +35,51 @@ export default function InventoryPage({ isTab = false }: { isTab?: boolean }) {
   const [editForm, setEditForm] = useState({ name: "", unitOfMeasure: "", lowStockAlert: "", purchaseUnit: "", unitsPerPurchase: "" });
 
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string; deps: string[] } | null>(null);
+
+  const [wasteTarget, setWasteTarget] = useState<InventoryItem | null>(null);
+  const [wasteQty, setWasteQty] = useState("");
+  const [wasteReason, setWasteReason] = useState<WasteReason | "">("");
+  const [wasteNote, setWasteNote] = useState("");
+
+  const [countTarget, setCountTarget] = useState<InventoryItem | null>(null);
+  const [countQty, setCountQty] = useState("");
+
+  // The movement history, for the variance table. Reloaded whenever stock changes.
+  const [ledger, setLedger] = useState<InventoryLedgerEntry[]>([]);
+  useEffect(() => { getLedger().then(setLedger).catch(() => {}); }, [getLedger, inventory]);
+
+  const reconciliations = useMemo(() => {
+    const byId = new Map(reconcile(ledger).map(r => [r.inventoryItemId, r]));
+    return inventory
+      .map(item => ({ item, summary: byId.get(item.id) }))
+      .filter((r): r is { item: InventoryItem; summary: NonNullable<typeof r.summary> } => !!r.summary);
+  }, [ledger, inventory]);
+
+  async function submitWaste() {
+    if (!wasteTarget) return;
+    const qty = Number(wasteQty);
+    // Required, both here and in the storage layer: an optional reason field is an empty one.
+    if (!wasteReason) { toast({ title: "Reason required", description: "Say what happened to it." }); return; }
+    if (!Number.isFinite(qty) || qty <= 0) { toast({ title: "Quantity required" }); return; }
+    await recordWaste(wasteTarget.id, qty, wasteReason, wasteNote.trim());
+    toast({ title: "Waste recorded", description: `${qty} ${wasteTarget.unitOfMeasure} — ${wasteReason}` });
+    setWasteTarget(null); setWasteQty(""); setWasteReason(""); setWasteNote("");
+  }
+
+  async function submitCount() {
+    if (!countTarget) return;
+    const counted = Number(countQty);
+    if (!Number.isFinite(counted)) { toast({ title: "Enter what is on the shelf" }); return; }
+    const variance = counted - countTarget.currentQuantity;
+    await recordCount(countTarget.id, counted);
+    toast({
+      title: "Count recorded",
+      description: variance === 0
+        ? "The shelf matches the books."
+        : `${variance > 0 ? "+" : ""}${variance} ${countTarget.unitOfMeasure} unexplained.`,
+    });
+    setCountTarget(null); setCountQty("");
+  }
 
   // Over-drawn is a distinct, louder state than low, and must not be folded into it: low
   // means "order more", negative means the count or the recipe is wrong.
@@ -215,6 +262,12 @@ export default function InventoryPage({ isTab = false }: { isTab?: boolean }) {
                           <Button variant="secondary" size="sm" className="h-8 rounded-xl" onClick={() => adjustInventory(i.id, -1)} data-testid={`button-inventory-dec-${i.id}`}>-1</Button>
                           <Button variant="secondary" size="sm" className="h-8 rounded-xl" onClick={() => adjustInventory(i.id, 1)} data-testid={`button-inventory-inc-${i.id}`}>+1</Button>
                           <Button size="sm" className="h-8 rounded-xl" onClick={() => adjustInventory(i.id, 10)} data-testid={`button-inventory-plus10-${i.id}`}>+10</Button>
+                          <Button variant="ghost" size="sm" className="h-8 rounded-xl" title="Record waste" onClick={() => setWasteTarget(i)} data-testid={`button-inventory-waste-${i.id}`}>
+                            <Trash className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="sm" className="h-8 rounded-xl" title="Count the shelf" onClick={() => { setCountTarget(i); setCountQty(String(i.currentQuantity)); }} data-testid={`button-inventory-count-${i.id}`}>
+                            <ClipboardCheck className="h-4 w-4" />
+                          </Button>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -272,6 +325,115 @@ export default function InventoryPage({ isTab = false }: { isTab?: boolean }) {
               <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
               <Button onClick={handleSaveEdit} data-testid="button-save-edit-inventory">Save</Button>
             </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Card className="border bg-card shadow-soft lg:col-span-12">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 font-serif" data-testid="text-inventory-variance-title">
+            <ClipboardCheck className="h-5 w-5" />
+            Where it went
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {reconciliations.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Nothing has moved yet. Sales, deliveries, waste and counts all appear here.
+            </p>
+          ) : (
+            <div className="max-h-[420px] overflow-auto rounded-2xl border bg-background/40">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Item</TableHead>
+                    <TableHead className="text-right">Opening</TableHead>
+                    <TableHead className="text-right">Received</TableHead>
+                    <TableHead className="text-right">Sold</TableHead>
+                    <TableHead className="text-right">Wasted</TableHead>
+                    <TableHead className="text-right">Counted</TableHead>
+                    <TableHead className="text-right">Unexplained</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {reconciliations.map(({ item, summary }) => (
+                    <TableRow key={item.id} data-testid={`row-variance-${item.id}`}>
+                      <TableCell className="font-medium">{item.name}</TableCell>
+                      <TableCell className="text-right font-mono">{summary.opening}</TableCell>
+                      <TableCell className="text-right font-mono">{summary.received}</TableCell>
+                      <TableCell className="text-right font-mono">{summary.sold}</TableCell>
+                      <TableCell className="text-right font-mono">{summary.wasted}</TableCell>
+                      {/* No count is not a zero variance: it is an unanswered question. */}
+                      <TableCell className="text-right font-mono">{summary.counted ?? "—"}</TableCell>
+                      <TableCell
+                        className={`text-right font-mono ${summary.unexplained !== 0 ? "font-semibold text-destructive" : ""}`}
+                        data-testid={`text-variance-unexplained-${item.id}`}
+                      >
+                        {summary.counted === null ? "not counted" : summary.unexplained}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Dialog open={!!wasteTarget} onOpenChange={open => { if (!open) setWasteTarget(null); }}>
+        <DialogContent data-testid="dialog-waste">
+          <DialogHeader>
+            <DialogTitle>Record waste — {wasteTarget?.name}</DialogTitle>
+            <DialogDescription>
+              A dropped tray, a spoiled case or a comped drink. Without this, every one of them
+              becomes "the recipes must be wrong", because that was the only bucket there was.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div>
+              <Label className="text-xs text-muted-foreground">Quantity ({wasteTarget?.unitOfMeasure})</Label>
+              <Input value={wasteQty} onChange={e => setWasteQty(e.target.value)} inputMode="decimal" className="mt-1 rounded-2xl" data-testid="input-waste-qty" />
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground">Reason (required)</Label>
+              <Select value={wasteReason} onValueChange={v => setWasteReason(v as WasteReason)}>
+                <SelectTrigger className="mt-1 rounded-2xl" data-testid="select-waste-reason">
+                  <SelectValue placeholder="What happened to it?" />
+                </SelectTrigger>
+                <SelectContent>
+                  {WASTE_REASONS.map(r => <SelectItem key={r} value={r}>{r}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label className="text-xs text-muted-foreground">Note (optional)</Label>
+              <Input value={wasteNote} onChange={e => setWasteNote(e.target.value)} className="mt-1 rounded-2xl" data-testid="input-waste-note" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setWasteTarget(null)}>Cancel</Button>
+            <Button onClick={submitWaste} data-testid="button-submit-waste">Record waste</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!countTarget} onOpenChange={open => { if (!open) setCountTarget(null); }}>
+        <DialogContent data-testid="dialog-count">
+          <DialogHeader>
+            <DialogTitle>Count the shelf — {countTarget?.name}</DialogTitle>
+            <DialogDescription>
+              What is actually there is the truth. The gap between it and the {countTarget?.currentQuantity}{" "}
+              {countTarget?.unitOfMeasure} the books say is the finding, and it is recorded rather than
+              quietly written over.
+            </DialogDescription>
+          </DialogHeader>
+          <div>
+            <Label className="text-xs text-muted-foreground">Counted ({countTarget?.unitOfMeasure})</Label>
+            <Input value={countQty} onChange={e => setCountQty(e.target.value)} inputMode="decimal" className="mt-1 rounded-2xl" data-testid="input-count-qty" />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCountTarget(null)}>Cancel</Button>
+            <Button onClick={submitCount} data-testid="button-submit-count">Record count</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
