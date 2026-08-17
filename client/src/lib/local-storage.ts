@@ -1,7 +1,10 @@
 import { db } from "./db";
 import { costPerStockUnit, stockUnitsReceived } from "@shared/units";
 import { WASTE_REASONS, ledgerRows, type InventoryLedgerEntry, type LedgerContext, type LedgerReason, type WasteReason } from "@shared/ledger";
-import { canOpenSession, type DrawerSession } from "@shared/drawer";
+import {
+  CASH_MOVEMENT_REASONS, canOpenSession, openSession,
+  type CashMovement, type CashMovementReason, type DrawerSession,
+} from "@shared/drawer";
 import {
   ACTIONS, actionLogEntry, priceChangeSummary,
   type ActionLogEntry, type ActionLogInput, type ActorKind,
@@ -429,6 +432,45 @@ export const storage = {
       updatedAt: now,
     });
     return db.drawerSessions.get(id);
+  },
+
+  async getCashMovements(): Promise<CashMovement[]> {
+    const rows = await db.cashMovements.toArray();
+    return rows.filter(r => !r.deletedAt).sort((a, b) => b.at - a.at);
+  },
+
+  /**
+   * Cash in or out without a sale. The reason is required and comes from a fixed list: cash
+   * leaving a drawer with no record is the hole this whole feature exists to close.
+   */
+  async recordCashMovement(input: {
+    kind: CashMovement["kind"];
+    amountCents: number;
+    reason: CashMovementReason;
+    note?: string;
+    employeeId: string | null;
+  }): Promise<CashMovement> {
+    if (!(input.amountCents > 0)) throw new Error("A cash movement must be greater than zero");
+    if (!CASH_MOVEMENT_REASONS.includes(input.reason)) throw new Error(`Unknown reason: ${input.reason}`);
+
+    const now = Date.now();
+    const sessions = (await db.drawerSessions.toArray()).filter(r => !r.deletedAt);
+    const movement: CashMovement = {
+      id: uid("cash"),
+      // Null when nobody had a session open — the movement still happened, and hiding it would
+      // be the same mistake as refusing to sell without one.
+      sessionId: openSession(sessions)?.id ?? null,
+      at: now,
+      kind: input.kind,
+      amountCents: input.amountCents,
+      reason: input.reason,
+      note: input.note ?? "",
+      employeeId: input.employeeId,
+      updatedAt: now,
+      deletedAt: null,
+    };
+    await db.cashMovements.put(movement);
+    return movement;
   },
 
   /** Ledger rows, newest first, optionally from a point in time. */

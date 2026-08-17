@@ -2,7 +2,7 @@ import Dexie, { type Table } from "dexie";
 import type { StoreSetting } from "@shared/api-handlers";
 import type { InventoryLedgerEntry } from "@shared/ledger";
 import type { ActionLogEntry } from "@shared/action-log";
-import type { DrawerSession } from "@shared/drawer";
+import type { CashMovement, DrawerSession } from "@shared/drawer";
 import type {
   ProductAttributes,
   ModifierScaleFactors,
@@ -14,7 +14,7 @@ import type {
 
 export type { InventoryLedgerEntry };
 export type { ActionLogEntry };
-export type { DrawerSession };
+export type { CashMovement, DrawerSession };
 export type { ProductAttributes, ModifierScaleFactors, ScaleFactorMatrix, SaleLine, PricingStrategy, ComboItemType };
 
 export interface Product {
@@ -232,6 +232,8 @@ class PosDatabase extends Dexie {
   actionLog!: Table<ActionLogEntry, string>;
   // What was in the drawer when it opened, and what was counted when it closed.
   drawerSessions!: Table<DrawerSession, string>;
+  // Cash that moved without a sale, each row carrying why.
+  cashMovements!: Table<CashMovement, string>;
 
   constructor() {
     super("cornerpos");
@@ -533,6 +535,11 @@ class PosDatabase extends Dexie {
     // sale" is the query the whole feature turns on.
     this.version(18).stores({
       drawerSessions: "id, openedAt, closedAt",
+    });
+
+    // Feature 22 T2: paid in / paid out.
+    this.version(19).stores({
+      cashMovements: "id, sessionId, at, kind",
     });
   }
 }

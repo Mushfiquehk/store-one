@@ -4,7 +4,7 @@ import { db } from "./db";
 import { storage } from "./local-storage";
 import type { InventoryLedgerEntry, WasteReason } from "@shared/ledger";
 import type { ActionLogEntry, ActionLogInput } from "@shared/action-log";
-import type { DrawerSession } from "@shared/drawer";
+import type { CashMovement, CashMovementReason, DrawerSession } from "@shared/drawer";
 
 export const CURRENT_EMPLOYEE_KEY = "cornerpos_current_employee";
 import { toast } from "@/hooks/use-toast";
@@ -120,6 +120,8 @@ type StoreContextType = {
   getDrawerSessions: () => Promise<DrawerSession[]>;
   openDrawerSession: (openingFloatCents: number) => Promise<DrawerSession>;
   closeDrawerSession: (id: string, counted: { countedCents: number; expectedCents: number; note?: string }) => Promise<DrawerSession | undefined>;
+  getCashMovements: () => Promise<CashMovement[]>;
+  recordCashMovement: (input: { kind: CashMovement["kind"]; amountCents: number; reason: CashMovementReason; note?: string }) => Promise<CashMovement>;
   getActionLog: (limit?: number) => Promise<ActionLogEntry[]>;
   logAction: (input: Omit<ActionLogInput, "actorKind" | "actorId"> & Partial<Pick<ActionLogInput, "actorKind" | "actorId">>) => Promise<ActionLogEntry>;
   updateSale: (id: string, data: Partial<Sale>) => void;
@@ -258,6 +260,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
+  const getCashMovements = useCallback(() => storage.getCashMovements(), []);
+  const recordCashMovement = useCallback(
+    (input: { kind: CashMovement["kind"]; amountCents: number; reason: CashMovementReason; note?: string }) =>
+      storage.recordCashMovement({ ...input, employeeId: currentEmployeeIdRef.current }),
+    [],
+  );
+
   const getActionLog = useCallback((limit?: number) => storage.getActionLog(limit), []);
   const logAction = useCallback(
     (input: Omit<ActionLogInput, "actorKind" | "actorId"> & Partial<Pick<ActionLogInput, "actorKind" | "actorId">>) =>
@@ -380,6 +389,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     getDrawerSessions,
     openDrawerSession,
     closeDrawerSession,
+    getCashMovements,
+    recordCashMovement,
     getActionLog,
     logAction,
     updateSale,

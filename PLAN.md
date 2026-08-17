@@ -669,7 +669,15 @@ variance. `canOpenSession` refuses a second open while one is live — checked a
 Dexie transaction, so two taps cannot both win. Selling is **never** blocked on a session: a sale is
 attached by `sessionForSale` from its timestamp, so an unattached sale is claimed by a session opened
 later. `day.startHour` (default 4, validated 0–23) gives `tradingDayStart`, so a sale at 1am belongs to
-the day that began yesterday morning rather than to a new one. T2–T4 remain.
+the day that began yesterday morning rather than to a new one. T2 done — `expectedCash(session, sales, movements)` in `shared/drawer.ts`:
+`openingFloat + cash tendered − change given + paid in − paid out`, pure, and identical across two
+reads of the same rows. It returns a **basis** — `TENDER` when every cash sale recorded what was handed
+over, `SALE_TOTALS` when one did not and its total had to stand in — so an approximation is never
+presented as a count. Card sales, test orders and out-of-window rows are excluded. `cashMovements`
+(Dexie v19) records paid in / paid out with a **required** reason from a fixed list; the amount is always
+positive and `kind` carries the direction, so no row can be ambiguous about its sign. A movement made
+with no session open still records, with a null `sessionId`.
+T3–T4 remain.
 
 **Not wired to the API surface yet:** T1 lists the `crudEntities` line in `shared/api-handlers.ts`, but
 generic CRUD is the wrong shape for this table — opening is a guarded operation and closing writes a
