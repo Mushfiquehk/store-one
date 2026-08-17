@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Package, Plus, Pencil, Trash2, Trash, ClipboardCheck } from "lucide-react";
 import AppShell from "@/components/app-shell";
@@ -43,6 +43,20 @@ export default function InventoryPage({ isTab = false }: { isTab?: boolean }) {
 
   const [countTarget, setCountTarget] = useState<InventoryItem | null>(null);
   const [countQty, setCountQty] = useState("");
+
+  // ?item=<id> comes from the margins report's "no price for X" links: open that item so
+  // the operator lands on the thing that needs fixing rather than on a list of sixty.
+  const deepLinkOpened = useRef(false);
+  useEffect(() => {
+    if (deepLinkOpened.current) return;
+    const id = new URLSearchParams(window.location.search).get("item");
+    if (!id) return;
+    const item = inventory.find(i => i.id === id);
+    if (!item) return;
+    // Once: closing the dialog must not reopen it on the next inventory update.
+    deepLinkOpened.current = true;
+    openEditItem(item);
+  }, [inventory]);
 
   // The movement history, for the variance table. Reloaded whenever stock changes.
   const [ledger, setLedger] = useState<InventoryLedgerEntry[]>([]);

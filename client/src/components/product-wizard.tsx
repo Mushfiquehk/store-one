@@ -1634,7 +1634,7 @@ export default function ProductWizard({
                     </div>
                   );
                 }
-                const margin = marginPct(sellingPriceCents, { costCents, unknownIngredients: [] });
+                const margin = marginPct(sellingPriceCents, { costCents, unknownIngredients: [], hasRecipe: true });
                 return (
                   <div key={rv.tempId} className="text-xs p-2 rounded-lg bg-muted/30 space-y-1" data-testid={`profitability-variant-${i}`}>
                     <div className="flex justify-between font-medium">
@@ -1672,7 +1672,7 @@ export default function ProductWizard({
               <div className="flex justify-between font-medium">
                 <span>Selling: {formatMoney(sellingPriceCents)} — Cost: {formatMoney(costCents)}</span>
                 <span className={sellingPriceCents - costCents >= 0 ? "text-green-600" : "text-red-600"}>
-                  {marginPct(sellingPriceCents, { costCents, unknownIngredients: [] })?.toFixed(1) ?? "—"}% margin
+                  {marginPct(sellingPriceCents, { costCents, unknownIngredients: [], hasRecipe: true })?.toFixed(1) ?? "—"}% margin
                 </span>
               </div>
             </div>

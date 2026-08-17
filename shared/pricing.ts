@@ -21,6 +21,13 @@ export type Cost = {
   /** What the *priced* ingredients add up to. A floor, not the answer, when anything is unknown. */
   costCents: number;
   /**
+   * False when nothing was costed at all — no recipe, no direct inventory link. Zero
+   * ingredients is not a zero cost: it renders as a 100% margin, which is the same lie as
+   * an unpriced ingredient. The seeded menu attaches BOM rows to a product's small variant
+   * only, so this is the common case, not a corner one.
+   */
+  hasRecipe: boolean;
+  /**
    * Ingredients with no recorded price. Non-empty means `costCents` is incomplete — an
    * unpriced ingredient is unknown, never free. Zero cost renders as 100% margin, which
    * is the most flattering possible lie about a menu.
@@ -41,7 +48,7 @@ export function sumIngredientCosts(ingredients: CostedIngredient[]): Cost {
     costCents += ing.quantity * ing.lastPurchasePrice;
   }
 
-  return { costCents: Math.round(costCents), unknownIngredients };
+  return { costCents: Math.round(costCents), unknownIngredients, hasRecipe: ingredients.length > 0 };
 }
 
 export type CostingData = DepletionData & {
@@ -72,7 +79,7 @@ export function costVariant(variantId: string, data: CostingData): Cost {
  * reports a negative margin, which is the whole point of costing a menu.
  */
 export function marginPct(priceCents: number, cost: Cost): number | null {
-  if (cost.unknownIngredients.length > 0 || priceCents <= 0) return null;
+  if (!cost.hasRecipe || cost.unknownIngredients.length > 0 || priceCents <= 0) return null;
   return ((priceCents - cost.costCents) / priceCents) * 100;
 }
 
@@ -126,7 +133,7 @@ export function menuMargins(
 
   const rows = data.variants.map(variant => {
     const cost = costVariant(variant.id, data);
-    const costKnown = cost.unknownIngredients.length === 0;
+    const costKnown = cost.hasRecipe && cost.unknownIngredients.length === 0;
     const priceCents = variant.basePrice;
     // Not clamped: an item priced below its ingredients is exactly what this is for.
     const marginCents = priceCents - cost.costCents;

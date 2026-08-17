@@ -5,6 +5,8 @@ import {
   Package,
   PieChart,
   Wallet,
+  Percent,
+  AlertTriangle,
 } from "lucide-react";
 import {
   LineChart,
@@ -28,6 +30,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Switch } from "@/components/ui/switch";
 import { useStore } from "@/lib/store";
 import { productMix, salesSeries, type Granularity } from "@shared/reports";
+import { menuMargins } from "@shared/pricing";
+import { Link } from "wouter";
 import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 
@@ -84,7 +88,7 @@ function ChartCard({ title, data, dataKey, format: fmt }: { title: string; data:
 }
 
 export default function ReportsPage() {
-  const { products, variants, inventory, sales, employees } = useStore();
+  const { products, variants, inventory, bom, modifiers, sales, employees } = useStore();
 
   const [granularityIndex, setGranularityIndex] = useState([1]);
   const granularities = ['hourly', 'daily', 'monthly'] as const;
@@ -151,6 +155,21 @@ export default function ReportsPage() {
     return Array.from(byProduct.values()).sort((a, b) => b.revenueCents - a.revenueCents);
   }, [sales, products, variants, showIngredientProducts, range]);
 
+  // Margins, from the same costing the API's menu-margins endpoint uses and the same
+  // volumes as the mix tab above. Worst first; unknown-cost rows are flagged, never
+  // sorted as though a missing ingredient price were a 100% margin.
+  const marginRows = useMemo(
+    () => menuMargins(
+      { products, variants, modifiers, bomEntries: bom, inventoryItems: inventory },
+      productMix(sales, { since: range.since }),
+    ),
+    [products, variants, modifiers, bom, inventory, sales, range],
+  );
+
+  // An unknown cost is only actionable if the operator can reach the item that needs a
+  // price. "Go find which of your 60 ingredients is missing one" is not a report.
+  const inventoryIdByName = useMemo(() => new Map(inventory.map(i => [i.name, i.id])), [inventory]);
+
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
       <AppShell title="Reports">
@@ -168,6 +187,9 @@ export default function ReportsPage() {
                 </TabsTrigger>
                 <TabsTrigger value="product-mix" className="rounded-lg h-full px-4">
                   <PieChart className="h-4 w-4 mr-2" /> Product Mix
+                </TabsTrigger>
+                <TabsTrigger value="margins" className="rounded-lg h-full px-4">
+                  <Percent className="h-4 w-4 mr-2" /> Margins
                 </TabsTrigger>
                 <TabsTrigger value="inventory" className="rounded-lg h-full px-4">
                   <Package className="h-4 w-4 mr-2" /> Inventory
@@ -237,6 +259,68 @@ export default function ReportsPage() {
                       ))}
                     </TableBody>
                   </Table>
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="margins" className="mt-0">
+              <Card className="shadow-soft rounded-2xl">
+                <CardHeader>
+                  <CardTitle>
+                    Menu Margins <span className="text-sm font-normal text-muted-foreground">(volumes: {range.label})</span>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {marginRows.length === 0 ? (
+                    <p className="text-sm text-muted-foreground" data-testid="text-no-margins">No menu items yet.</p>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Item</TableHead>
+                          <TableHead className="text-right">Price</TableHead>
+                          <TableHead className="text-right">Cost</TableHead>
+                          <TableHead className="text-right">Margin</TableHead>
+                          <TableHead className="text-right">Sold</TableHead>
+                          <TableHead className="text-right">Contribution</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {marginRows.map(row => (
+                          <TableRow key={row.variantId} data-testid={`row-margin-${row.variantId}`}>
+                            <TableCell className="font-medium">
+                              {row.productName} <span className="text-muted-foreground">{row.variantName}</span>
+                              {!row.costKnown && (
+                                <span className="mt-1 flex flex-wrap items-center gap-1 text-xs text-muted-foreground" data-testid={`text-margin-unknown-${row.variantId}`}>
+                                  <AlertTriangle className="h-3 w-3 text-amber-600" />
+                                  No price for
+                                  {row.unknownIngredients.map(name => {
+                                    const id = inventoryIdByName.get(name);
+                                    return id ? (
+                                      <Link key={name} href={`/inventory?item=${encodeURIComponent(id)}`} className="underline">{name}</Link>
+                                    ) : (
+                                      <span key={name}>{name}</span>
+                                    );
+                                  })}
+                                </span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right font-mono">{formatMoney(row.priceCents)}</TableCell>
+                            {/* An unknown cost is not a cheap one: show nothing rather than a floor
+                                that reads as the answer. */}
+                            <TableCell className="text-right font-mono">{row.costKnown ? formatMoney(row.costCents) : "\u2014"}</TableCell>
+                            <TableCell className={`text-right font-mono ${row.costKnown && row.marginCents < 0 ? "font-semibold text-destructive" : ""}`}>
+                              {row.costKnown ? `${formatMoney(row.marginCents)} (${row.marginPct!.toFixed(1)}%)` : "unknown"}
+                            </TableCell>
+                            <TableCell className="text-right font-mono">{row.quantity}</TableCell>
+                            <TableCell className={`text-right font-mono ${row.contributionCents < 0 ? "font-semibold text-destructive" : ""}`}>
+                              {row.costKnown ? formatMoney(row.contributionCents) : "\u2014"}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
                 </CardContent>
               </Card>
             </TabsContent>

@@ -2164,7 +2164,15 @@ Express server serves it because sales have lived there since Feature 7 T2), one
 worst margin first, unknown-cost rows last, ties broken by volume. `?since=`/`?until=` narrows the
 volumes through the same `productMix` the mix report uses, and carries `quantity` plus
 `contributionCents` — a variant that sold nothing still gets a row, because it is still priced wrong.
-T3–T4 remain.
+T3 done — a **Margins** tab on the reports page, computed from the same `menuMargins` the endpoint
+uses over the page's window, worst first, with unknown-cost rows flagged and their unpriced
+ingredients linked to `/inventory?item=<id>` (which now opens that item).
+T4 remains.
+
+**Fixed while doing T3, worth calling out:** a variant with *no* recipe rows costed as 0 and therefore
+showed a **100% margin** — the exact lie the honesty requirement above is about, and the common case,
+because the seed attaches BOM rows to each product's small variant only (see the finding under Feature
+15). `Cost` now carries `hasRecipe`, so no-recipe rows read as unknown and cannot lead the report.
 
 **Found while doing T2:** `server/routes.ts:708-720` still returns 501 for `sales-summary` and
 `product-mix` saying "sales data is stored client-side" — untrue since Feature 7 T2, and now
