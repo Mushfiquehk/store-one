@@ -766,7 +766,11 @@ wrong number. The API rejects a negative rate, a non-number, and `825` typed for
 at `app-shell.tsx:51` is deleted; `home.tsx`'s went with the file in Feature 16 T4. T2 done — `taxOnCart` in `shared/pricing.ts` is the one tax computation: taxable lines only, with the
 cart discount reducing the taxable base proportionally. The till calls it instead of taxing the whole
 subtotal, and says "some items exempt" when any line is out of the base.
-T3–T4 remain.
+T3 done — `tax.inclusive` (`TAX_INCLUSIVE_KEY`) is one branch inside the same `taxOnCart`, extracting
+the tax (`total × rate / (100 + rate)`) instead of adding it, and returning `totalCents` so no caller
+decides whether to add tax on. The till's summary says **"Tax included"** versus **"Tax"**, because
+those are different claims about what the customer paid. A switch in Settings sets the mode.
+T4 remains.
 
 **Deviation from T2's wording, deliberately:** the task asks for a new `taxable: boolean` column across
 `shared/schema.ts`, Dexie and `server/schema.ts`. `ProductAttributes.tax_exempt` **already exists** and

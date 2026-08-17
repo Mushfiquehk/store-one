@@ -9,7 +9,7 @@
  * quantities are in, so a line cost is a plain multiplication.
  */
 import { computeInventoryDeductions, type DepletionData } from "./depletion";
-import { taxCentsFor } from "./schema";
+import { taxCentsFor, taxRatePct } from "./schema";
 
 export type CostedIngredient = {
   name: string;
@@ -174,33 +174,65 @@ export type TaxLine = {
 
 export type CartTax = {
   taxCents: number;
-  /** The base tax was actually charged on, after discounts. */
+  /** The base tax was charged on, after discounts. Contains the tax itself when inclusive. */
   taxableCents: number;
-  /** What was excluded, so a receipt or a report can show it rather than implying it was taxed. */
+  /** What was excluded, so a receipt can show it rather than implying it was taxed. */
   exemptCents: number;
+  /** What the lines come to after the discount — before tax is added, when it is added. */
+  subtotalCents: number;
+  /** What the customer pays. Equal to the subtotal when prices already include tax. */
+  totalCents: number;
+  inclusive: boolean;
+};
+
+export type TaxOptions = {
+  ratePct: number;
+  /** Cart-level discount, spread across the whole cart. */
+  discountCents?: number;
+  /** True when menu prices already contain the tax, so it is extracted rather than added. */
+  inclusive?: boolean;
 };
 
 /**
- * Tax for a cart, in one place.
+ * Tax for a cart, in one place — including the total, so no caller has to decide whether to
+ * add the tax on.
  *
- * Two rules worth stating because getting either wrong is a liability:
+ * Three rules, each a liability if got wrong:
  *
  * 1. **Only taxable lines are in the base.** One taxable $10 item and one exempt $10 item at
  *    10% is $1.00 of tax, not $2.00.
  * 2. **A discount reduces the taxable base proportionally.** Tax applies to what the customer
- *    pays, so a cart discount comes off the taxable share too — not off the exempt lines
- *    alone, and not after tax. Feature 5 T3 owns the order of operations; this follows it.
+ *    pays. Feature 5 T3 owns the order of operations; this follows it.
+ * 3. **Inclusive prices have the tax extracted, not added**: `total × rate / (100 + rate)`.
+ *    A $10.00 inclusive price at 10% is a $10.00 total containing 91 cents of tax — not
+ *    $11.00. Tax is computed once over the base, so the total never gains a stray cent no
+ *    matter how many lines the cart has.
  */
-export function taxOnCart(lines: TaxLine[], ratePct: number, discountCents = 0): CartTax {
+export function taxOnCart(lines: TaxLine[], options: TaxOptions): CartTax {
+  const { ratePct, discountCents = 0, inclusive = false } = options;
   const grossCents = lines.reduce((total, line) => total + line.amountCents, 0);
   const taxableGross = lines.reduce((total, line) => total + (line.exempt ? 0 : line.amountCents), 0);
-  const exemptCents = grossCents - taxableGross;
 
-  if (grossCents <= 0) return { taxCents: 0, taxableCents: 0, exemptCents: 0 };
+  if (grossCents <= 0) {
+    return { taxCents: 0, taxableCents: 0, exemptCents: 0, subtotalCents: 0, totalCents: 0, inclusive };
+  }
 
+  const subtotalCents = Math.max(0, grossCents - discountCents);
   // The discount is spread across the whole cart, so the taxable share of it is proportional.
-  const afterDiscount = Math.max(0, grossCents - discountCents);
-  const taxableCents = Math.round(taxableGross * (afterDiscount / grossCents));
+  const taxableCents = Math.round(taxableGross * (subtotalCents / grossCents));
+  const exemptCents = subtotalCents - taxableCents;
 
-  return { taxCents: taxCentsFor(taxableCents, ratePct), taxableCents, exemptCents };
+  const rate = taxRatePct(ratePct);
+  const taxCents = inclusive
+    ? Math.round((taxableCents * rate) / (100 + rate))
+    : taxCentsFor(taxableCents, rate);
+
+  return {
+    taxCents,
+    taxableCents,
+    exemptCents,
+    subtotalCents,
+    totalCents: inclusive ? subtotalCents : subtotalCents + taxCents,
+    inclusive,
+  };
 }
