@@ -171,6 +171,7 @@ export function buildSaleRow(data: Record<string, unknown>, now: number) {
     isTestOrder: (data.isTestOrder as boolean) ?? false,
     taxRatePct: (data.taxRatePct as number) ?? null,
     taxInclusive: (data.taxInclusive as boolean) ?? null,
+    employeeId: (data.employeeId as string) ?? null,
     updatedAt: now,
     deletedAt: null as number | null,
   };

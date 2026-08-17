@@ -359,6 +359,7 @@ export async function processTestOrder(
     isTestOrder: true,
     taxRatePct,
     taxInclusive: false,
+    employeeId: null,
   }, now);
 
   if (dryRun) {

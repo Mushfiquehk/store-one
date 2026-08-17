@@ -419,6 +419,8 @@ function generateSales(): Sale[] {
         changeCents: 0,
         taxRatePct: TAX_RATE * 100,
         taxInclusive: false,
+        // Demo sales are unattributed: inventing a cashier would put a name on takings nobody rang.
+        employeeId: null,
         status: "completed",
         linesJson: lines,
         customerName: "",
