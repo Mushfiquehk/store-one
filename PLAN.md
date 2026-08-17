@@ -677,7 +677,15 @@ presented as a count. Card sales, test orders and out-of-window rows are exclude
 (Dexie v19) records paid in / paid out with a **required** reason from a fixed list; the amount is always
 positive and `kind` carries the direction, so no row can be ambiguous about its sign. A movement made
 with no session open still records, with a null `sessionId`.
-T3–T4 remain.
+T3 done — closing asks for the counted total with **nothing else on screen**; expected, counted and the
+variance appear only after it is submitted. The field is never pre-filled from the expectation and there
+is no "use expected" shortcut — a test asserts the expected figure renders only inside the post-count
+branch and that the count input's markup does not mention it. The close records who counted (Feature 19
+T1's active employee), writes one `DRAWER_CLOSED` action-log row whose summary reads on its own
+("$512.50 counted against $520.50 expected — $8.00 short"), and requires a note when the variance
+exceeds `drawer.varianceNoteThresholdCents` (default $5, **over as well as short**) — a note, not a
+block. An approximated expectation says so on the screen and in the log row.
+T4 remains.
 
 **Not wired to the API surface yet:** T1 lists the `crudEntities` line in `shared/api-handlers.ts`, but
 generic CRUD is the wrong shape for this table — opening is a guarded operation and closing writes a

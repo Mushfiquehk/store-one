@@ -17,6 +17,7 @@ export const ACTIONS = {
   SETTING_CHANGED: "SETTING_CHANGED",
   BACKUP_RESTORED: "BACKUP_RESTORED",
   DEMO_CLEARED: "DEMO_CLEARED",
+  DRAWER_CLOSED: "DRAWER_CLOSED",
 } as const;
 
 export type Action = typeof ACTIONS[keyof typeof ACTIONS];

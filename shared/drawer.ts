@@ -204,3 +204,38 @@ export function expectedCash(
     paidOutCents,
   };
 }
+
+/**
+ * How far the count may sit from expected before a note is required.
+ *
+ * A note, not a block: an operator who is $40 short at 11pm needs to record what they think
+ * happened while they still remember it, and a till that refuses to close is a till that gets
+ * closed by force-quitting the app.
+ */
+export const VARIANCE_NOTE_THRESHOLD_KEY = "drawer.varianceNoteThresholdCents";
+export const DEFAULT_VARIANCE_NOTE_THRESHOLD_CENTS = 500;
+
+export function varianceNoteThresholdCents(value: unknown): number {
+  const cents = typeof value === "number" ? value : NaN;
+  return Number.isInteger(cents) && cents >= 0 ? cents : DEFAULT_VARIANCE_NOTE_THRESHOLD_CENTS;
+}
+
+/** Over as well as short: a drawer $40 up is as much a finding as one $40 down. */
+export function varianceNeedsNote(varianceCents: number, thresholdCents: number): boolean {
+  return Math.abs(varianceCents) > varianceNoteThresholdCents(thresholdCents);
+}
+
+/**
+ * The close, as a sentence for the action log: "$512.50 counted, $8.00 short".
+ *
+ * A closed drawer is a decision with money attached, so the row has to be readable on its own
+ * next to the voids rather than sending someone to look up two numbers.
+ */
+export function closeSummary(countedCents: number, expectedCents: number, basis: ExpectedCash["basis"]): string {
+  const money = (cents: number) =>
+    new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
+  const variance = countedCents - expectedCents;
+  const direction = variance === 0 ? "exact" : variance > 0 ? `${money(variance)} over` : `${money(-variance)} short`;
+  const caveat = basis === "TENDER" ? "" : " (expected approximated from sale totals)";
+  return `${money(countedCents)} counted against ${money(expectedCents)} expected — ${direction}${caveat}`;
+}
