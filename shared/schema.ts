@@ -50,6 +50,9 @@ const isTenderList = (v: unknown): v is string[] =>
  * till, so it is rejected at the API rather than trusted to the UI that sent it.
  */
 export function validateSetting(key: string, value: unknown): string | null {
+  if (key === TAX_INCLUSIVE_KEY) {
+    return typeof value === "boolean" ? null : "tax.inclusive must be true or false";
+  }
   if (key === TAX_RATE_KEY) {
     // A negative rate is a refund per item, and 8.25 typed as 825 charges eight times the bill.
     const rate = typeof value === "number" ? value : NaN;
@@ -78,6 +81,15 @@ export const TAX_RATE_KEY = "tax.ratePct";
  * their first day rather than a liability they discover at the end of the quarter.
  */
 export const DEFAULT_TAX_RATE_PCT = 0;
+
+/**
+ * Whether menu prices already contain the tax.
+ *
+ * VAT and GST jurisdictions price this way — the shelf price is what the customer pays and
+ * the tax is *extracted* from it rather than added. A POS that cannot express that is
+ * unusable outside North America. Default false, which is every existing store's behaviour.
+ */
+export const TAX_INCLUSIVE_KEY = "tax.inclusive";
 
 /** The stored rate, or zero for anything unset or unusable. */
 export function taxRatePct(value: unknown): number {

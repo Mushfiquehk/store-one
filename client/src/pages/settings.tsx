@@ -33,7 +33,7 @@ import {
   startAutoSync, stopAutoSync,
 } from "@/lib/sync";
 import {
-  DEFAULT_TAX_RATE_PCT, DEFAULT_TENDER_METHODS, TAX_RATE_KEY, TENDER_METHODS_KEY,
+  DEFAULT_TAX_RATE_PCT, DEFAULT_TENDER_METHODS, TAX_INCLUSIVE_KEY, TAX_RATE_KEY, TENDER_METHODS_KEY,
   taxRatePct, tenderMethods, type SyncCategory,
 } from "@shared/schema";
 
@@ -92,6 +92,7 @@ export default function SettingsPage() {
   // Zero until the operator says otherwise: an unconfigured rate must look unconfigured.
   const [taxRate, setTaxRate] = useState(DEFAULT_TAX_RATE_PCT);
   const [taxSaving, setTaxSaving] = useState(false);
+  const [taxInclusive, setTaxInclusive] = useState(false);
   const [clientCode, setClientCode] = useState(() => localStorage.getItem("cornerpos_client_code") || "");
   const [backupStatus, setBackupStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [restoreStatus, setRestoreStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
@@ -115,6 +116,10 @@ export default function SettingsPage() {
     fetch(`/api/settings/${TAX_RATE_KEY}`)
       .then(r => r.json())
       .then(d => setTaxRate(taxRatePct(d.value)))
+      .catch(() => {});
+    fetch(`/api/settings/${TAX_INCLUSIVE_KEY}`)
+      .then(r => r.json())
+      .then(d => setTaxInclusive(d.value === true))
       .catch(() => {});
     fetch(`/api/settings/${TENDER_METHODS_KEY}`)
       .then(r => r.json())
@@ -146,6 +151,22 @@ export default function SettingsPage() {
       toast({ title: "Not saved", description: err instanceof Error ? err.message : "Save failed", variant: "destructive" });
     } finally {
       setTaxSaving(false);
+    }
+  };
+
+  const saveTaxInclusive = async (inclusive: boolean) => {
+    const previous = taxInclusive;
+    setTaxInclusive(inclusive);
+    try {
+      const res = await fetch(`/api/settings/${TAX_INCLUSIVE_KEY}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ value: inclusive }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Save failed");
+    } catch (err) {
+      setTaxInclusive(previous);
+      toast({ title: "Not saved", description: err instanceof Error ? err.message : "Save failed", variant: "destructive" });
     }
   };
 
@@ -482,6 +503,21 @@ export default function SettingsPage() {
                     />
                     <Percent className="absolute right-3 top-2.5 h-4 w-4 text-muted-foreground" />
                   </div>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <Label className="text-base">Prices include tax</Label>
+                    <p className="text-sm text-muted-foreground">
+                      On for VAT and GST pricing: the menu price is what the customer pays and the tax
+                      is shown as included. Off adds the tax on top at the till.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={taxInclusive}
+                    onCheckedChange={saveTaxInclusive}
+                    data-testid="switch-tax-inclusive"
+                  />
                 </div>
 
                 <Separator />

@@ -168,7 +168,7 @@ test("an exempt line is not in the tax base", () => {
   const tax = taxOnCart([
     { amountCents: 1000, exempt: false },
     { amountCents: 1000, exempt: true },
-  ], 10);
+  ], { ratePct: 10 });
 
   assert.equal(tax.taxCents, 100);
   assert.equal(tax.taxableCents, 1000);
@@ -180,28 +180,73 @@ test("a discount reduces the taxable base rather than being taxed through", () =
   const tax = taxOnCart([
     { amountCents: 1000, exempt: false },
     { amountCents: 1000, exempt: true },
-  ], 10, 400);
+  ], { ratePct: 10, discountCents: 400 });
 
   assert.equal(tax.taxableCents, 800);
   assert.equal(tax.taxCents, 80, "not 100, which is tax on the pre-discount total");
 });
 
 test("an all-exempt cart is charged nothing, whatever the rate", () => {
-  const tax = taxOnCart([{ amountCents: 5000, exempt: true }], 8.25);
-  assert.deepEqual(tax, { taxCents: 0, taxableCents: 0, exemptCents: 5000 });
+  const tax = taxOnCart([{ amountCents: 5000, exempt: true }], { ratePct: 8.25 });
+  assert.equal(tax.taxCents, 0);
+  assert.equal(tax.exemptCents, 5000);
+  assert.equal(tax.totalCents, 5000, "the customer pays the shelf price and no more");
 });
 
 test("an empty cart and an over-large discount do not produce negative tax", () => {
-  assert.deepEqual(taxOnCart([], 10), { taxCents: 0, taxableCents: 0, exemptCents: 0 });
-  const overDiscounted = taxOnCart([{ amountCents: 1000, exempt: false }], 10, 5000);
+  assert.deepEqual(taxOnCart([], { ratePct: 10 }), {
+    taxCents: 0, taxableCents: 0, exemptCents: 0, subtotalCents: 0, totalCents: 0, inclusive: false,
+  });
+  const overDiscounted = taxOnCart([{ amountCents: 1000, exempt: false }], { ratePct: 10, discountCents: 5000 });
   assert.equal(overDiscounted.taxCents, 0);
   assert.equal(overDiscounted.taxableCents, 0);
 });
 
 test("with nothing exempt, the base is the whole discounted cart", () => {
   // The behaviour every existing row keeps: absent tax_exempt means taxable.
-  const tax = taxOnCart([{ amountCents: 1000, exempt: false }, { amountCents: 500, exempt: false }], 8.25, 150);
+  const tax = taxOnCart([{ amountCents: 1000, exempt: false }, { amountCents: 500, exempt: false }], { ratePct: 8.25, discountCents: 150 });
   assert.equal(tax.taxableCents, 1350);
   assert.equal(tax.taxCents, 111);
   assert.equal(tax.exemptCents, 0);
+});
+
+test("an inclusive price has the tax extracted, not added", () => {
+  // The plan's check: $10.00 inclusive at 10% is a $10.00 total containing 91 cents...
+  const inclusive = taxOnCart([{ amountCents: 1000, exempt: false }], { ratePct: 10, inclusive: true });
+  assert.equal(inclusive.totalCents, 1000, "the shelf price is what the customer pays");
+  assert.equal(inclusive.taxCents, 91, "1000 x 10 / 110");
+  assert.equal(inclusive.inclusive, true, "and the receipt can say which claim it is making");
+
+  // ...and the same price exclusive is $11.00 with a dollar of tax.
+  const exclusive = taxOnCart([{ amountCents: 1000, exempt: false }], { ratePct: 10 });
+  assert.equal(exclusive.totalCents, 1100);
+  assert.equal(exclusive.taxCents, 100);
+});
+
+test("a three-line cart sums exactly to the total, in both modes", () => {
+  // Tax is computed once over the base rather than per line, so there is no stray cent to
+  // reconcile — the failure mode this check exists for.
+  const lines = [
+    { amountCents: 333, exempt: false },
+    { amountCents: 333, exempt: false },
+    { amountCents: 334, exempt: false },
+  ];
+
+  const exclusive = taxOnCart(lines, { ratePct: 8.25 });
+  assert.equal(exclusive.subtotalCents, 1000);
+  assert.equal(exclusive.subtotalCents + exclusive.taxCents, exclusive.totalCents);
+
+  const inclusive = taxOnCart(lines, { ratePct: 8.25, inclusive: true });
+  assert.equal(inclusive.totalCents, 1000, "still exactly the sum of the lines");
+  assert.ok(inclusive.taxCents < exclusive.taxCents, "extracted tax is smaller than added tax");
+});
+
+test("inclusive pricing with an exempt line taxes only the taxable part of the price", () => {
+  const tax = taxOnCart([
+    { amountCents: 1000, exempt: false },
+    { amountCents: 1000, exempt: true },
+  ], { ratePct: 10, inclusive: true });
+
+  assert.equal(tax.totalCents, 2000, "the customer pays both shelf prices");
+  assert.equal(tax.taxCents, 91, "only the taxable half contains tax");
 });

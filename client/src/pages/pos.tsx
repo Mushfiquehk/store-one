@@ -16,7 +16,7 @@ import OrderReceipts from "@/components/order-receipts";
 import { format } from "date-fns";
 import type { Combo } from "@/lib/db";
 import {
-  DEFAULT_TAX_RATE_PCT, DEFAULT_TENDER_METHODS, TAX_RATE_KEY, TENDER_METHODS_KEY,
+  DEFAULT_TAX_RATE_PCT, DEFAULT_TENDER_METHODS, TAX_INCLUSIVE_KEY, TAX_RATE_KEY, TENDER_METHODS_KEY,
   changeDueCents, taxRatePct, tenderMethods, tenderSuggestions,
 } from "@shared/schema";
 import { taxOnCart } from "@shared/pricing";
@@ -43,6 +43,7 @@ export default function PosPage() {
 
   // The operator's rate, not a constant wearing a state hook. Zero until one is set.
   const [taxRate, setTaxRate] = useState(DEFAULT_TAX_RATE_PCT);
+  const [taxInclusive, setTaxInclusive] = useState(false);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [appliedCombos, setAppliedCombos] = useState<Map<string, string>>(new Map());
   const [dismissedCombos, setDismissedCombos] = useState<Set<string>>(new Set());
@@ -61,6 +62,10 @@ export default function PosPage() {
     fetch(`/api/settings/${TAX_RATE_KEY}`)
       .then(r => r.json())
       .then(d => setTaxRate(taxRatePct(d.value)))
+      .catch(() => {});
+    fetch(`/api/settings/${TAX_INCLUSIVE_KEY}`)
+      .then(r => r.json())
+      .then(d => setTaxInclusive(d.value === true))
       .catch(() => {});
   }, []);
 
@@ -364,11 +369,12 @@ export default function PosPage() {
       amountCents: getCartItemPrice(item) * item.qty,
       exempt: products.find(p => p.id === item.productId)?.attributes?.tax_exempt === true,
     })),
-    taxRate,
-    totalComboDiscount,
+    { ratePct: taxRate, discountCents: totalComboDiscount, inclusive: taxInclusive },
   );
   const taxCents = cartTax.taxCents;
-  const totalCents = subtotalCents + taxCents;
+  // Not subtotal + tax: with inclusive pricing the price already contains it, and that
+  // decision belongs in one place rather than at every call site.
+  const totalCents = cartTax.totalCents;
 
   // A non-cash sale tenders exactly the total: the day's cash expectation is a sum over
   // this column, and a null in the middle of it reads as a hole nobody can explain.
@@ -811,7 +817,10 @@ export default function PosPage() {
                           </div>
                         )}
                         <div className="flex justify-between text-muted-foreground">
-                          <span>Tax ({taxRate}%{cartTax.exemptCents > 0 ? ", some items exempt" : ""})</span>
+                          <span>
+                            {cartTax.inclusive ? "Tax included" : "Tax"} ({taxRate}%
+                            {cartTax.exemptCents > 0 ? ", some items exempt" : ""})
+                          </span>
                           <span>{formatMoney(taxCents)}</span>
                         </div>
                         <Separator className="my-2" />
