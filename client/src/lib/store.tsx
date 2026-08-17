@@ -3,6 +3,8 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "./db";
 import { storage } from "./local-storage";
 import type { InventoryLedgerEntry, WasteReason } from "@shared/ledger";
+
+export const CURRENT_EMPLOYEE_KEY = "cornerpos_current_employee";
 import { toast } from "@/hooks/use-toast";
 import type {
   Product,
@@ -46,6 +48,14 @@ type StoreContextType = {
   inventory: InventoryItem[];
   bom: BomEntry[];
   employees: Employee[];
+  /**
+   * Who is on the till right now. Device state, not component state: a till is a shared
+   * device, and the person on it outlives whichever dialog selected them. Null is honest —
+   * a single-operator store that never created an employee record must still be able to sell.
+   */
+  currentEmployeeId: string | null;
+  currentEmployee: Employee | null;
+  setCurrentEmployeeId: (id: string | null) => void;
   timePunches: TimePunch[];
   sales: Sale[];
   invoices: Invoice[];
@@ -242,6 +252,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const addProductGroupItem = useCallback((data: Partial<ProductGroupItem>) => storage.createProductGroupItem(data), []);
   const deleteProductGroupItem = useCallback((id: string) => { storage.deleteProductGroupItem(id); }, []);
 
+  // Same cornerpos_ convention sync.ts uses for device-local state.
+  const [currentEmployeeId, setCurrentEmployeeIdState] = useState<string | null>(
+    () => localStorage.getItem(CURRENT_EMPLOYEE_KEY),
+  );
+
+  const setCurrentEmployeeId = useCallback((id: string | null) => {
+    if (id) localStorage.setItem(CURRENT_EMPLOYEE_KEY, id);
+    else localStorage.removeItem(CURRENT_EMPLOYEE_KEY);
+    setCurrentEmployeeIdState(id);
+  }, []);
+
+  // An employee who was deleted is not the current one, whatever localStorage still says.
+  const currentEmployee = (employees ?? []).find(e => e.id === currentEmployeeId) ?? null;
+
   const value: StoreContextType = {
     products: products ?? [],
     variants: variants ?? [],
@@ -250,6 +274,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     inventory: inventory ?? [],
     bom: bom ?? [],
     employees: employees ?? [],
+    currentEmployeeId: currentEmployee ? currentEmployee.id : null,
+    currentEmployee,
+    setCurrentEmployeeId,
     timePunches: timePunches ?? [],
     sales: sales ?? [],
     invoices: invoices ?? [],
