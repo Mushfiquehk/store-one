@@ -1,6 +1,7 @@
 import { db } from "./db";
 import { costPerStockUnit, stockUnitsReceived } from "@shared/units";
 import { WASTE_REASONS, ledgerRows, type InventoryLedgerEntry, type LedgerContext, type LedgerReason, type WasteReason } from "@shared/ledger";
+import { canOpenSession, type DrawerSession } from "@shared/drawer";
 import {
   ACTIONS, actionLogEntry, priceChangeSummary,
   type ActionLogEntry, type ActionLogInput, type ActorKind,
@@ -371,6 +372,63 @@ export const storage = {
       });
     });
     return db.inventoryItems.get(id);
+  },
+
+  async getDrawerSessions(): Promise<DrawerSession[]> {
+    const rows = await db.drawerSessions.toArray();
+    return rows.filter(r => !r.deletedAt).sort((a, b) => b.openedAt - a.openedAt);
+  },
+
+  /**
+   * Open a session, or refuse: two open at once make every sale ambiguous about which drawer it
+   * belongs to. The check and the write are in one transaction so two taps cannot both win.
+   */
+  async openDrawerSession(openingFloatCents: number, employeeId: string | null): Promise<DrawerSession> {
+    let created!: DrawerSession;
+    await db.transaction("rw", db.drawerSessions, async () => {
+      const existing = (await db.drawerSessions.toArray()).filter(r => !r.deletedAt);
+      const allowed = canOpenSession(existing);
+      if (!allowed.ok) throw new Error(allowed.reason);
+
+      const now = Date.now();
+      created = {
+        id: uid("drawer"),
+        openedAt: now,
+        openedByEmployeeId: employeeId,
+        openingFloatCents,
+        closedAt: null,
+        closedByEmployeeId: null,
+        countedCents: null,
+        expectedCents: null,
+        varianceCents: null,
+        note: "",
+        updatedAt: now,
+        deletedAt: null,
+      };
+      await db.drawerSessions.put(created);
+    });
+    return created;
+  },
+
+  /**
+   * Close the open session with what was counted. `expectedCents` is supplied by the caller and
+   * written here, so the variance is fixed at close and cannot drift as later sales arrive.
+   */
+  async closeDrawerSession(
+    id: string,
+    counted: { countedCents: number; expectedCents: number; employeeId: string | null; note?: string },
+  ): Promise<DrawerSession | undefined> {
+    const now = Date.now();
+    await db.drawerSessions.update(id, {
+      closedAt: now,
+      closedByEmployeeId: counted.employeeId,
+      countedCents: counted.countedCents,
+      expectedCents: counted.expectedCents,
+      varianceCents: counted.countedCents - counted.expectedCents,
+      note: counted.note ?? "",
+      updatedAt: now,
+    });
+    return db.drawerSessions.get(id);
   },
 
   /** Ledger rows, newest first, optionally from a point in time. */

@@ -4,6 +4,7 @@ import { db } from "./db";
 import { storage } from "./local-storage";
 import type { InventoryLedgerEntry, WasteReason } from "@shared/ledger";
 import type { ActionLogEntry, ActionLogInput } from "@shared/action-log";
+import type { DrawerSession } from "@shared/drawer";
 
 export const CURRENT_EMPLOYEE_KEY = "cornerpos_current_employee";
 import { toast } from "@/hooks/use-toast";
@@ -116,6 +117,9 @@ type StoreContextType = {
   recordWaste: (id: string, quantity: number, reason: WasteReason, note?: string) => Promise<InventoryItem | undefined>;
   recordCount: (id: string, counted: number, note?: string) => Promise<InventoryItem | undefined>;
   getLedger: (since?: number) => Promise<InventoryLedgerEntry[]>;
+  getDrawerSessions: () => Promise<DrawerSession[]>;
+  openDrawerSession: (openingFloatCents: number) => Promise<DrawerSession>;
+  closeDrawerSession: (id: string, counted: { countedCents: number; expectedCents: number; note?: string }) => Promise<DrawerSession | undefined>;
   getActionLog: (limit?: number) => Promise<ActionLogEntry[]>;
   logAction: (input: Omit<ActionLogInput, "actorKind" | "actorId"> & Partial<Pick<ActionLogInput, "actorKind" | "actorId">>) => Promise<ActionLogEntry>;
   updateSale: (id: string, data: Partial<Sale>) => void;
@@ -243,6 +247,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const recordWaste = useCallback((id: string, quantity: number, reason: WasteReason, note?: string) => storage.recordWaste(id, quantity, reason, note), []);
   const recordCount = useCallback((id: string, counted: number, note?: string) => storage.recordCount(id, counted, note), []);
   const getLedger = useCallback((since?: number) => storage.getLedger(since), []);
+  const getDrawerSessions = useCallback(() => storage.getDrawerSessions(), []);
+  const openDrawerSession = useCallback(
+    (openingFloatCents: number) => storage.openDrawerSession(openingFloatCents, currentEmployeeIdRef.current),
+    [],
+  );
+  const closeDrawerSession = useCallback(
+    (id: string, counted: { countedCents: number; expectedCents: number; note?: string }) =>
+      storage.closeDrawerSession(id, { ...counted, employeeId: currentEmployeeIdRef.current }),
+    [],
+  );
+
   const getActionLog = useCallback((limit?: number) => storage.getActionLog(limit), []);
   const logAction = useCallback(
     (input: Omit<ActionLogInput, "actorKind" | "actorId"> & Partial<Pick<ActionLogInput, "actorKind" | "actorId">>) =>
@@ -362,6 +377,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     recordWaste,
     recordCount,
     getLedger,
+    getDrawerSessions,
+    openDrawerSession,
+    closeDrawerSession,
     getActionLog,
     logAction,
     updateSale,
