@@ -145,6 +145,9 @@ export const adminSales = pgTable("admin_sales", {
   // Nullable: rows recorded before the till asked what the customer handed over.
   tenderedCents: integer("tendered_cents"),
   changeCents: integer("change_cents"),
+  // Rung by /api/orders/simulate to check a recipe, not by a customer. Kept out of every
+  // report by shared/reports.ts's realSales().
+  isTestOrder: pgBoolean("is_test_order").notNull().default(false),
   status: text("status").notNull().default("completed"),
   customerName: text("customer_name").notNull().default(""),
   linesJson: jsonb("lines_json").notNull(),

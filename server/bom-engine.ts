@@ -6,6 +6,7 @@ import {
 import { eq, isNull } from "drizzle-orm";
 // One depletion walk, shared with the till. This file kept its own copy until Feature 15 T1.
 import { computeInventoryDeductions } from "../shared/depletion";
+import { buildSaleRow } from "./storage";
 
 export { computeInventoryDeductions };
 
@@ -341,7 +342,10 @@ export async function processTestOrder(
     finalPriceCents: l.finalPriceCents,
   }));
 
-  const sale = {
+  // Built by the one row builder in storage.ts, and marked as a test order so no report
+  // counts a recipe check as revenue. This is a simulation endpoint; the sale it writes is
+  // evidence that the recipe deducts correctly, not money the business took.
+  const sale = buildSaleRow({
     id: saleId,
     createdAt: now,
     subtotalCents,
@@ -352,16 +356,12 @@ export async function processTestOrder(
     status: "completed",
     customerName,
     linesJson,
-  };
+    isTestOrder: true,
+  }, now);
 
   if (dryRun) {
     await db.transaction(async (tx) => {
-      await tx.insert(adminSales).values({
-        ...sale,
-        closedAt: null,
-        updatedAt: now,
-        deletedAt: null,
-      });
+      await tx.insert(adminSales).values(sale);
 
       for (const effect of inventoryEffects) {
         await tx.update(adminInventoryItems)
@@ -376,12 +376,7 @@ export async function processTestOrder(
     });
   } else {
     await db.transaction(async (tx) => {
-      await tx.insert(adminSales).values({
-        ...sale,
-        closedAt: null,
-        updatedAt: now,
-        deletedAt: null,
-      });
+      await tx.insert(adminSales).values(sale);
 
       for (const effect of inventoryEffects) {
         await tx.update(adminInventoryItems)

@@ -145,6 +145,35 @@ export interface IAdminStorage {
   applyClientSyncChanges(clientCode: string, changes: { tableName: string; recordId: string; data: Record<string, unknown>; action: string }[]): Promise<true | null>;
 }
 
+/**
+ * The one place an admin_sales row is built.
+ *
+ * There were two: this one and bom-engine's inline object for test orders. Two constructions
+ * of the same row is how a column added to one gets forgotten in the other — which is exactly
+ * what happened to tenderedCents. bom-engine still does its own insert, because it writes
+ * inside a transaction it rolls back for dry runs, but it builds the row from here.
+ */
+export function buildSaleRow(data: Record<string, unknown>, now: number) {
+  return {
+    id: data.id as string,
+    createdAt: (data.createdAt as number) ?? now,
+    subtotalCents: (data.subtotalCents as number) ?? 0,
+    taxCents: (data.taxCents as number) ?? 0,
+    totalCents: (data.totalCents as number) ?? 0,
+    comboDiscountCents: (data.comboDiscountCents as number) ?? 0,
+    paymentMethod: (data.paymentMethod as string) ?? "test",
+    tenderedCents: (data.tenderedCents as number) ?? null,
+    changeCents: (data.changeCents as number) ?? null,
+    status: (data.status as string) ?? "completed",
+    customerName: (data.customerName as string) ?? "",
+    linesJson: data.linesJson ?? [],
+    closedAt: (data.closedAt as number) ?? null,
+    isTestOrder: (data.isTestOrder as boolean) ?? false,
+    updatedAt: now,
+    deletedAt: null as number | null,
+  };
+}
+
 export const storage: IStorage = {
   async getOrCreateClient(code: string, name?: string): Promise<Client> {
     const [result] = await db
@@ -890,23 +919,7 @@ export const adminStorage: IAdminStorage = {
   },
   async createSale(data: Record<string, unknown>) {
     const now = Date.now();
-    const row = {
-      id: data.id as string,
-      createdAt: (data.createdAt as number) ?? now,
-      subtotalCents: (data.subtotalCents as number) ?? 0,
-      taxCents: (data.taxCents as number) ?? 0,
-      totalCents: (data.totalCents as number) ?? 0,
-      comboDiscountCents: (data.comboDiscountCents as number) ?? 0,
-      paymentMethod: (data.paymentMethod as string) ?? "test",
-      tenderedCents: (data.tenderedCents as number) ?? null,
-      changeCents: (data.changeCents as number) ?? null,
-      status: (data.status as string) ?? "completed",
-      customerName: (data.customerName as string) ?? "",
-      linesJson: data.linesJson ?? [],
-      closedAt: (data.closedAt as number) ?? null,
-      updatedAt: now,
-      deletedAt: null,
-    };
+    const row = buildSaleRow(data, now);
     const [r] = await db.insert(adminSales).values(row)
       .onConflictDoUpdate({ target: adminSales.id, set: { ...row, updatedAt: now } }).returning();
     return r;

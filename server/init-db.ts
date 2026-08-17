@@ -9,6 +9,19 @@ import { sql } from "drizzle-orm";
  * or how it runs has changed.
  */
 export async function initDb() {
+  // One writer at a time. Two processes running this concurrently — two server instances
+  // booting, or two test files opening the same database — race inside CREATE TABLE IF NOT
+  // EXISTS and one of them fails on a duplicate pg_type entry. The lock is released when the
+  // session ends even if this throws, so a crashed boot cannot wedge the next one.
+  await db.execute(sql`SELECT pg_advisory_lock(8262614)`);
+  try {
+    await initSchema();
+  } finally {
+    await db.execute(sql`SELECT pg_advisory_unlock(8262614)`);
+  }
+}
+
+async function initSchema() {
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS clients (
       id SERIAL PRIMARY KEY,
@@ -163,6 +176,7 @@ export async function initDb() {
       payment_method TEXT NOT NULL DEFAULT 'test',
       tendered_cents INTEGER,
       change_cents INTEGER,
+      is_test_order BOOLEAN NOT NULL DEFAULT FALSE,
       status TEXT NOT NULL DEFAULT 'completed',
       customer_name TEXT NOT NULL DEFAULT '',
       lines_json JSONB NOT NULL,
@@ -176,6 +190,8 @@ export async function initDb() {
   // initDb() threw "relation admin_sales does not exist" and the server never finished booting.
   await db.execute(sql`ALTER TABLE admin_sales ADD COLUMN IF NOT EXISTS tendered_cents INTEGER`);
   await db.execute(sql`ALTER TABLE admin_sales ADD COLUMN IF NOT EXISTS change_cents INTEGER`);
+  // Feature 26 T4: test orders, so a recipe check cannot be counted as revenue.
+  await db.execute(sql`ALTER TABLE admin_sales ADD COLUMN IF NOT EXISTS is_test_order BOOLEAN NOT NULL DEFAULT FALSE`);
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS store_settings (
       key TEXT PRIMARY KEY,

@@ -17,7 +17,18 @@ export type ReportSale = {
   taxCents?: number;
   // Dexie stores this as an array; a row that came off the wire may still be a JSON string.
   linesJson?: ReportSaleLine[] | string;
+  /**
+   * A sale rung by `/api/orders/simulate` to check a recipe, not by a customer. Visible as a
+   * sale, excluded from every report in this file — a test order counted as revenue is the
+   * same class of lie as an unpriced ingredient counted as free.
+   */
+  isTestOrder?: boolean | null;
 };
+
+/** Real trade only. Every report here starts from this, so none of them can forget. */
+export function realSales(sales: ReportSale[]): ReportSale[] {
+  return sales.filter(sale => !sale.isTestOrder);
+}
 
 export type Granularity = "hourly" | "daily" | "monthly";
 
@@ -92,7 +103,8 @@ function bucketLabel(start: number, granularity: Granularity): string {
  * the same claim as "we took $0.00 that hour", and only the caller knows which it wants
  * to draw.
  */
-export function salesSeries(sales: ReportSale[], window: SalesWindow): SalesBucket[] {
+export function salesSeries(allSales: ReportSale[], window: SalesWindow): SalesBucket[] {
+  const sales = realSales(allSales);
   const { granularity, since, until, fill } = window;
   const buckets = new Map<number, SalesBucket>();
 
@@ -133,8 +145,8 @@ export function salesSeries(sales: ReportSale[], window: SalesWindow): SalesBuck
 }
 
 /** The four scalars the sales-summary endpoint has always returned, over a window. */
-export function salesSummary(sales: ReportSale[], window: { since?: number; until?: number } = {}) {
-  const inWindow = sales.filter(s => {
+export function salesSummary(allSales: ReportSale[], window: { since?: number; until?: number } = {}) {
+  const inWindow = realSales(allSales).filter(s => {
     const at = s.createdAt;
     if (typeof at !== "number") return false;
     if (window.since != null && at < window.since) return false;
@@ -162,10 +174,10 @@ export function salesSummary(sales: ReportSale[], window: { since?: number; unti
  * Per-variant units and revenue, revenue-descending. Lifted from the product-mix handler,
  * including its guard against a sale with no lines.
  */
-export function productMix(sales: ReportSale[], window: { since?: number; until?: number } = {}): ProductMixRow[] {
+export function productMix(allSales: ReportSale[], window: { since?: number; until?: number } = {}): ProductMixRow[] {
   const mix: Record<string, ProductMixRow> = {};
 
-  for (const sale of sales) {
+  for (const sale of realSales(allSales)) {
     const at = sale.createdAt;
     if (window.since != null && (typeof at !== "number" || at < window.since)) continue;
     if (window.until != null && (typeof at !== "number" || at > window.until)) continue;
