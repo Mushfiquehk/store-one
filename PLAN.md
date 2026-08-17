@@ -2481,7 +2481,26 @@ restore asks first, and a store that has not been backed up in weeks says so.
 
 ## Feature 8 — Sync that converges, and a conflict policy that is written down
 
-**Status:** planned
+**Status:** T1 done — the string comparison is replaced by `sameSyncedFields` / `sameDeletedState`
+(`shared/sync-compare.ts`): an explicit per-table field list, with `undefined` and `null` treated as
+equal and nested objects compared by value rather than by key order. Server-only columns are outside
+the list, so `createdAt` — and `locationId` when Feature 3 lands — can never register as a difference.
+T2–T4 remain.
+
+**Confirmation, and one correction to the analysis above.** A live sync could not be run here (no
+Postgres in this environment), so the failure is reproduced deterministically in
+`shared/sync-compare.test.ts` instead of by temporary logging: the first test builds the same product
+as each side builds it and asserts the old `JSON.stringify` comparison says they differ while the new
+one says they agree.
+
+Reading the code, the **field-set** half of the prediction is only partly right: the client `Product`
+and `Variant` interfaces do carry `createdAt`, so those field sets match. Where it does hold is
+`inventoryItems` — `purchaseUnit` and `unitsPerPurchase` are optional client-side and NOT NULL
+server-side, so a pre-v10 row genuinely has no such keys. The **general** mechanism is key order, and
+it is worse than "the two sides were built by different machinery": `syncRecords.data` is `jsonb`, which
+does not preserve key order, and `client/src/lib/sync.ts:136` writes a server record into Dexie with
+`table.put(change.data)` — the server's order — then pushes it back verbatim. So a record that has been
+through the server once compares unequal to its own admin row from then on.
 **Vision pillar:** #1 — "the best foundation". Sales records are the business's books.
 **Added:** 2026-08-09
 
