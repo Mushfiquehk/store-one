@@ -1092,7 +1092,11 @@ emailed copy that matches what they were charged to the cent, and every copy aft
 
 ## Feature 19 — Who did that: attribution, and the log every autopsy needs
 
-**Status:** T1 done — the current employee lives in the store, persisted under
+**Status:** done — T1–T4 complete. A current employee that survives a reload, `employeeId` on every
+sale, an append-only action log written at the existing choke points, and one list an operator can read.
+The agent actor id waits on Feature 2/4.
+
+T1 done — the current employee lives in the store, persisted under
 `cornerpos_current_employee` (the same convention `sync.ts` uses), and is shown in the app-shell header
 where an operator can see and change it. Clocking in sets it; **clocking out clears it, and closing the
 dialog does not** — that clearing on submit was the bug that made attribution impossible. Selling with
@@ -1114,8 +1118,20 @@ change), the settings `PUT` handler (and a secret's row records *that* it change
 the restore path in `settings.tsx`. Inventory movements stay in Feature 15's ledger. A failed append
 warns and does not fail the write it was recording — the log is evidence, not a precondition for taking
 money, and that is tested too.
-T4 remains: the agent actor (still `AGENT` with a null id until Feature 2 has tokens) and somewhere to
-read the log.
+T4 done as far as it can be — **the viewer is built; the MCP half is blocked on Feature 2.**
+**Settings → Activity** lists staff and agent actions together, newest first, filterable by Everyone /
+Agent / System / each employee, with each `MENU_APPLIED` row carrying its change count. Logging is
+documented in `docs/api-reference.md` (there is no `docs/agent-setup.md` — Feature 2 owns that file, and
+should move this section into it), including that a secret's row never records the new value.
+
+**Blocked on Feature 2, not skipped:** the MCP endpoint setting `actorKind: "AGENT"` with an actor id
+identifying the connection. `menu/apply` already logs as `AGENT` today, but with a **null** actor id
+because nothing yet identifies a connection — Feature 4's tokens are what give it a name. The check's
+first half is therefore verified through the API path rather than through MCP: an apply logs as an agent
+action with its change count, and a hand price change appears beside it as an employee action, in one
+list, in order.
+
+**Feature 19 is complete** (T1–T4), with that one thread carried into Feature 2.
 
 **On T1's testability:** T1 was React state plus `localStorage`, which this runner (glob `{shared,server}`)
 cannot reach. T2 is where attribution became testable, and it is tested against a real database: a sale

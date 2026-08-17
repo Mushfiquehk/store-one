@@ -13,7 +13,7 @@ import { useState, useEffect, useCallback } from "react";
 import {
   Settings, Percent, CloudUpload, CloudDownload, Database, CheckCircle2,
   XCircle, Loader2, RefreshCw, Package, Warehouse, ShoppingCart, Clock, Timer, FileText,
-  CalendarClock, Mail, Save,
+  CalendarClock, Mail, Save, History,
 } from "lucide-react";
 import InteractiveSyncUI from "@/components/interactive-sync";
 import { useToast } from "@/hooks/use-toast";
@@ -36,6 +36,7 @@ import {
   DEFAULT_TAX_RATE_PCT, DEFAULT_TENDER_METHODS, TAX_INCLUSIVE_KEY, TAX_RATE_KEY, TENDER_METHODS_KEY,
   taxRatePct, tenderMethods, type SyncCategory,
 } from "@shared/schema";
+import type { ActionLogEntry } from "@shared/action-log";
 
 type SyncStatus = "idle" | "syncing" | "success" | "error";
 
@@ -89,7 +90,7 @@ const PROVIDER_PRESETS: Record<string, Partial<EmailConfig>> = {
 
 export default function SettingsPage() {
   const { toast } = useToast();
-  const { logAction } = useStore();
+  const { logAction, getActionLog, employees } = useStore();
   // Zero until the operator says otherwise: an unconfigured rate must look unconfigured.
   const [taxRate, setTaxRate] = useState(DEFAULT_TAX_RATE_PCT);
   const [taxSaving, setTaxSaving] = useState(false);
@@ -473,6 +474,27 @@ export default function SettingsPage() {
     return new Date(timestamp).toLocaleString();
   };
 
+  // The one list pillar #6's autopsy reads: staff actions and agent actions in order, together.
+  // A separate agent log would make "what happened Tuesday" a join done in the operator's head.
+  const [activity, setActivity] = useState<ActionLogEntry[]>([]);
+  const [actorFilter, setActorFilter] = useState<string>("all");
+
+  useEffect(() => {
+    getActionLog(200).then(setActivity).catch(() => {});
+  }, [getActionLog, restoreStatus, taxSaving, emailSaving]);
+
+  const actorLabel = (entry: ActionLogEntry) => {
+    if (entry.actorKind === "AGENT") return "Agent";
+    if (entry.actorKind === "SYSTEM") return "System";
+    return employees.find(e => e.id === entry.actorId)?.name ?? "Unattributed";
+  };
+
+  const visibleActivity = activity.filter(entry => {
+    if (actorFilter === "all") return true;
+    if (actorFilter === "AGENT" || actorFilter === "SYSTEM") return entry.actorKind === actorFilter;
+    return entry.actorId === actorFilter;
+  });
+
   const isBusy = backupStatus === "loading" || restoreStatus === "loading" ||
     Object.values(categoryStates).some(s => s.status === "syncing");
 
@@ -480,6 +502,58 @@ export default function SettingsPage() {
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
       <AppShell title="Settings">
         <div className="max-w-2xl mx-auto space-y-6">
+          <Card className="border shadow-soft rounded-2xl overflow-hidden">
+            <CardHeader className="bg-muted/20 pb-4">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-lg bg-primary/10 text-primary">
+                    <History className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <CardTitle className="font-serif">Activity</CardTitle>
+                    <CardDescription>
+                      What was changed, by whom — staff and agents in one list, newest first.
+                    </CardDescription>
+                  </div>
+                </div>
+                <Select value={actorFilter} onValueChange={setActorFilter}>
+                  <SelectTrigger className="w-[160px] rounded-xl" data-testid="select-activity-actor">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Everyone</SelectItem>
+                    <SelectItem value="AGENT">Agent</SelectItem>
+                    <SelectItem value="SYSTEM">System</SelectItem>
+                    {employees.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-6">
+              {visibleActivity.length === 0 ? (
+                <p className="text-sm text-muted-foreground" data-testid="text-no-activity">
+                  Nothing recorded yet. Price changes, menu applies, setting changes and restores appear here.
+                </p>
+              ) : (
+                <div className="max-h-[360px] overflow-auto space-y-2">
+                  {visibleActivity.map(entry => (
+                    <div key={entry.id} className="rounded-xl border p-3 text-sm" data-testid={`row-activity-${entry.id}`}>
+                      <div className="flex items-start justify-between gap-3">
+                        <span className="font-medium">{entry.summary}</span>
+                        <span className="whitespace-nowrap text-xs text-muted-foreground">
+                          {new Date(entry.at).toLocaleString()}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {actorLabel(entry)} · {entry.action.toLowerCase().replace(/_/g, " ")}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           <Card className="border shadow-soft rounded-2xl overflow-hidden">
             <CardHeader className="bg-muted/20 pb-4">
               <div className="flex items-center gap-2">

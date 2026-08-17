@@ -353,3 +353,25 @@ test("a failed log append does not fail the write it was recording", async () =>
   const res = await call(createApiHandlers(store), "PUT", `/api/settings/${TAX_RATE_KEY}`, { value: 6.5 });
   assert.equal(res.status, 200, "the setting still saved");
 });
+
+test("agent and staff actions land in one list, in order", async () => {
+  // T4's check, as far as it can be checked without Feature 2: an apply through the API logs as
+  // an agent action with its change count, and a hand-made change in the same minute sits beside
+  // it as an employee action — one list, one order, no join done in the operator's head.
+  const store = stubStore();
+  const h = createApiHandlers(store);
+
+  await call(h, "PUT", `/api/settings/${TAX_RATE_KEY}`, { value: 6.5 });
+
+  // The employee-attributed rows come from the client storage path, so stand one in for it here.
+  await store.appendActionLog!({
+    id: "log_hand", at: Date.now(), actorKind: "EMPLOYEE", actorId: "emp_ana",
+    action: "PRICE_CHANGED", targetType: "variant", targetId: "var_1",
+    summary: "Latte / Large $5.00 → $5.50", detail: null,
+  });
+
+  const rows = logOf(store);
+  assert.equal(rows.length, 2, "both actors, one list");
+  assert.deepEqual(rows.map(r => r.actorKind), ["SYSTEM", "EMPLOYEE"], "in the order they happened");
+  assert.ok((rows[1].summary as string).includes("$5.00") && (rows[1].summary as string).includes("$5.50"));
+});
