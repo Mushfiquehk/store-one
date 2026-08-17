@@ -15,7 +15,10 @@ import ModifierSelector, { type SelectedModifier } from "@/components/modifier-s
 import OrderReceipts from "@/components/order-receipts";
 import { format } from "date-fns";
 import type { Combo } from "@/lib/db";
-import { DEFAULT_TENDER_METHODS, TENDER_METHODS_KEY, changeDueCents, tenderMethods, tenderSuggestions } from "@shared/schema";
+import {
+  DEFAULT_TAX_RATE_PCT, DEFAULT_TENDER_METHODS, TAX_RATE_KEY, TENDER_METHODS_KEY,
+  changeDueCents, taxCentsFor, taxRatePct, tenderMethods, tenderSuggestions,
+} from "@shared/schema";
 import { computeInventoryDeductions } from "@shared/depletion";
 
 function formatMoney(cents: number) {
@@ -37,7 +40,8 @@ export default function PosPage() {
     combos, comboItems, productGroups, productGroupItems,
   } = useStore();
 
-  const [taxRatePct, setTaxRatePct] = useState(8.25);
+  // The operator's rate, not a constant wearing a state hook. Zero until one is set.
+  const [taxRate, setTaxRate] = useState(DEFAULT_TAX_RATE_PCT);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [appliedCombos, setAppliedCombos] = useState<Map<string, string>>(new Map());
   const [dismissedCombos, setDismissedCombos] = useState<Set<string>>(new Set());
@@ -52,6 +56,10 @@ export default function PosPage() {
     fetch(`/api/settings/${TENDER_METHODS_KEY}`)
       .then(r => r.json())
       .then(d => setAcceptedMethods(tenderMethods(d.value)))
+      .catch(() => {});
+    fetch(`/api/settings/${TAX_RATE_KEY}`)
+      .then(r => r.json())
+      .then(d => setTaxRate(taxRatePct(d.value)))
       .catch(() => {});
   }, []);
 
@@ -346,7 +354,7 @@ export default function PosPage() {
   }, 0);
 
   const subtotalCents = Math.max(0, subtotalCentsBeforeCombo - totalComboDiscount);
-  const taxCents = Math.round((subtotalCents * taxRatePct) / 100);
+  const taxCents = taxCentsFor(subtotalCents, taxRate);
   const totalCents = subtotalCents + taxCents;
 
   // A non-cash sale tenders exactly the total: the day's cash expectation is a sum over
@@ -790,7 +798,7 @@ export default function PosPage() {
                           </div>
                         )}
                         <div className="flex justify-between text-muted-foreground">
-                          <span>Tax ({taxRatePct}%)</span>
+                          <span>Tax ({taxRate}%)</span>
                           <span>{formatMoney(taxCents)}</span>
                         </div>
                         <Separator className="my-2" />

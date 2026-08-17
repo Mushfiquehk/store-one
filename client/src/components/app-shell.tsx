@@ -48,7 +48,6 @@ export default function AppShell({
   children: React.ReactNode;
 }) {
   const [location, setLocation] = useLocation();
-  const [taxRate, setTaxRate] = useState(8.25);
   const { toast } = useToast();
   const { employees, timePunches, addTimePunch, updateTimePunch } = useStore();
   
