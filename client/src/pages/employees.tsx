@@ -20,6 +20,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { useStore, type Employee } from "@/lib/store";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { centsToDollarsInput, parseDollarsToCents } from "@shared/money";
 import { motion } from "framer-motion";
 
 function uid(prefix: string) {
@@ -37,10 +38,13 @@ export default function EmployeesPage() {
   const [formData, setFormData] = useState<Partial<Employee>>({
     name: "",
     role: "staff",
-    payRate: 0,
     pin: "",
     email: ""
   });
+  // Edited in dollars, stored in cents. Kept as the typed string so "18.5" does not
+  // reformat itself under the operator's cursor mid-entry.
+  const [payRateInput, setPayRateInput] = useState("");
+  const [unpaid, setUnpaid] = useState(false);
 
   const filteredEmployees = employees.filter(e =>
     e.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -50,9 +54,16 @@ export default function EmployeesPage() {
     if (employee) {
       setEditingEmployee(employee);
       setFormData({ ...employee });
+      // Existing rows keep whatever they have; an unpaid row is one an operator chose.
+      setPayRateInput(centsToDollarsInput(employee.payRate));
+      setUnpaid(employee.payRate === 0);
     } else {
       setEditingEmployee(null);
-      setFormData({ name: "", role: "staff", payRate: 1500, pin: "", email: "" });
+      // No default wage. Inventing a plausible $15.00 is how every employee in the app
+      // came to be silently paid a rate nobody chose.
+      setFormData({ name: "", role: "staff", pin: "", email: "" });
+      setPayRateInput("");
+      setUnpaid(false);
     }
     setIsDialogOpen(true);
   };
@@ -63,15 +74,27 @@ export default function EmployeesPage() {
       return;
     }
 
+    // A wage is either stated or explicitly unpaid. Labour cost is the second-biggest
+    // number in the business; a guess here is worse than a refusal to save.
+    const payRate = unpaid ? 0 : parseDollarsToCents(payRateInput);
+    if (payRate == null) {
+      toast({
+        title: "Pay rate required",
+        description: "Enter an hourly rate, or mark this person unpaid.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (editingEmployee) {
-      updateEmployee(editingEmployee.id, formData);
+      updateEmployee(editingEmployee.id, { ...formData, payRate });
       toast({ title: "Success", description: "Employee updated successfully." });
     } else {
       addEmployee({
         id: uid("emp"),
         name: formData.name!,
         role: formData.role || "staff",
-        payRate: formData.payRate || 0,
+        payRate,
         pin: formData.pin!,
         email: formData.email || ""
       });
@@ -119,6 +142,7 @@ export default function EmployeesPage() {
                   <TableRow className="hover:bg-transparent">
                     <TableHead>Name</TableHead>
                     <TableHead>Role</TableHead>
+                    <TableHead className="text-right">Pay rate</TableHead>
                     <TableHead className="text-center">PIN</TableHead>
                     <TableHead className="w-[50px]"></TableHead>
                   </TableRow>
@@ -142,6 +166,12 @@ export default function EmployeesPage() {
                           {employee.role === 'manager' && <ShieldCheck className="w-3 h-3 mr-1" />}
                           {employee.role.charAt(0).toUpperCase() + employee.role.slice(1)}
                         </span>
+                      </TableCell>
+                      {/* On screen, because a wage nobody can see is a wage nobody checks. */}
+                      <TableCell className="text-right font-mono text-sm">
+                        {employee.payRate === 0
+                          ? <span className="text-muted-foreground">Unpaid</span>
+                          : `$${centsToDollarsInput(employee.payRate)}/hr`}
                       </TableCell>
                       <TableCell className="text-center">
                         <div className="inline-flex items-center gap-1 px-2 py-1 rounded bg-muted/50 text-xs font-mono text-muted-foreground">
@@ -198,6 +228,34 @@ export default function EmployeesPage() {
                     <SelectItem value="manager">Manager</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="payRate" className="text-right">Pay rate</Label>
+                <div className="col-span-3 flex items-center gap-2">
+                  <span className="text-muted-foreground">$</span>
+                  <Input
+                    id="payRate"
+                    inputMode="decimal"
+                    value={unpaid ? "" : payRateInput}
+                    disabled={unpaid}
+                    onChange={e => setPayRateInput(e.target.value)}
+                    placeholder="18.50"
+                    data-testid="input-employee-pay-rate"
+                  />
+                  <span className="whitespace-nowrap text-sm text-muted-foreground">per hour</span>
+                </div>
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <span />
+                <label className="col-span-3 flex items-center gap-2 text-sm text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={unpaid}
+                    onChange={e => setUnpaid(e.target.checked)}
+                    data-testid="checkbox-employee-unpaid"
+                  />
+                  Unpaid (owner, volunteer) — labour cost counts them at zero
+                </label>
               </div>
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="email" className="text-right">Email</Label>

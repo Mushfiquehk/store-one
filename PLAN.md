@@ -1666,8 +1666,19 @@ unexplained.
 
 ## Feature 14 — Labour: the second-biggest number, and nobody can even type a wage
 
-**Status:** planned. (The note that stood here described Feature 11 T1, not this feature — it has
-moved to Feature 11, which is now done.)
+**Status:** T1 done — the employee dialog has a **pay rate per hour** field, edited in dollars and
+stored in cents through `shared/money.ts` (`parseDollarsToCents` / `centsToDollarsInput`, tested). The
+hardcoded `1500` is gone: a new employee cannot be saved without either a rate or an explicit
+**Unpaid** tick, and the rate is shown in the employee table so a wage nobody set is visible rather
+than assumed. Existing rows are not backfilled. T2–T4 remain.
+
+**Seam for T2:** `Employee.payRate` is a non-null number, so `0` is the only way to say "unpaid" *and*
+the value an old row with no rate already has — T1 reads `0` as a deliberate "Unpaid". If labour
+reporting needs to tell "chose zero" from "never set", `payRate` has to become nullable; that is a
+schema change T2 should decide, not something to guess at here.
+
+(The note that stood here described Feature 11 T1, not this feature — it has moved to Feature 11,
+which is now done.)
 **Vision pillar:** #1 — "the best foundation". Feature 10 is the growth feature; this is the feature
 that makes Feature 10's numbers true.
 **Blocks:** Feature 10 (do this first, or ship a margin report that is confidently wrong)
