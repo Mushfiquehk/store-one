@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { costVariant, marginPct, menuMargins, sumIngredientCosts } from "./pricing";
+import { costVariant, marginPct, menuMargins, sumIngredientCosts, taxOnCart } from "./pricing";
 import type { CostingData, MarginData } from "./pricing";
 
 // A latte: two ingredients through the variant's own recipe, one of them via a
@@ -160,4 +160,48 @@ test("a variant with no recipe at all is unknown, not a 100% margin", () => {
   assert.equal(large.marginPct, null);
   assert.equal(large.contributionCents, 0);
   assert.notEqual(rows[0].variantId, "v_latte_l", "and it does not lead the report");
+});
+
+
+test("an exempt line is not in the tax base", () => {
+  // The plan's check: $10 taxable plus $10 exempt at 10% is one dollar of tax, not two.
+  const tax = taxOnCart([
+    { amountCents: 1000, exempt: false },
+    { amountCents: 1000, exempt: true },
+  ], 10);
+
+  assert.equal(tax.taxCents, 100);
+  assert.equal(tax.taxableCents, 1000);
+  assert.equal(tax.exemptCents, 1000, "and the receipt can say what was excluded");
+});
+
+test("a discount reduces the taxable base rather than being taxed through", () => {
+  // $20 cart, half of it exempt, $4 off: the taxable half drops to $8, so 10% is 80 cents.
+  const tax = taxOnCart([
+    { amountCents: 1000, exempt: false },
+    { amountCents: 1000, exempt: true },
+  ], 10, 400);
+
+  assert.equal(tax.taxableCents, 800);
+  assert.equal(tax.taxCents, 80, "not 100, which is tax on the pre-discount total");
+});
+
+test("an all-exempt cart is charged nothing, whatever the rate", () => {
+  const tax = taxOnCart([{ amountCents: 5000, exempt: true }], 8.25);
+  assert.deepEqual(tax, { taxCents: 0, taxableCents: 0, exemptCents: 5000 });
+});
+
+test("an empty cart and an over-large discount do not produce negative tax", () => {
+  assert.deepEqual(taxOnCart([], 10), { taxCents: 0, taxableCents: 0, exemptCents: 0 });
+  const overDiscounted = taxOnCart([{ amountCents: 1000, exempt: false }], 10, 5000);
+  assert.equal(overDiscounted.taxCents, 0);
+  assert.equal(overDiscounted.taxableCents, 0);
+});
+
+test("with nothing exempt, the base is the whole discounted cart", () => {
+  // The behaviour every existing row keeps: absent tax_exempt means taxable.
+  const tax = taxOnCart([{ amountCents: 1000, exempt: false }, { amountCents: 500, exempt: false }], 8.25, 150);
+  assert.equal(tax.taxableCents, 1350);
+  assert.equal(tax.taxCents, 111);
+  assert.equal(tax.exemptCents, 0);
 });

@@ -9,6 +9,7 @@
  * quantities are in, so a line cost is a plain multiplication.
  */
 import { computeInventoryDeductions, type DepletionData } from "./depletion";
+import { taxCentsFor } from "./schema";
 
 export type CostedIngredient = {
   name: string;
@@ -162,4 +163,44 @@ export function menuMargins(
     if (pctA !== pctB) return pctA - pctB;
     return b.quantity - a.quantity;
   });
+}
+
+export type TaxLine = {
+  /** What this line actually costs the customer, after any per-line pricing. */
+  amountCents: number;
+  /** True for a line no tax applies to — groceries, gift cards, whatever the operator marks. */
+  exempt: boolean;
+};
+
+export type CartTax = {
+  taxCents: number;
+  /** The base tax was actually charged on, after discounts. */
+  taxableCents: number;
+  /** What was excluded, so a receipt or a report can show it rather than implying it was taxed. */
+  exemptCents: number;
+};
+
+/**
+ * Tax for a cart, in one place.
+ *
+ * Two rules worth stating because getting either wrong is a liability:
+ *
+ * 1. **Only taxable lines are in the base.** One taxable $10 item and one exempt $10 item at
+ *    10% is $1.00 of tax, not $2.00.
+ * 2. **A discount reduces the taxable base proportionally.** Tax applies to what the customer
+ *    pays, so a cart discount comes off the taxable share too — not off the exempt lines
+ *    alone, and not after tax. Feature 5 T3 owns the order of operations; this follows it.
+ */
+export function taxOnCart(lines: TaxLine[], ratePct: number, discountCents = 0): CartTax {
+  const grossCents = lines.reduce((total, line) => total + line.amountCents, 0);
+  const taxableGross = lines.reduce((total, line) => total + (line.exempt ? 0 : line.amountCents), 0);
+  const exemptCents = grossCents - taxableGross;
+
+  if (grossCents <= 0) return { taxCents: 0, taxableCents: 0, exemptCents: 0 };
+
+  // The discount is spread across the whole cart, so the taxable share of it is proportional.
+  const afterDiscount = Math.max(0, grossCents - discountCents);
+  const taxableCents = Math.round(taxableGross * (afterDiscount / grossCents));
+
+  return { taxCents: taxCentsFor(taxableCents, ratePct), taxableCents, exemptCents };
 }
