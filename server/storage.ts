@@ -10,7 +10,7 @@ import type { Client, Backup, SyncRecord } from "./schema";
 import type { StoreSetting } from "../shared/api-handlers";
 import { eq, desc, sql, and, gt, inArray, isNull, count } from "drizzle-orm";
 import { costPerStockUnit } from "../shared/units";
-import { sameDeletedState, sameSyncedFields } from "../shared/sync-compare";
+import { resolveByRecency, resolveConflict } from "../shared/sync-compare";
 
 export interface ListOptions {
   limit?: number;
@@ -276,12 +276,15 @@ export const storage: IStorage = {
           const adminDeletedAt = (adminRecord.deletedAt as number) || null;
           const adminData = { ...adminRecord };
 
-          // Value comparison over the fields sync owns. The string comparison this replaces
-          // could essentially never be equal — see shared/sync-compare.ts — so every menu
-          // record was pushed back to every client on every sync.
-          const dataMatches =
-            sameSyncedFields(change.tableName, change.data, adminData) &&
-            sameDeletedState(change.deletedAt, adminDeletedAt);
+          // The policy, by name rather than by control flow: admin owns these tables and
+          // wins even against a newer device edit, and agreement is not a conflict at all.
+          // See shared/sync-compare.ts for the rule and the reason.
+          const resolution = resolveConflict(
+            change.tableName,
+            { data: change.data, updatedAt: change.updatedAt, deletedAt: change.deletedAt },
+            { data: adminData, updatedAt: adminUpdatedAt, deletedAt: adminDeletedAt },
+          );
+          const dataMatches = resolution.winner === "equal";
 
           if (!dataMatches) {
             await db
@@ -358,7 +361,8 @@ export const storage: IStorage = {
         });
       } else {
         const serverRecord = existing[0];
-        if (change.updatedAt >= serverRecord.updatedAt) {
+        // No admin counterpart: last write wins on updatedAt, stated rather than implied.
+        if (resolveByRecency(change, serverRecord).winner === "pos") {
           await db
             .update(syncRecords)
             .set({

@@ -76,3 +76,74 @@ export function sameSyncedFields(
 export function sameDeletedState(pos: unknown, admin: unknown): boolean {
   return (pos ?? null) === null ? (admin ?? null) === null : (admin ?? null) !== null;
 }
+
+/**
+ * The conflict policy, written down.
+ *
+ * It used to live only in the shape of an `if`: `adminUpdatedAt` was read out of the row,
+ * written into `syncRecords`, and never compared to anything, so admin won unconditionally
+ * and silently. That may be the right rule — it is certainly the intended one — but a
+ * policy that exists only as control flow is a policy that gets reversed by accident during
+ * the next refactor.
+ */
+export const ADMIN_OWNED_TABLES = [
+  "products", "variants", "modifierGroups", "productModifierGroups",
+  "modifiers", "inventoryItems", "billOfMaterials",
+  "invoices", "invoiceLineItems",
+] as const;
+
+/**
+ * True for the tables the admin console owns. The menu, the recipes and the supplier
+ * invoices are authored in the back office; a POS device consumes them and does not get to
+ * edit them out from under it. Sales, by contrast, are authored on the device.
+ */
+export function isAdminOwned(tableName: string): boolean {
+  return (ADMIN_OWNED_TABLES as readonly string[]).includes(tableName);
+}
+
+export type Resolution = {
+  winner: "admin" | "pos" | "equal";
+  /** Why — carried so a log line or a test can state the rule, not just the outcome. */
+  reason: string;
+};
+
+export type SyncSide = {
+  data?: Record<string, unknown> | null;
+  updatedAt?: number | null;
+  deletedAt?: number | null;
+};
+
+/**
+ * Who wins for a record that has an admin counterpart.
+ *
+ * **Admin wins even when the POS edit is newer**, deliberately: the back office is the
+ * source of truth for these tables, and a device that disagrees is out of date rather than
+ * ahead. The one thing that is *not* a conflict is agreement — if the fields sync owns
+ * already match, nothing needs pushing, which is the whole of Feature 8's convergence.
+ */
+export function resolveConflict(tableName: string, pos: SyncSide, admin: SyncSide | null): Resolution {
+  if (!admin) {
+    return { winner: "pos", reason: "no admin record for this row; the device's copy is all there is" };
+  }
+  if (sameSyncedFields(tableName, pos.data, admin.data) && sameDeletedState(pos.deletedAt, admin.deletedAt)) {
+    return { winner: "equal", reason: "every field sync owns already agrees" };
+  }
+  if (isAdminOwned(tableName)) {
+    return { winner: "admin", reason: "the admin console owns this table; devices consume it" };
+  }
+  return resolveByRecency(pos, admin);
+}
+
+/**
+ * The fallback for tables with no admin counterpart: last write wins on `updatedAt`.
+ *
+ * Ties go to the incoming record, which is what the existing `>=` did — a device that
+ * re-pushes an identical timestamp is not in conflict with itself.
+ */
+export function resolveByRecency(pos: SyncSide, other: SyncSide): Resolution {
+  const posAt = pos.updatedAt ?? 0;
+  const otherAt = other.updatedAt ?? 0;
+  return posAt >= otherAt
+    ? { winner: "pos", reason: `device edit is newer or equal (${posAt} >= ${otherAt})` }
+    : { winner: "admin", reason: `stored record is newer (${otherAt} > ${posAt})` };
+}

@@ -2485,7 +2485,15 @@ restore asks first, and a store that has not been backed up in weeks says so.
 (`shared/sync-compare.ts`): an explicit per-table field list, with `undefined` and `null` treated as
 equal and nested objects compared by value rather than by key order. Server-only columns are outside
 the list, so `createdAt` — and `locationId` when Feature 3 lands — can never register as a difference.
-T2–T4 remain.
+T2 done — `resolveConflict(tableName, pos, admin)` and `resolveByRecency` in `shared/sync-compare.ts`
+carry the policy by name, each returning a winner **and a reason**. Admin wins for the admin-owned
+tables even against a newer device edit (stated, with the why: the back office authors the menu,
+devices consume it); tables with no admin counterpart are last-write-wins on `updatedAt`, ties to the
+incoming record, as the old `>=` already did. `ADMIN_OWNED_TABLES` is now one list shared by the server
+and `client/src/lib/sync.ts`, which had its own copy. The `updatedAt` fallback is fixed: a record with
+no timestamp reads as `0` — the oldest thing in the system — rather than `Date.now()`, which made it
+win every comparison it entered.
+T3–T4 remain.
 
 **Confirmation, and one correction to the analysis above.** A live sync could not be run here (no
 Postgres in this environment), so the failure is reproduced deterministically in

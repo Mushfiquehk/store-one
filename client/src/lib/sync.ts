@@ -1,5 +1,6 @@
 import { db } from "./db";
 import type { SyncCategory } from "@shared/schema";
+import { ADMIN_OWNED_TABLES } from "@shared/sync-compare";
 import { SYNC_CATEGORY_TABLES } from "@shared/schema";
 
 interface SyncChange {
@@ -16,11 +17,9 @@ interface SyncResult {
   syncedAt: number;
 }
 
-const ADMIN_AUTHORITATIVE_TABLES = new Set([
-  "products", "variants", "modifierGroups", "productModifierGroups",
-  "modifiers", "inventoryItems", "billOfMaterials",
-  "invoices", "invoiceLineItems",
-]);
+// The policy lives in shared/sync-compare.ts, so the client and the server cannot drift
+// into disagreeing about who owns what.
+const ADMIN_AUTHORITATIVE_TABLES = new Set<string>(ADMIN_OWNED_TABLES);
 
 const SYNC_STATE_PREFIX = "cornerpos_sync_";
 
@@ -98,7 +97,9 @@ async function collectChanges(category: SyncCategory, lastSyncedAt: number): Pro
         tableName,
         recordId: getRecordId(tableName, record),
         data: record,
-        updatedAt: (record.updatedAt as number) || Date.now(),
+        // A record with no updatedAt is the *oldest* thing in the system, not the newest.
+        // Stamping it `now` made it win every last-write-wins comparison it entered.
+        updatedAt: typeof record.updatedAt === "number" ? record.updatedAt : 0,
         deletedAt: (record.deletedAt as number) || null,
       });
     }
