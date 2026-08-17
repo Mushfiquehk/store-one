@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ALL_CATEGORY, UNCATEGORISED, categoryOf, menuCategories, productsInCategory, renameCategory } from "./menu-grid";
+import {
+  ALL_CATEGORY, UNCATEGORISED, categoryOf, menuCategories, productsInCategory, renameCategory,
+  reorderProducts, sortProducts,
+} from "./menu-grid";
 
 const latte = { name: "Latte", attributes: { tags: ["espresso"] } };
 const bun = { name: "Bun", attributes: { tags: ["bakery"] } };
@@ -102,4 +105,67 @@ test("renaming to a blank or unchanged name does nothing", () => {
   const products = [{ id: "p1", name: "Latte", category: "Drinks" }];
   assert.deepEqual(renameCategory(["Drinks"], products, "Drinks", "  ").productIds, []);
   assert.deepEqual(renameCategory(["Drinks"], products, "Drinks", "Drinks").categories, ["Drinks"]);
+});
+
+const arranged = [
+  { id: "p1", name: "Latte", category: "Drinks", sortOrder: 0 },
+  { id: "p2", name: "Tea", category: "Drinks", sortOrder: 1 },
+  { id: "p3", name: "Mocha", category: "Drinks", sortOrder: 2 },
+];
+
+test("the grid shows the arrangement, not alphabetical order", () => {
+  assert.deepEqual(sortProducts(arranged).map(p => p.id), ["p1", "p2", "p3"]);
+  const shuffled = [arranged[2], arranged[0], arranged[1]];
+  assert.deepEqual(sortProducts(shuffled).map(p => p.id), ["p1", "p2", "p3"]);
+});
+
+test("a newly added product lands at the end, not in the middle", () => {
+  // The plan's check. A product nobody has positioned has no sortOrder, and inserting it
+  // anywhere but the end would rearrange a layout the operator built.
+  const withNew = [...arranged, { id: "p4", name: "Americano", category: "Drinks" }];
+  assert.deepEqual(sortProducts(withNew).map(p => p.id), ["p1", "p2", "p3", "p4"]);
+});
+
+test("reordering writes only the rows that moved", () => {
+  // Drag Mocha to the front: all three shift, so all three are written.
+  const toFront = reorderProducts(arranged, "p3", "p1");
+  assert.deepEqual(toFront, [
+    { id: "p3", sortOrder: 0 },
+    { id: "p1", sortOrder: 1 },
+    { id: "p2", sortOrder: 2 },
+  ]);
+
+  // Swap the last two: the first product does not move, so it is not rewritten.
+  assert.deepEqual(reorderProducts(arranged, "p3", "p2"), [
+    { id: "p3", sortOrder: 1 },
+    { id: "p2", sortOrder: 2 },
+  ]);
+});
+
+test("the arrangement survives being applied and read back", () => {
+  const moves = reorderProducts(arranged, "p3", "p1");
+  const applied = arranged.map(p => {
+    const move = moves.find(m => m.id === p.id);
+    return move ? { ...p, sortOrder: move.sortOrder } : p;
+  });
+  assert.deepEqual(sortProducts(applied).map(p => p.id), ["p3", "p1", "p2"], "reload shows the new order");
+});
+
+test("dropping a product on itself, or on something that is not there, changes nothing", () => {
+  assert.deepEqual(reorderProducts(arranged, "p1", "p1"), []);
+  assert.deepEqual(reorderProducts(arranged, "p1", "ghost"), []);
+  assert.deepEqual(reorderProducts(arranged, "ghost", "p1"), []);
+});
+
+test("positions stay contiguous after several moves, so ties cannot creep in", () => {
+  let products = [...arranged, { id: "p4", name: "Americano", category: "Drinks", sortOrder: 3 }];
+  for (const [moved, target] of [["p4", "p1"], ["p2", "p4"], ["p3", "p1"]] as const) {
+    const moves = reorderProducts(products, moved, target);
+    products = products.map(p => {
+      const move = moves.find(m => m.id === p.id);
+      return move ? { ...p, sortOrder: move.sortOrder } : p;
+    });
+  }
+  const orders = sortProducts(products).map(p => p.sortOrder);
+  assert.deepEqual(orders, [0, 1, 2, 3], "still 0..n with no duplicates");
 });

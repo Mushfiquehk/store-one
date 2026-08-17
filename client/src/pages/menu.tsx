@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { ClipboardList, Plus, Filter, Tag, Trash2, X, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
+import { ClipboardList, Plus, Filter, Tag, Trash2, X, ArrowUp, ArrowDown, ArrowUpDown, GripVertical } from "lucide-react";
 import AppShell from "@/components/app-shell";
 import ProductWizard from "@/components/product-wizard";
+import { reorderProducts, sortProducts } from "@shared/menu-grid";
 import ProductEditor from "@/components/product-editor";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,7 +14,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { useStore, type Product } from "@/lib/store";
 
-type SortKey = "name" | "type" | "sku" | "tags" | "price";
+// "arrangement" is the operator's dragged order and the default: sorting by a column is a
+// temporary view, while the arrangement is what the till actually shows.
+type SortKey = "arrangement" | "name" | "type" | "sku" | "tags" | "price";
 type SortDir = "asc" | "desc";
 
 function formatMoney(cents: number) {
@@ -32,7 +35,7 @@ export default function MenuPage({ isTab = false }: { isTab?: boolean }) {
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
 
-  const [sortKey, setSortKey] = useState<SortKey>("name");
+  const [sortKey, setSortKey] = useState<SortKey>("arrangement");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
   function toggleSort(key: SortKey) {
@@ -51,6 +54,35 @@ export default function MenuPage({ isTab = false }: { isTab?: boolean }) {
       : <ArrowDown className="h-3 w-3 ml-1" />;
   }
 
+  // ponytail: pointer events and elementFromPoint, the same pattern schedule.tsx uses — HTML5
+  // dataTransfer never fires on touch, and an iPad is the device this runs on.
+  const [dragging, setDragging] = useState<{ id: string } | null>(null);
+
+  const dropOnRow = useCallback((movedId: string, clientX: number, clientY: number) => {
+    const row = document.elementFromPoint(clientX, clientY)?.closest("[data-product-row]") as HTMLElement | null;
+    const targetId = row?.dataset.productRow;
+    if (!targetId) return;
+    // Persisted on drop, not on a save button: a layout editor with an unsaved state is a
+    // layout an operator loses.
+    for (const move of reorderProducts(products, movedId, targetId)) {
+      updateProduct(move.id, { sortOrder: move.sortOrder });
+    }
+  }, [products, updateProduct]);
+
+  useEffect(() => {
+    if (!dragging) return;
+    const up = (e: PointerEvent) => {
+      dropOnRow(dragging.id, e.clientX, e.clientY);
+      setDragging(null);
+    };
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => {
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+  }, [dragging, dropOnRow]);
+
   const filteredProducts = useMemo(() => {
     if (filterType === "all") return products;
     return products.filter(p => p.type === filterType);
@@ -64,6 +96,14 @@ export default function MenuPage({ isTab = false }: { isTab?: boolean }) {
       variants: variants.filter(v => v.productId === p.id).sort((a, b) => a.name.localeCompare(b.name)),
       tags: p.attributes?.tags || [],
     }));
+
+    // The arrangement is not a comparator over one field, so it is applied whole.
+    if (sortKey === "arrangement") {
+      const ordered = sortProducts(filteredProducts);
+      const position = new Map(ordered.map((p, i) => [p.id, i]));
+      groups.sort((a, b) => (position.get(a.product.id) ?? 0) - (position.get(b.product.id) ?? 0));
+      return sortDir === "asc" ? groups : groups.reverse();
+    }
 
     groups.sort((a, b) => {
       let cmp = 0;
@@ -219,6 +259,7 @@ export default function MenuPage({ isTab = false }: { isTab?: boolean }) {
                       return (
                         <TableRow
                           key={p.id}
+                          data-product-row={p.id}
                           className={selected ? "bg-primary/5 cursor-pointer hover:bg-primary/10 transition-colors" : "cursor-pointer hover:bg-muted/50 transition-colors"}
                           onClick={() => {
                             setSelectedProductId(p.id);
@@ -227,6 +268,22 @@ export default function MenuPage({ isTab = false }: { isTab?: boolean }) {
                           data-testid={`row-menu-${p.id}`}
                         >
                           <TableCell className="font-medium" data-testid={`text-menu-row-name-${p.id}`}>
+                            {sortKey === "arrangement" && (
+                              <button
+                                type="button"
+                                className="mr-2 cursor-grab align-middle text-muted-foreground hover:text-foreground"
+                                title="Drag to reorder on the till"
+                                onClick={e => e.stopPropagation()}
+                                onPointerDown={e => {
+                                  e.stopPropagation();
+                                  e.preventDefault();
+                                  setDragging({ id: p.id });
+                                }}
+                                data-testid={`drag-menu-${p.id}`}
+                              >
+                                <GripVertical className="h-4 w-4" />
+                              </button>
+                            )}
                             <span className="text-primary hover:underline">{p.name}</span>
                             {p.isComposite && (
                               <Badge variant="outline" className="ml-2 text-[10px]">Prepared</Badge>

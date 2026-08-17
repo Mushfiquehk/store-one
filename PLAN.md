@@ -269,8 +269,15 @@ rather than a `Set` over products, an empty configured category still shows, and
 category the list has not been told about is appended rather than hidden. `renameCategory` returns the
 new list **and** the product ids to rewrite, in one function, so a rename cannot empty a category and
 orphan its products. `categoryOf` falls back to the first tag, which is what makes the migration free.
-T3–T4 remain — including the operator-facing reorder/rename UI: T2 ships the model, the till's use of
-it, and the rename primitive, but the only way to reorder today is a `PUT /api/settings/menu.categories`.
+T3 done — products carry `sortOrder` (all three schemas; Dexie v15 seeds it from the order rows already
+came back in, so an upgrade preserves what the operator was looking at). `sortProducts` puts unpositioned
+products last, so a newly added item lands at the end of its category rather than in the middle of a
+layout. `reorderProducts` returns only the rows whose position changed, keeping positions contiguous so
+ties cannot creep in. The menu table defaults to an **arrangement** sort with a drag handle that persists
+on drop — pointer events and `elementFromPoint`, the pattern `schedule.tsx` already uses, because HTML5
+`dataTransfer` never fires on touch and this runs on an iPad.
+T4 remains. **Still no UI for reordering or renaming *categories*** — T3 arranges products within a
+category; the category list itself is still only settable through `PUT /api/settings/menu.categories`.
 **Vision pillar:** #1 — "the easiest path". Setting up a menu is the first thing an operator does and
 the till layout is what they live in afterwards.
 **Depends on:** nothing. **T1 is a bug fix and should be taken on its own** regardless of the rest.
