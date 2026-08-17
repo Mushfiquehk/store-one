@@ -100,6 +100,7 @@ type StoreContextType = {
   updateTimePunch: (id: string, data: Partial<TimePunch>) => void;
 
   addSale: (data: Partial<Sale>) => void;
+  recordSale: (data: Partial<Sale>, deltas: Map<string, number>) => Promise<Sale>;
   updateSale: (id: string, data: Partial<Sale>) => void;
 
   createInvoiceWithLineItems: (invoiceData: Partial<Invoice>, lineItems: Partial<InvoiceLineItem>[]) => Promise<any>;
@@ -212,6 +213,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const updateTimePunch = useCallback((id: string, data: Partial<TimePunch>) => { storage.updateTimePunch(id, data); }, []);
 
   const addSale = useCallback((data: Partial<Sale>) => { storage.createSale(data); }, []);
+  // A sale and the stock it moves, in one transaction — see local-storage.recordSale.
+  const recordSale = useCallback((data: Partial<Sale>, deltas: Map<string, number>) => storage.recordSale(data, deltas), []);
   const updateSale = useCallback((id: string, data: Partial<Sale>) => { storage.updateSale(id, data); }, []);
 
   const createInvoiceWithLineItems = useCallback((invoiceData: Partial<Invoice>, lineItems: Partial<InvoiceLineItem>[]) => storage.createInvoiceWithLineItems(invoiceData, lineItems), []);
@@ -295,6 +298,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     updateTimePunch,
 
     addSale,
+    recordSale,
     updateSale,
 
     createInvoiceWithLineItems,

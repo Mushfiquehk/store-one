@@ -1483,7 +1483,16 @@ that nothing is connected yet, and there is exactly one POS page in the codebase
 re-exports it and the till's copy (`resolveSubRecipe` + the walk in `handleRecordSale`) is deleted.
 The server's bare `else` is gone: a BOM row pointing at nothing deducts from nothing. Fixture
 assertions in `server/depletion.test.ts` pin a seeded drink's deltas, written out by hand from the
-seed rows. T2–T4 remain.
+seed rows.
+T2 done — `inventoryLedger` (Dexie v12, `shared/ledger.ts`) with `ledgerRows` as the one place a
+delta becomes a quantity and a row. `recordSale` writes the sale, the stock and the ledger in one
+Dexie `rw` transaction, so the old "N un-awaited adjusts, then the sale" ordering is gone. Invoice
+receives log `RECEIVE`, manual adjustments log `MANUAL`, on both the till and the local-server paths.
+`BACKUP_TABLES` picks it up automatically — confirmed at runtime, 18 tables.
+Still unlogged, for a later task: `updateInventoryItem` with an explicit `currentQuantity`
+(`dexie-admin-storage.ts:260`) sets stock directly rather than by delta, and creating an item with an
+opening quantity (`inventory.tsx:55`) writes stock with no opening row.
+T3–T4 remain.
 
 **Found while doing T1, not fixed here:** BOM rows are attached only to a product's *small* variant
 (`seed-data.ts:208-224`, `sourceId: V("mocha_s")`) while their `scaleFactorMatrix` keys every size.

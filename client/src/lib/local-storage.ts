@@ -1,5 +1,6 @@
 import { db } from "./db";
 import { costPerStockUnit, stockUnitsReceived } from "@shared/units";
+import { ledgerRows, type LedgerContext, type LedgerReason } from "@shared/ledger";
 import type {
   Product,
   Variant,
@@ -21,6 +22,27 @@ import type {
 
 function notDeleted<T extends { deletedAt: number | null }>(items: T[]): T[] {
   return items.filter(item => !item.deletedAt);
+}
+
+function uid(prefix: string) {
+  return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`;
+}
+
+/**
+ * Apply deltas to `currentQuantity` and append one ledger row per delta. Must be called
+ * inside a transaction that covers inventoryItems and inventoryLedger — every caller
+ * here does, which is what makes stock and its explanation land together or not at all.
+ */
+async function applyDeltas(
+  deltas: Map<string, number>,
+  quantityBefore: Record<string, number>,
+  ctx: LedgerContext,
+): Promise<void> {
+  const { rows, quantityAfter } = ledgerRows(deltas, quantityBefore, ctx);
+  for (const [id, qty] of Object.entries(quantityAfter)) {
+    await db.inventoryItems.update(id, { currentQuantity: qty, updatedAt: ctx.createdAt });
+  }
+  if (rows.length) await db.inventoryLedger.bulkPut(rows);
 }
 
 export const storage = {
@@ -252,12 +274,52 @@ export const storage = {
     return db.inventoryItems.get(id);
   },
 
-  async adjustInventoryQuantity(id: string, delta: number): Promise<InventoryItem | undefined> {
-    const item = await db.inventoryItems.get(id);
-    if (!item) return undefined;
-    const newQty = Math.max(0, item.currentQuantity + delta);
-    await db.inventoryItems.update(id, { currentQuantity: newQty, updatedAt: Date.now() });
+  async adjustInventoryQuantity(
+    id: string,
+    delta: number,
+    ctx: { reason?: LedgerReason; refType?: string; refId?: string; note?: string } = {},
+  ): Promise<InventoryItem | undefined> {
+    // Every quantity change lands with a reason. A ledger with a hole in it is worse
+    // than none, because the hole looks like theft.
+    await db.transaction("rw", [db.inventoryItems, db.inventoryLedger], async () => {
+      const item = await db.inventoryItems.get(id);
+      if (!item) return;
+      await applyDeltas(new Map([[id, delta]]), { [id]: item.currentQuantity }, {
+        reason: ctx.reason ?? "MANUAL",
+        refType: ctx.refType ?? null,
+        refId: ctx.refId ?? null,
+        note: ctx.note ?? "",
+        createdAt: Date.now(),
+        newId: itemId => uid(`led_${itemId}`),
+      });
+    });
     return db.inventoryItems.get(id);
+  },
+
+  /**
+   * A sale and everything it moves, in one transaction. The sale used to be written
+   * *after* N un-awaited stock writes: a crash mid-loop left stock deducted for a sale
+   * that never existed, and nothing afterwards could tell which lines had been applied.
+   */
+  async recordSale(data: Partial<Sale>, deltas: Map<string, number>): Promise<Sale> {
+    let sale!: Sale;
+    await db.transaction("rw", [db.sales, db.inventoryItems, db.inventoryLedger], async () => {
+      sale = await storage.createSale(data);
+
+      const before: Record<string, number> = {};
+      for (const id of Array.from(deltas.keys())) {
+        const item = await db.inventoryItems.get(id);
+        if (item) before[id] = item.currentQuantity;
+      }
+      await applyDeltas(deltas, before, {
+        reason: "SALE",
+        refType: "SALE",
+        refId: sale.id,
+        createdAt: sale.createdAt,
+        newId: itemId => uid(`led_${itemId}`),
+      });
+    });
+    return sale;
   },
 
   async deleteInventoryItem(id: string): Promise<void> {
@@ -424,7 +486,7 @@ export const storage = {
 
     const createdLineItems: InvoiceLineItem[] = [];
 
-    await db.transaction("rw", [db.invoices, db.invoiceLineItems, db.inventoryItems], async () => {
+    await db.transaction("rw", [db.invoices, db.invoiceLineItems, db.inventoryItems, db.inventoryLedger], async () => {
       await db.invoices.put(invoice);
 
       for (const li of lineItems) {
@@ -446,10 +508,14 @@ export const storage = {
           await db.inventoryItems.update(existingItem.id, {
             // The invoice quotes a price per purchase unit; lastPurchasePrice is per stocking unit.
             lastPurchasePrice: costPerStockUnit(lineItem.unitPriceCents, existingItem.unitsPerPurchase),
-            // One gallon received is 128 oz on hand, not 1.
-            currentQuantity: existingItem.currentQuantity + stockUnitsReceived(lineItem.quantity, existingItem.unitsPerPurchase),
             updatedAt: now,
           });
+          // One gallon received is 128 oz on hand, not 1 — and the ledger says so.
+          await applyDeltas(
+            new Map([[existingItem.id, stockUnitsReceived(lineItem.quantity, existingItem.unitsPerPurchase)]]),
+            { [existingItem.id]: existingItem.currentQuantity },
+            { reason: "RECEIVE", refType: "INVOICE", refId: invoice.id, createdAt: now, newId: id => uid(`led_${id}`) },
+          );
         } else {
           // A brand new item has no pack size yet, so it is stocked in whatever it was
           // bought in — unitsPerPurchase 1, price unconverted.
@@ -457,7 +523,7 @@ export const storage = {
             id: lineItem.inventoryItemId,
             name: lineItem.description || "Unknown Item",
             unitOfMeasure: "each",
-            currentQuantity: lineItem.quantity,
+            currentQuantity: 0,
             lowStockThreshold: null,
             lastPurchasePrice: lineItem.unitPriceCents,
             purchaseUnit: null,
@@ -466,6 +532,13 @@ export const storage = {
             deletedAt: null,
           };
           await db.inventoryItems.put(newItem);
+          // Created empty and then received, so the first quantity it ever had is
+          // explained by a ledger row like every one after it.
+          await applyDeltas(
+            new Map([[newItem.id, lineItem.quantity]]),
+            { [newItem.id]: 0 },
+            { reason: "RECEIVE", refType: "INVOICE", refId: invoice.id, createdAt: now, newId: id => uid(`led_${id}`) },
+          );
         }
       }
     });

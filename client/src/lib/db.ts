@@ -1,5 +1,6 @@
 import Dexie, { type Table } from "dexie";
 import type { StoreSetting } from "@shared/api-handlers";
+import type { InventoryLedgerEntry } from "@shared/ledger";
 import type {
   ProductAttributes,
   ModifierScaleFactors,
@@ -9,6 +10,7 @@ import type {
   ComboItemType,
 } from "@shared/schema";
 
+export type { InventoryLedgerEntry };
 export type { ProductAttributes, ModifierScaleFactors, ScaleFactorMatrix, SaleLine, PricingStrategy, ComboItemType };
 
 export interface Product {
@@ -212,6 +214,8 @@ class PosDatabase extends Dexie {
   productGroups!: Table<ProductGroup, string>;
   productGroupItems!: Table<ProductGroupItem, string>;
   settings!: Table<StoreSetting, string>;
+  // Append-only: why every quantity moved. See shared/ledger.ts.
+  inventoryLedger!: Table<InventoryLedgerEntry, string>;
 
   constructor() {
     super("cornerpos");
@@ -455,6 +459,12 @@ class PosDatabase extends Dexie {
         if (sale.tenderedCents === undefined) sale.tenderedCents = null;
         if (sale.changeCents === undefined) sale.changeCents = null;
       });
+    });
+
+    // Feature 15: the ledger. New table only — nothing to backfill, because there is no
+    // history to invent. It starts explaining movements from here on.
+    this.version(12).stores({
+      inventoryLedger: "id, inventoryItemId, createdAt, reason, refId",
     });
   }
 }

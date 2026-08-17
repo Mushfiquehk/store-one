@@ -33,7 +33,7 @@ export default function PosPage() {
   const { toast } = useToast();
   const {
     products, variants, inventory, bom, sales, modifierGroups, modifiers,
-    productModifierLinks, productModifierScaleFactors, addSale, updateSale, adjustInventory, isLoading,
+    productModifierLinks, productModifierScaleFactors, recordSale, updateSale, isLoading,
     combos, comboItems, productGroups, productGroupItems,
   } = useStore();
 
@@ -379,7 +379,6 @@ export default function PosPage() {
       cart.map(line => ({ variantId: line.variantId, qty: line.qty, modifiers: line.modifiers })),
       { products, variants, modifiers, bomEntries: bom },
     );
-    deltas.forEach((delta, inventoryItemId) => adjustInventory(inventoryItemId, delta));
 
     const itemComboMap = new Map<string, { comboId: string; comboName: string }>();
     comboDiscounts.forEach(({ combo, discount, items }) => {
@@ -389,7 +388,8 @@ export default function PosPage() {
       });
     });
 
-    addSale({
+    // The sale, the stock it moves and the ledger rows explaining it: one transaction.
+    recordSale({
       id: uid("sale"),
       createdAt: Date.now(),
       subtotalCents,
@@ -443,7 +443,7 @@ export default function PosPage() {
           finalPriceCents: finalPrice,
         };
       }),
-    });
+    }, deltas);
 
     toast({ title: "Sale recorded", description: `${formatMoney(totalCents)} • ${paymentType}` });
     clearCart();

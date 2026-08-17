@@ -1,3 +1,4 @@
+import { ledgerRows } from "@shared/ledger";
 import { db } from "./db";
 import type {
   Product,
@@ -263,10 +264,19 @@ export const dexieAdminStorage: ApiAdminStorage = {
     return db.inventoryItems.get(id);
   },
   async adjustInventoryQuantity(id: string, delta: number) {
-    const item = await db.inventoryItems.get(id);
-    if (!item) return null;
-    const newQty = Math.max(0, item.currentQuantity + delta);
-    await db.inventoryItems.update(id, { currentQuantity: newQty, updatedAt: Date.now() });
+    // The same rule as the till's path: no quantity moves without a row saying why.
+    await db.transaction("rw", [db.inventoryItems, db.inventoryLedger], async () => {
+      const item = await db.inventoryItems.get(id);
+      if (!item) return;
+      const now = Date.now();
+      const { rows, quantityAfter } = ledgerRows(new Map([[id, delta]]), { [id]: item.currentQuantity }, {
+        reason: "MANUAL",
+        createdAt: now,
+        newId: itemId => `led_${itemId}_${Math.random().toString(16).slice(2)}_${now}`,
+      });
+      await db.inventoryItems.update(id, { currentQuantity: quantityAfter[id], updatedAt: now });
+      await db.inventoryLedger.bulkPut(rows);
+    });
     return db.inventoryItems.get(id);
   },
   async deleteInventoryItem(id: string) {
