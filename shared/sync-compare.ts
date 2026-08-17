@@ -135,6 +135,28 @@ export function resolveConflict(tableName: string, pos: SyncSide, admin: SyncSid
 }
 
 /**
+ * Who owns a sale: the `admin_sales` row.
+ *
+ * A sale is **authored on the device** and *lands* server-side as a row. The `sales` sync
+ * group is transport, not storage — the JSON blob in `syncRecords` is sync bookkeeping (the
+ * `lastSyncedAt` window depends on it), never the authoritative record. Feature 8 T4 found
+ * that nothing promoted the blob into a row, so every server-side report — `sales-summary`,
+ * `product-mix`, `menu-margins` — was blind to every sale that arrived by sync. Feature 26
+ * T2 is the promotion; this constant is the decision it implements.
+ *
+ * The corollary matters as much as the rule: **sales are device-authored, so admin-wins must
+ * never apply to them.** The back office does not author sales and has no newer truth about
+ * one; last-write-wins on `updatedAt` is correct for this table and `SALES_TABLE` is
+ * deliberately absent from ADMIN_OWNED_TABLES above. `isAdminOwned("sales")` returning true
+ * would let a stale server copy overwrite a real transaction — which is why there is a test
+ * asserting it never does.
+ */
+export const SALES_TABLE = "sales";
+
+/** Where the authoritative sale lives, for anything that needs to say so out loud. */
+export const SALES_OWNER = "admin_sales" as const;
+
+/**
  * The fallback for tables with no admin counterpart: last write wins on `updatedAt`.
  *
  * Ties go to the incoming record, which is what the existing `>=` did — a device that
