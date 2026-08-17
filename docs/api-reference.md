@@ -2208,3 +2208,32 @@ The loop is always the same — **read, propose, preview, apply on approval**:
 Rows with `costKnown: false` are **not** a pricing finding — they are a data-entry task. Ask the
 operator to price the named ingredients (a supplier invoice sets `lastPurchasePrice`) rather than
 proposing a price change from a cost you do not have.
+
+---
+
+## Every write is logged
+
+Changes made through this API are recorded in an **append-only** action log alongside the ones an
+operator makes by hand — one list, in order, so "what happened on Tuesday" is a single read rather
+than a join someone performs in their head.
+
+| Field | |
+|---|---|
+| `actorKind` | `EMPLOYEE`, `AGENT` or `SYSTEM`. API and agent writes are `AGENT`; a settings `PUT` with no identified caller is `SYSTEM`. |
+| `actorId` | Who exactly. Null until Feature 4's tokens give an agent connection a name. |
+| `action` | `PRICE_CHANGED`, `MENU_APPLIED`, `SALE_VOIDED`, `SETTING_CHANGED`, `BACKUP_RESTORED`, `DEMO_CLEARED`. |
+| `summary` | Complete on its own — a price change carries **both** prices. |
+| `detail` | Nullable JSON. For a setting covered by `SECRET_SETTING_FIELDS` it is `null`: the log records *that* a credential changed, never what it changed to. |
+
+What this means for an agent:
+
+- **`POST /api/admin/menu/apply` writes one row per apply**, with its change count — not one row per
+  change, which would bury a 60-product menu. A no-op re-apply still records that a menu was applied
+  and says `0 changes`.
+- **`PUT /api/settings/:key` writes one row** per change.
+- Inventory movements are **not** in this log. They are ledger rows carrying quantities and a
+  resulting balance (see Feature 15 in PLAN.md).
+- The log is **append-only**: nothing in the codebase updates or deletes a row, and a test enforces it.
+
+An operator deciding whether to trust an agent with their menu can read exactly what it did under
+**Settings → Activity**, filtered to `Agent`.
