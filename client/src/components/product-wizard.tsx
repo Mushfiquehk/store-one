@@ -13,6 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { useStore } from "@/lib/store";
 import type { BomEntry } from "@/lib/db";
+import { marginPct, sumIngredientCosts } from "@shared/pricing";
 
 function uid(prefix: string) {
   return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now()}`;
@@ -1633,12 +1634,12 @@ export default function ProductWizard({
                     </div>
                   );
                 }
-                const margin = sellingPriceCents > 0 ? ((sellingPriceCents - costCents) / sellingPriceCents * 100) : 0;
+                const margin = marginPct(sellingPriceCents, { costCents, unknownIngredients: [] });
                 return (
                   <div key={rv.tempId} className="text-xs p-2 rounded-lg bg-muted/30 space-y-1" data-testid={`profitability-variant-${i}`}>
                     <div className="flex justify-between font-medium">
                       <span>{rv.name}</span>
-                      <span className={margin >= 0 ? "text-green-600" : "text-red-600"}>{margin.toFixed(1)}% margin</span>
+                      <span className={(margin ?? 0) >= 0 ? "text-green-600" : "text-red-600"}>{margin == null ? "—" : `${margin.toFixed(1)}%`} margin</span>
                     </div>
                     <div className="flex justify-between text-muted-foreground">
                       <span>{linkedItem.name}: {formatMoney(costCents)}</span>
@@ -1671,7 +1672,7 @@ export default function ProductWizard({
               <div className="flex justify-between font-medium">
                 <span>Selling: {formatMoney(sellingPriceCents)} — Cost: {formatMoney(costCents)}</span>
                 <span className={sellingPriceCents - costCents >= 0 ? "text-green-600" : "text-red-600"}>
-                  {sellingPriceCents > 0 ? ((sellingPriceCents - costCents) / sellingPriceCents * 100).toFixed(1) : "0.0"}% margin
+                  {marginPct(sellingPriceCents, { costCents, unknownIngredients: [] })?.toFixed(1) ?? "—"}% margin
                 </span>
               </div>
             </div>
@@ -1698,15 +1699,24 @@ export default function ProductWizard({
               );
             }
 
-            let totalCostCents = 0;
-            let hasMissingCost = false;
+            // One costing implementation: shared/pricing.ts, the same one the margin
+            // report uses. This panel only lays the numbers out.
+            const cost = sumIngredientCosts(entries.map(e => {
+              const item = inventory.find(i => i.id === e.inventoryItemId);
+              return {
+                name: item?.name || "?",
+                quantity: Number(e.quantity),
+                lastPurchasePrice: item?.lastPurchasePrice ?? null,
+              };
+            }));
+            const totalCostCents = cost.costCents;
+            const hasMissingCost = cost.unknownIngredients.length > 0;
 
             const ingredientLines = entries.map((e, ei) => {
               const item = inventory.find(i => i.id === e.inventoryItemId);
               const qty = Number(e.quantity);
               const unitCost = item?.lastPurchasePrice;
               if (unitCost == null) {
-                hasMissingCost = true;
                 return (
                   <div key={ei} className="flex justify-between text-muted-foreground" data-testid={`profitability-ingredient-${vi}-${ei}`}>
                     <span>{item?.name || "?"} × {qty}</span>
@@ -1715,7 +1725,6 @@ export default function ProductWizard({
                 );
               }
               const lineCost = Math.round(qty * unitCost);
-              totalCostCents += lineCost;
               return (
                 <div key={ei} className="flex justify-between" data-testid={`profitability-ingredient-${vi}-${ei}`}>
                   <span>{item?.name || "?"} × {qty} @ {formatMoney(unitCost)}</span>
@@ -1724,9 +1733,7 @@ export default function ProductWizard({
               );
             });
 
-            const margin = !hasMissingCost && sellingPriceCents > 0
-              ? ((sellingPriceCents - totalCostCents) / sellingPriceCents * 100)
-              : null;
+            const margin = marginPct(sellingPriceCents, cost);
 
             return (
               <div key={wv.tempId} className="text-xs p-2 rounded-lg bg-muted/30 space-y-1" data-testid={`profitability-variant-${vi}`}>

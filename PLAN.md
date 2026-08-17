@@ -50,8 +50,8 @@ map and two handlers), **Feature 16 T1** (the till drops to cash-only on every r
 so its inputs are finally true), then **Feature 14** (labour, which needs 13's real revenue as its
 denominator), then **Feature 8** (sync convergence).
 
-Note that Feature 10 T1 depends on **Feature 5 T1** to move `computeInventoryDeductions` out of the
-db-coupled `bom-engine.ts`; that extraction has not happened yet.
+~~Note that Feature 10 T1 depends on **Feature 5 T1**~~ — that extraction landed with **Feature 15 T1**
+(`shared/depletion.ts`), and Feature 10 T1 is done on top of it.
 
 Everything else is a genuine enhancement and can wait: **1** (menu blueprint, done), **2** (agent
 bridge), **3** (locations), **6** (setup status), **12** (voids and refunds), **18** (profit and
@@ -2153,9 +2153,16 @@ schemas, and the demo menu produces margins a restaurant operator would recognis
 
 ## Feature 10 — Menu margins: the number that decides whether there is a second location
 
-**Status:** planned
+**Status:** T1 done — `shared/pricing.ts` has `costVariant`, `sumIngredientCosts` and `marginPct`, all
+built on Feature 15 T1's `shared/depletion.ts` rather than a second BOM walk. An unpriced ingredient
+is named, never treated as free, and `marginPct` returns null rather than stating a margin on an
+unknown cost. `product-wizard.tsx`'s `renderProfitability` now uses the same functions instead of its
+own arithmetic, so there is one costing implementation. Tests in `shared/pricing.test.ts`.
+T2–T4 remain.
 **Vision pillar:** #1 — the guiding star itself, "boost their business into getting a second location"
-**Depends on:** Feature 5 T1 (needs the pure pricing/BOM functions out of `server/bom-engine.ts`)
+**Depends on:** ~~Feature 5 T1~~ — **satisfied**: Feature 15 T1 moved `computeInventoryDeductions`
+into `shared/depletion.ts`, which is the extraction this needed. Feature 5 T1 can still take the
+pricing/discount region of `bom-engine.ts` into this same file.
 **Added:** 2026-08-09
 
 ### The finding
