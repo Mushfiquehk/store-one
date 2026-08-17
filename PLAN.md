@@ -1479,7 +1479,18 @@ that nothing is connected yet, and there is exactly one POS page in the codebase
 
 ## Feature 15 — Depletion that leaves a record: one engine, one ledger
 
-**Status:** planned
+**Status:** T1 done — the walk lives in `shared/depletion.ts`, called by both paths; `bom-engine.ts`
+re-exports it and the till's copy (`resolveSubRecipe` + the walk in `handleRecordSale`) is deleted.
+The server's bare `else` is gone: a BOM row pointing at nothing deducts from nothing. Fixture
+assertions in `server/depletion.test.ts` pin a seeded drink's deltas, written out by hand from the
+seed rows. T2–T4 remain.
+
+**Found while doing T1, not fixed here:** BOM rows are attached only to a product's *small* variant
+(`seed-data.ts:208-224`, `sourceId: V("mocha_s")`) while their `scaleFactorMatrix` keys every size.
+The walk filters `sourceId === line.variantId`, so **a medium or large drink matches no BOM rows and
+deducts nothing at all** — the scale factors never apply. Both copies behaved this way, so T1 changes
+nothing about it, but it is a bigger hole in pillar #4 than the drift T1 closed: either the seed must
+carry a row per variant, or the walk must resolve a product's recipe through its default variant.
 **Vision pillar:** #4 — *"the depletion of the amount of recipe ingredients of the items are the most
 accurate in the industry. This is imperative to accurate expense calculations and forecasts in COGS."*
 This is the pillar the plan has never touched.
