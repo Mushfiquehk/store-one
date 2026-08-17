@@ -874,6 +874,8 @@ export const adminStorage: IAdminStorage = {
       totalCents: (data.totalCents as number) ?? 0,
       comboDiscountCents: (data.comboDiscountCents as number) ?? 0,
       paymentMethod: (data.paymentMethod as string) ?? "test",
+      tenderedCents: (data.tenderedCents as number) ?? null,
+      changeCents: (data.changeCents as number) ?? null,
       status: (data.status as string) ?? "completed",
       customerName: (data.customerName as string) ?? "",
       linesJson: data.linesJson ?? [],

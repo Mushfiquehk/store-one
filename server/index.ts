@@ -136,6 +136,9 @@ async function initDb() {
   // columns need their own statement. The DEFAULT backfills existing rows to today's behaviour.
   await db.execute(sql`ALTER TABLE admin_inventory_items ADD COLUMN IF NOT EXISTS purchase_unit TEXT`);
   await db.execute(sql`ALTER TABLE admin_inventory_items ADD COLUMN IF NOT EXISTS units_per_purchase DOUBLE PRECISION NOT NULL DEFAULT 1`);
+  // Feature 16 T2: cash tender. Nullable, so existing sales stay readable as "never asked".
+  await db.execute(sql`ALTER TABLE admin_sales ADD COLUMN IF NOT EXISTS tendered_cents INTEGER`);
+  await db.execute(sql`ALTER TABLE admin_sales ADD COLUMN IF NOT EXISTS change_cents INTEGER`);
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS admin_bill_of_materials (
       id TEXT PRIMARY KEY,
@@ -185,6 +188,8 @@ async function initDb() {
       total_cents INTEGER NOT NULL DEFAULT 0,
       combo_discount_cents INTEGER NOT NULL DEFAULT 0,
       payment_method TEXT NOT NULL DEFAULT 'test',
+      tendered_cents INTEGER,
+      change_cents INTEGER,
       status TEXT NOT NULL DEFAULT 'completed',
       customer_name TEXT NOT NULL DEFAULT '',
       lines_json JSONB NOT NULL,

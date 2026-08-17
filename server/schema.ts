@@ -142,6 +142,9 @@ export const adminSales = pgTable("admin_sales", {
   totalCents: integer("total_cents").notNull().default(0),
   comboDiscountCents: integer("combo_discount_cents").notNull().default(0),
   paymentMethod: text("payment_method").notNull().default("test"),
+  // Nullable: rows recorded before the till asked what the customer handed over.
+  tenderedCents: integer("tendered_cents"),
+  changeCents: integer("change_cents"),
   status: text("status").notNull().default("completed"),
   customerName: text("customer_name").notNull().default(""),
   linesJson: jsonb("lines_json").notNull(),
