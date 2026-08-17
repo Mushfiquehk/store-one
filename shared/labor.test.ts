@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { hoursWorked, laborCost, laborPct, type LaborEmployee, type LaborPunch } from "./labor";
+import { hoursWorked, laborCost, laborPct, scheduledVsActual, type LaborEmployee, type LaborPunch, type ScheduleShift } from "./labor";
 
 const HOUR = 60 * 60 * 1000;
 const day = (d: number, h = 0) => new Date(2026, 2, d, h).getTime();
@@ -116,4 +116,50 @@ test("the labour percentage is exactly cost over revenue, and repeats itself", (
   assert.equal(laborPct(first, revenueCents), (first.costCents / revenueCents) * 100);
   assert.equal(first.costCents, 17600, "8 paid hours at $22, plus 4 unpaid ones");
   assert.equal(first.hours, 12, "and the unpaid hours are still hours");
+});
+
+test("a rostered shift nobody turned up for is the whole variance, not a missing row", () => {
+  // The plan's check for T4.
+  const shifts: ScheduleShift[] = [
+    { employeeId: "e_ana", dayOfWeek: 1, startMinutes: 9 * 60, endMinutes: 17 * 60 },
+    { employeeId: "e_bo", dayOfWeek: 2, startMinutes: 12 * 60, endMinutes: 16 * 60 },
+  ];
+  // Ana worked her eight; Bo's four rostered hours were never punched.
+  const punches: LaborPunch[] = [{ id: "p1", employeeId: "e_ana", timeIn: day(2, 9), timeOut: day(2, 17) }];
+
+  const rows = scheduledVsActual(shifts, punches, staff, { now: day(8), since: day(2) });
+  const byId = Object.fromEntries(rows.map(r => [r.employeeId, r]));
+
+  assert.equal(rows.length, 2, "the no-show still gets a row");
+  assert.deepEqual(
+    [byId.e_bo.scheduledHours, byId.e_bo.actualHours, byId.e_bo.varianceHours],
+    [4, 0, -4],
+    "four rostered hours unworked",
+  );
+  assert.equal(byId.e_bo.scheduledCostCents, 0, "Bo is unpaid, so the roster cost nothing either");
+  assert.deepEqual([byId.e_ana.scheduledHours, byId.e_ana.actualHours, byId.e_ana.varianceHours], [8, 8, 0]);
+  assert.equal(byId.e_ana.scheduledCostCents, 17600);
+  assert.equal(byId.e_ana.actualCostCents, 17600);
+});
+
+test("hours paid that nobody rostered show up as the overrun they are, listed first", () => {
+  const shifts: ScheduleShift[] = [{ employeeId: "e_ana", dayOfWeek: 1, startMinutes: 9 * 60, endMinutes: 17 * 60 }];
+  const punches: LaborPunch[] = [
+    { id: "p1", employeeId: "e_ana", timeIn: day(2, 9), timeOut: day(2, 19) },
+    { id: "p2", employeeId: "e_cy", timeIn: day(3, 9), timeOut: day(3, 14) },
+  ];
+
+  const rows = scheduledVsActual(shifts, punches, staff, { now: day(8), since: day(2) });
+  assert.equal(rows[0].employeeId, "e_cy", "five unrostered hours is the biggest overrun");
+  assert.equal(rows[0].scheduledHours, 0);
+  assert.equal(rows[0].actualCostCents, null, "Cy has no rate, so no cost is claimed");
+  assert.equal(rows[1].varianceHours, 2, "Ana stayed two hours past her shift");
+});
+
+test("with no shifts at all, the comparison is still every worked hour", () => {
+  // What the page falls back to when the schedule request fails: actual-only, not blank.
+  const punches: LaborPunch[] = [{ id: "p1", employeeId: "e_ana", timeIn: day(2, 9), timeOut: day(2, 17) }];
+  const rows = scheduledVsActual([], punches, staff, { now: day(8), since: day(2) });
+  assert.equal(rows.length, 1);
+  assert.deepEqual([rows[0].scheduledHours, rows[0].actualHours, rows[0].varianceHours], [0, 8, 8]);
 });

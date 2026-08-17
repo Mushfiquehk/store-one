@@ -32,9 +32,9 @@ import { Switch } from "@/components/ui/switch";
 import { useStore } from "@/lib/store";
 import { productMix, salesSeries, type Granularity } from "@shared/reports";
 import { menuMargins } from "@shared/pricing";
-import { laborCost, laborPct } from "@shared/labor";
+import { laborCost, laborPct, scheduledVsActual, type ScheduleShift } from "@shared/labor";
 import { Link } from "wouter";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 
 function formatMoney(cents: number) {
@@ -168,6 +168,33 @@ export default function ReportsPage() {
   );
   const laborPercent = laborPct(labor, revenueCents);
 
+  // The rostered week comes from the server (schedule shifts live there); punches are
+  // local by Feature 7 T4's deliberate split. If the request fails we show actual-only
+  // rather than nothing — and say which it is, instead of implying nobody was rostered.
+  const [weekShifts, setWeekShifts] = useState<ScheduleShift[] | null>(null);
+  const [shiftsFailed, setShiftsFailed] = useState(false);
+  const weekStart = useMemo(() => {
+    const d = new Date();
+    const day = d.getDay();
+    d.setDate(d.getDate() - day + (day === 0 ? -6 : 1));
+    d.setHours(0, 0, 0, 0);
+    return { iso: d.toISOString().split("T")[0], since: d.getTime() };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/schedule/shifts?weekStart=${weekStart.iso}`)
+      .then(r => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then(d => { if (!cancelled) { setWeekShifts((d.shifts ?? []) as ScheduleShift[]); setShiftsFailed(false); } })
+      .catch(() => { if (!cancelled) { setWeekShifts([]); setShiftsFailed(true); } });
+    return () => { cancelled = true; };
+  }, [weekStart]);
+
+  const weekRows = useMemo(
+    () => scheduledVsActual(weekShifts ?? [], timePunches, employees, { since: weekStart.since, now: Date.now() }),
+    [weekShifts, timePunches, employees, weekStart],
+  );
+
   // Margins, from the same costing the API's menu-margins endpoint uses and the same
   // volumes as the mix tab above. Worst first; unknown-cost rows are flagged, never
   // sorted as though a missing ingredient price were a 100% margin.
@@ -275,6 +302,60 @@ export default function ReportsPage() {
                 <ChartCard title="Sales Overview" data={salesData} dataKey="sales" format="currency" />
                 <ChartCard title="Transaction Volume" data={salesData} dataKey="transactions" />
               </div>
+
+              <Card className="shadow-soft rounded-2xl">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base">
+                    Rostered vs paid <span className="text-sm font-normal text-muted-foreground">(this week)</span>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {shiftsFailed && (
+                    <p className="mb-3 text-sm text-amber-700 dark:text-amber-500" data-testid="text-shifts-unavailable">
+                      The schedule could not be loaded, so this shows hours actually worked with nothing to
+                      compare them against — not an empty roster.
+                    </p>
+                  )}
+                  {weekRows.length === 0 ? (
+                    <p className="text-sm text-muted-foreground" data-testid="text-no-week-labour">
+                      Nobody rostered or clocked in this week.
+                    </p>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Employee</TableHead>
+                          <TableHead className="text-right">Rostered</TableHead>
+                          <TableHead className="text-right">Paid</TableHead>
+                          <TableHead className="text-right">Variance</TableHead>
+                          <TableHead className="text-right">Cost</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {weekRows.map(row => (
+                          <TableRow key={row.employeeId} data-testid={`row-week-labour-${row.employeeId}`}>
+                            <TableCell className="font-medium">
+                              {row.employeeName}
+                              {row.unclosedPunches.length > 0 && (
+                                <span className="ml-2 text-xs text-destructive">never clocked out — hours not counted</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right font-mono">{row.scheduledHours.toFixed(1)}</TableCell>
+                            <TableCell className="text-right font-mono">{row.actualHours.toFixed(1)}</TableCell>
+                            {/* Positive means paid more than planned, which is the number to act on. */}
+                            <TableCell className={`text-right font-mono ${row.varianceHours > 0 ? "font-semibold text-destructive" : ""}`}>
+                              {row.varianceHours > 0 ? "+" : ""}{row.varianceHours.toFixed(1)}
+                            </TableCell>
+                            <TableCell className="text-right font-mono">
+                              {row.actualCostCents == null ? "\u2014" : formatMoney(row.actualCostCents)}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                </CardContent>
+              </Card>
             </TabsContent>
 
             <TabsContent value="product-mix" className="mt-0">

@@ -1666,7 +1666,10 @@ unexplained.
 
 ## Feature 14 — Labour: the second-biggest number, and nobody can even type a wage
 
-**Status:** T1 done — the employee dialog has a **pay rate per hour** field, edited in dollars and
+**Status:** done — T1–T4 complete. A wage an operator can set, hours with an explicit answer for the
+punch nobody closed, labour cost and percentage on the reports page, and rostered against paid.
+
+T1 done — the employee dialog has a **pay rate per hour** field, edited in dollars and
 stored in cents through `shared/money.ts` (`parseDollarsToCents` / `centsToDollarsInput`, tested). The
 hardcoded `1500` is gone: a new employee cannot be saved without either a rate or an explicit
 **Unpaid** tick, and the rate is shown in the employee table so a wage nobody set is visible rather
@@ -1682,7 +1685,15 @@ T3 done — the Sales Trends tab carries **Labour Cost**, **Labour % of Revenue*
 for the same window as the revenue above them, from `laborCost`/`laborPct`. Any window with an
 unclosed punch says so beside the numbers, names who and for how long, and states that those hours are
 *not* included; unset pay rates get their own caveat with a link to the employees page; shifts still
-running are called out as counted-to-now. T4 remains.
+running are called out as counted-to-now.
+T4 done — `scheduledVsActual` in `shared/labor.ts` and a **Rostered vs paid (this week)** table on the
+reports page: rostered hours, paid hours, variance (biggest overrun first) and cost per employee.
+Everyone in *either* list gets a row, so a shift nobody turned up for shows as variance instead of
+vanishing. Shifts are fetched from `GET /api/schedule/shifts?weekStart=` and a failed request degrades
+to actual-only **and says so**, rather than rendering an empty roster as though nobody was scheduled.
+Punches stay local — Feature 7 T4's split is untouched.
+
+**Feature 14 is complete.**
 
 **Seam, decided in T2:** `Employee.payRate` is a non-null number, so `0` is the only way to say
 "unpaid" *and* the value an old row with no rate already has — T1 reads `0` as a deliberate "Unpaid".
