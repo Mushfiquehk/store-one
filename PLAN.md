@@ -2493,7 +2493,19 @@ incoming record, as the old `>=` already did. `ADMIN_OWNED_TABLES` is now one li
 and `client/src/lib/sync.ts`, which had its own copy. The `updatedAt` fallback is fixed: a record with
 no timestamp reads as `0` — the oldest thing in the system — rather than `Date.now()`, which made it
 win every comparison it entered.
-T3–T4 remain.
+T3 done — `server/sync-convergence.test.ts` runs the real thing against a real Postgres: two syncs with
+nothing changed in between, and the second pushes and pulls **nothing**. Then one field changes and
+exactly one record moves (with the admin value winning), the next round is quiet again, and a
+soft-delete on both sides at different timestamps is agreement rather than a conflict. It skips loudly
+without a `DATABASE_URL` instead of passing quietly, and `initDb` moved to `server/init-db.ts` so a test
+can create the schema without starting a listener. Verified load-bearing by restoring the old
+`JSON.stringify` comparison, which makes it fail.
+
+**Fixed while running it — a boot-breaking bug shipped in Feature 16 T2:** `initDb` ran
+`ALTER TABLE admin_sales ADD COLUMN …` *before* `CREATE TABLE IF NOT EXISTS admin_sales`, so on a
+**fresh** database `initDb()` threw `relation "admin_sales" does not exist` and the server never
+finished booting. Nothing in the suite could have caught it; the first actual `initDb()` run did.
+T4 remains.
 
 **Confirmation, and one correction to the analysis above.** A live sync could not be run here (no
 Postgres in this environment), so the failure is reproduced deterministically in
