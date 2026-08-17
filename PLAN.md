@@ -2167,7 +2167,12 @@ volumes through the same `productMix` the mix report uses, and carries `quantity
 T3 done — a **Margins** tab on the reports page, computed from the same `menuMargins` the endpoint
 uses over the page's window, worst first, with unknown-cost rows flagged and their unpriced
 ingredients linked to `/inventory?item=<id>` (which now opens that item).
-T4 remains.
+T4 partially done — **blocked on Feature 2**, which has not been built: there is no `shared/mcp.ts` tool
+table to register `menu_margins` in and no `docs/agent-setup.md` to document it in. What did not need
+Feature 2 has landed: the endpoint is documented in `docs/api-reference.md` with the honesty rules an
+agent has to respect, the read-propose-preview-apply loop written out, and the task's check covered as
+an API test — a price change is reflected by the next `menu-margins` call with nothing else in between.
+The MCP registration is recorded as a bullet on Feature 2 T1 so it is not lost.
 
 **Fixed while doing T3, worth calling out:** a variant with *no* recipe rows costed as 0 and therefore
 showed a **100% margin** — the exact lie the honesty requirement above is about, and the common case,
@@ -3302,7 +3307,15 @@ separate process to supervise, no new deployment unit.
 | `adjust_inventory` | `POST /api/admin/inventory-items/:id/adjust` | both |
 | `sales_summary` | `GET /api/reports/sales-summary` | local only |
 | `product_mix` | `GET /api/reports/product-mix` | local only |
+| `menu_margins` | `GET /api/reports/menu-margins` (**shipped**, Feature 10 T2) | both |
 | `get_settings` / `set_setting` | `GET`/`PUT /api/settings/:key` (Feature 7 T3) | both |
+
+**`menu_margins` is Feature 10 T4's outstanding half** — the endpoint and its documentation exist
+(`docs/api-reference.md` > Reports), so this is a table entry plus a description. Describe it as the
+read an agent must do **before** proposing any price change or discount: an agent that applies 20% off
+an item running a 15% margin is a liability, and rows with `costKnown: false` are a data-entry task,
+not a pricing finding. It is available on **both** servers, unlike the two report tools above it,
+because costing reads the menu and recipes the Express server owns.
 
 **Updated by Feature 7 T2.** The reason `sales_summary` and `product_mix` are local-only was "the
 Express adapter's `listSales()` returns `[]`". That is no longer true — sales persist on the Express

@@ -196,11 +196,14 @@ test("a till cannot be saved into accepting nothing", async () => {
 
 // A store with a menu, a recipe and one sale, for the margins endpoint.
 function marginsStore(): ApiAdminStorage {
+  let cookiePriceCents = 100;
   return new Proxy({
+    // Lets a test reprice the item the way apply_menu would, without a menu-apply stub.
+    repriceCookie(cents: number) { cookiePriceCents = cents; },
     async listProducts() { return [{ id: "p1", name: "Cookie" }, { id: "p2", name: "Latte" }]; },
     async listVariants() {
       return [
-        { id: "v_cookie", name: "One", productId: "p1", basePrice: 100, directInventoryId: null },
+        { id: "v_cookie", name: "One", productId: "p1", basePrice: cookiePriceCents, directInventoryId: null },
         { id: "v_latte", name: "Small", productId: "p2", basePrice: 400, directInventoryId: null },
       ];
     },
@@ -254,4 +257,26 @@ test("menu-margins ?since= narrows the volumes but keeps every menu row", async 
   assert.equal(cookie.contributionCents, 0);
   assert.equal(cookie.marginCents, -50);
   assert.equal((rows.find(r => r.variantId === "v_latte")!).quantity, 2);
+});
+
+test("a price change is reflected by the next menu-margins call, with nothing in between", async () => {
+  // Feature 10 T4's check, at the API level: the endpoint recomputes from the menu on
+  // every call, so there is no cache for an agent to invalidate after repricing.
+  const store = marginsStore();
+  const h = createApiHandlers(store);
+
+  const before = (await call(h, "GET", "/api/reports/menu-margins")).data as Array<Record<string, unknown>>;
+  assert.equal(before[0].variantId, "v_cookie");
+  assert.equal(before[0].marginCents, -50);
+
+  // Reprice the loss-maker the way an agent would, then read again — one call, no refresh.
+  (store as unknown as { repriceCookie: (cents: number) => void }).repriceCookie(300);
+
+  const after = (await call(h, "GET", "/api/reports/menu-margins")).data as Array<Record<string, unknown>>;
+  const cookie = after.find(r => r.variantId === "v_cookie")!;
+  assert.equal(cookie.priceCents, 300);
+  assert.equal(cookie.marginCents, 150, "the new margin, immediately");
+  assert.equal(cookie.marginPct, 50);
+  // Still the thinnest margin on this two-item menu, but no longer sold at a loss.
+  assert.ok(after.every(r => (r.marginCents as number) >= 0), "nothing sells below cost now");
 });
