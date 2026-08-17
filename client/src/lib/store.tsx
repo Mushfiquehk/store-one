@@ -53,7 +53,6 @@ type StoreContextType = {
   comboItems: ComboItem[];
   productGroups: ProductGroup[];
   productGroupItems: ProductGroupItem[];
-  integrations: string[];
   productModifierLinks: Record<string, string[]>;
   productModifierScaleFactors: Record<string, ModifierScaleFactors | null>;
   isLoading: boolean;
@@ -121,13 +120,11 @@ type StoreContextType = {
   addProductGroupItem: (data: Partial<ProductGroupItem>) => Promise<any>;
   deleteProductGroupItem: (id: string) => void;
 
-  toggleIntegration: (id: string) => void;
 };
 
 export const StoreContext = createContext<StoreContextType | null>(null);
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
-  const [integrations, setIntegrations] = useState<string[]>([]);
 
   const [dbReady, setDbReady] = useState(false);
 
@@ -235,14 +232,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const addProductGroupItem = useCallback((data: Partial<ProductGroupItem>) => storage.createProductGroupItem(data), []);
   const deleteProductGroupItem = useCallback((id: string) => { storage.deleteProductGroupItem(id); }, []);
 
-  const toggleIntegration = useCallback((id: string) => {
-    setIntegrations(prev => {
-      if (prev.includes(id)) return prev.filter(i => i !== id);
-      toast({ title: "Integration Connected", description: "Successfully linked to provider." });
-      return [...prev, id];
-    });
-  }, []);
-
   const value: StoreContextType = {
     products: products ?? [],
     variants: variants ?? [],
@@ -259,7 +248,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     comboItems: comboItemsList ?? [],
     productGroups: productGroupsList ?? [],
     productGroupItems: productGroupItemsList ?? [],
-    integrations,
     productModifierLinks,
     productModifierScaleFactors,
     isLoading,
@@ -327,7 +315,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     addProductGroupItem,
     deleteProductGroupItem,
 
-    toggleIntegration,
   };
 
   return (
