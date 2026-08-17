@@ -1319,7 +1319,11 @@ as a plain setting.
 
 ## Feature 16 — Taking money: a card button that survives a reload, and an integrations page that does not lie
 
-**Status:** T1 done — accepted tender is the `payments.methods` setting (`TENDER_METHODS_KEY`,
+**Status:** done — T1–T4 complete. Accepted tender is a store setting that survives a reload, a cash
+sale records what was handed over and the change given, the Integrations page describes a roadmap
+instead of simulating one, and the dead second POS is deleted.
+
+T1 done — accepted tender is the `payments.methods` setting (`TENDER_METHODS_KEY`,
 `tenderMethods`, `validateSetting` in `shared/schema.ts`), the payment dialog renders one button per
 accepted method with no `(Setup Integration)` label, and the API rejects an empty list
 (`shared/api-handlers.test.ts`). `pos.tsx` no longer reads `integrations` at all — T3 still has to
@@ -1331,7 +1335,9 @@ under-tender disables Record Sale), and a non-cash sale records `tendered = tota
 Tests in `shared/tender.test.ts`.
 T3 done — the six providers live in `shared/integrations.ts`, each `status: "planned"`, and each card
 says "Not available yet" with a disabled button. `toggleIntegration` and the `integrations` state are
-deleted from both stores, and the page points at Settings → Payment Methods for taking cards. T4 remains.
+deleted from both stores, and the page points at Settings → Payment Methods for taking cards.
+T4 done — `client/src/pages/home.tsx` (1,141 lines of parallel cart, pricing and payment code,
+imported by nothing) is deleted. Nothing was salvaged: everything in it exists in `pos.tsx`.
 **Vision pillar:** #3 — *"optional add-on features that the operator can setup and pay for later. The
 operator can optionally integrate 3rd party vendors."* This pillar has a page, a nav entry, and no
 implementation. Also #1: "setup **and operate**" — operating a till means taking the money.
