@@ -10,6 +10,7 @@ import type { Client, Backup, SyncRecord } from "./schema";
 import type { StoreSetting } from "../shared/api-handlers";
 import { eq, desc, sql, and, gt, inArray, isNull, count } from "drizzle-orm";
 import { costPerStockUnit } from "../shared/units";
+import { sameDeletedState, sameSyncedFields } from "../shared/sync-compare";
 
 export interface ListOptions {
   limit?: number;
@@ -275,9 +276,12 @@ export const storage: IStorage = {
           const adminDeletedAt = (adminRecord.deletedAt as number) || null;
           const adminData = { ...adminRecord };
 
-          const posDataJson = JSON.stringify(change.data);
-          const adminDataJson = JSON.stringify(adminData);
-          const dataMatches = posDataJson === adminDataJson && change.deletedAt === adminDeletedAt;
+          // Value comparison over the fields sync owns. The string comparison this replaces
+          // could essentially never be equal — see shared/sync-compare.ts — so every menu
+          // record was pushed back to every client on every sync.
+          const dataMatches =
+            sameSyncedFields(change.tableName, change.data, adminData) &&
+            sameDeletedState(change.deletedAt, adminDeletedAt);
 
           if (!dataMatches) {
             await db
