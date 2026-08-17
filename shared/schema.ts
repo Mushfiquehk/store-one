@@ -60,6 +60,27 @@ export function tenderMethods(value: unknown): string[] {
   return isTenderList(value) ? value : [...DEFAULT_TENDER_METHODS];
 }
 
+/**
+ * Change owed, computed in one place and never negative — an under-tender is a blocked
+ * confirm, not a negative change handed back to the customer.
+ */
+export function changeDueCents(totalCents: number, tenderedCents: number): number {
+  return Math.max(0, tenderedCents - totalCents);
+}
+
+// The notes a customer actually hands over. US denominations; the till is not a
+// currency system, and an operator can always type the amount.
+const NOTE_CENTS = [500, 1000, 2000, 5000];
+
+/** Exact total first, then the next note up at each denomination. */
+export function tenderSuggestions(totalCents: number): number[] {
+  const all = [totalCents, ...NOTE_CENTS.map(n => Math.ceil(totalCents / n) * n)];
+  return all
+    .filter((v, i) => v >= totalCents && all.indexOf(v) === i)
+    .sort((a, b) => a - b)
+    .slice(0, 4);
+}
+
 // A secret is write-only through the API: settable, never readable back. One map,
 // applied at every exit (settings responses, backup snapshots), so a new credential
 // is one line here rather than a new leak.
@@ -244,6 +265,10 @@ export type Sale = {
   taxCents: number;
   totalCents: number;
   paymentMethod: string;
+  // Null only on sales recorded before the till asked. A new sale always carries both,
+  // because the day's cash expectation is a sum over tenderedCents.
+  tenderedCents: number | null;
+  changeCents: number | null;
   status: string;
   linesJson: SaleLine[];
   customerName: string;

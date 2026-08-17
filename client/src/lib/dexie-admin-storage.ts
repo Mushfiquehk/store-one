@@ -423,6 +423,9 @@ export const dexieAdminStorage: ApiAdminStorage = {
       taxCents: (data.taxCents as number) ?? 0,
       totalCents: (data.totalCents as number) ?? 0,
       paymentMethod: (data.paymentMethod as string) ?? "cash",
+      // Null means the till never asked, not zero — see the Sale type.
+      tenderedCents: (data.tenderedCents as number) ?? null,
+      changeCents: (data.changeCents as number) ?? null,
       status: (data.status as string) ?? "completed",
       linesJson: (data.linesJson as Sale["linesJson"]) ?? [],
       customerName: (data.customerName as string) ?? "",

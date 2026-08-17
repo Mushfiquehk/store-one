@@ -15,7 +15,7 @@ import ModifierSelector, { type SelectedModifier } from "@/components/modifier-s
 import OrderReceipts from "@/components/order-receipts";
 import { format } from "date-fns";
 import type { Combo } from "@/lib/db";
-import { DEFAULT_TENDER_METHODS, TENDER_METHODS_KEY, tenderMethods } from "@shared/schema";
+import { DEFAULT_TENDER_METHODS, TENDER_METHODS_KEY, changeDueCents, tenderMethods, tenderSuggestions } from "@shared/schema";
 
 function formatMoney(cents: number) {
   return new Intl.NumberFormat(undefined, {
@@ -45,6 +45,7 @@ export default function PosPage() {
   // React state that reset to "cash only" every time the tablet restarted.
   const [acceptedMethods, setAcceptedMethods] = useState<string[]>(DEFAULT_TENDER_METHODS);
   const [paymentType, setPaymentType] = useState<string>(DEFAULT_TENDER_METHODS[0]);
+  const [tenderedInput, setTenderedInput] = useState("");
 
   useEffect(() => {
     fetch(`/api/settings/${TENDER_METHODS_KEY}`)
@@ -347,6 +348,13 @@ export default function PosPage() {
   const taxCents = Math.round((subtotalCents * taxRatePct) / 100);
   const totalCents = subtotalCents + taxCents;
 
+  // A non-cash sale tenders exactly the total: the day's cash expectation is a sum over
+  // this column, and a null in the middle of it reads as a hole nobody can explain.
+  const isCashTender = paymentType === "Cash";
+  const tenderedCents = isCashTender ? Math.round(Number(tenderedInput) * 100) || 0 : totalCents;
+  const changeCents = isCashTender ? changeDueCents(totalCents, tenderedCents) : 0;
+  const underTendered = isCashTender && tenderedCents < totalCents;
+
   function handleCloseOrder(saleId: string) {
     updateSale(saleId, { closedAt: Date.now() });
     toast({ title: "Order closed" });
@@ -359,6 +367,7 @@ export default function PosPage() {
     }
     // A method the store has since stopped accepting must not stay selected.
     if (!acceptedMethods.includes(paymentType)) setPaymentType(acceptedMethods[0]);
+    setTenderedInput("");
     setIsPaymentOpen(true);
   }
 
@@ -461,6 +470,8 @@ export default function PosPage() {
       taxCents,
       totalCents,
       paymentMethod: paymentType,
+      tenderedCents,
+      changeCents,
       status: "completed",
       customerName: customerName.trim(),
       closedAt: null,
@@ -943,6 +954,40 @@ export default function PosPage() {
                   </Button>
                 ))}
               </div>
+              {isCashTender && (
+                <div className="space-y-3">
+                  <label className="text-xs text-muted-foreground uppercase tracking-wider block">Amount Tendered</label>
+                  <div className="grid grid-cols-4 gap-2">
+                    {tenderSuggestions(totalCents).map(cents => (
+                      <Button
+                        key={cents}
+                        variant="outline"
+                        className="rounded-xl"
+                        onClick={() => setTenderedInput((cents / 100).toFixed(2))}
+                        data-testid={`button-tender-quick-${cents}`}
+                      >
+                        {formatMoney(cents)}
+                      </Button>
+                    ))}
+                  </div>
+                  <Input
+                    type="number"
+                    inputMode="decimal"
+                    step="0.01"
+                    value={tenderedInput}
+                    onChange={e => setTenderedInput(e.target.value)}
+                    placeholder="0.00"
+                    className="rounded-xl text-lg"
+                    data-testid="input-tendered"
+                  />
+                  <div className="flex justify-between text-lg" data-testid="text-change-due">
+                    <span className="text-muted-foreground">Change Due</span>
+                    <span className={underTendered ? "text-destructive" : "font-medium"}>
+                      {underTendered ? `${formatMoney(totalCents - tenderedCents)} short` : formatMoney(changeCents)}
+                    </span>
+                  </div>
+                </div>
+              )}
               <div className="rounded-xl bg-muted/30 p-4 border border-border/50 text-sm">
                 <div className="flex justify-between mb-1">
                   <span className="text-muted-foreground">Subtotal</span>
@@ -967,7 +1012,14 @@ export default function PosPage() {
             </div>
             <DialogFooter>
               <Button variant="secondary" onClick={() => setIsPaymentOpen(false)}>Cancel</Button>
-              <Button onClick={handleRecordSale} className="rounded-2xl px-8">Record Sale</Button>
+              <Button
+                onClick={handleRecordSale}
+                disabled={underTendered}
+                className="rounded-2xl px-8"
+                data-testid="button-record-sale"
+              >
+                Record Sale
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

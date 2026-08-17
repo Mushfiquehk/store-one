@@ -372,6 +372,8 @@ export const storage = {
       taxCents: data.taxCents!,
       totalCents: data.totalCents!,
       paymentMethod: data.paymentMethod!,
+      tenderedCents: data.tenderedCents ?? null,
+      changeCents: data.changeCents ?? null,
       status: data.status!,
       linesJson: data.linesJson!,
       customerName: data.customerName ?? "",

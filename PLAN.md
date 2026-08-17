@@ -1323,7 +1323,12 @@ as a plain setting.
 `tenderMethods`, `validateSetting` in `shared/schema.ts`), the payment dialog renders one button per
 accepted method with no `(Setup Integration)` label, and the API rejects an empty list
 (`shared/api-handlers.test.ts`). `pos.tsx` no longer reads `integrations` at all — T3 still has to
-delete the state and its fake toggle. T2–T4 remain.
+delete the state and its fake toggle.
+T2 done — `tenderedCents` / `changeCents` on `Sale` (Dexie v11, `admin_sales` columns added by both
+the bootstrap and an `ALTER … IF NOT EXISTS`), a cash sale asks what was handed over with quick
+amounts from `tenderSuggestions`, change comes from `changeDueCents` (never negative; an
+under-tender disables Record Sale), and a non-cash sale records `tendered = total, change = 0`.
+Tests in `shared/tender.test.ts`. T3–T4 remain.
 **Vision pillar:** #3 — *"optional add-on features that the operator can setup and pay for later. The
 operator can optionally integrate 3rd party vendors."* This pillar has a page, a nav entry, and no
 implementation. Also #1: "setup **and operate**" — operating a till means taking the money.

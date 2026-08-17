@@ -146,6 +146,8 @@ export interface Sale {
   taxCents: number;
   totalCents: number;
   paymentMethod: string;
+  tenderedCents: number | null;
+  changeCents: number | null;
   status: string;
   linesJson: SaleLine[];
   customerName: string;
@@ -443,6 +445,15 @@ class PosDatabase extends Dexie {
       await tx.table("inventoryItems").toCollection().modify(item => {
         if (item.unitsPerPurchase === undefined) item.unitsPerPurchase = 1;
         if (item.purchaseUnit === undefined) item.purchaseUnit = null;
+      });
+    });
+
+    // Feature 16: what the customer handed over. Null on rows recorded before the till
+    // asked — an honest "unknown", distinguishable from a zero.
+    this.version(11).stores({}).upgrade(async tx => {
+      await tx.table("sales").toCollection().modify(sale => {
+        if (sale.tenderedCents === undefined) sale.tenderedCents = null;
+        if (sale.changeCents === undefined) sale.changeCents = null;
       });
     });
   }
