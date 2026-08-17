@@ -10,7 +10,7 @@ import type { Client, Backup, SyncRecord } from "./schema";
 import type { StoreSetting } from "../shared/api-handlers";
 import { eq, desc, sql, and, gt, inArray, isNull, count } from "drizzle-orm";
 import { costPerStockUnit } from "../shared/units";
-import { resolveByRecency, resolveConflict } from "../shared/sync-compare";
+import { SALES_TABLE, resolveByRecency, resolveConflict } from "../shared/sync-compare";
 
 export interface ListOptions {
   limit?: number;
@@ -267,6 +267,20 @@ export const storage: IStorage = {
     for (const change of changes) {
       const key = `${change.tableName}::${change.recordId}`;
       processedRecordKeys.add(key);
+
+      // A sale is device-authored and lands here as a row: admin_sales is the owner
+      // (SALES_OWNER in shared/sync-compare.ts). The syncRecords blob below stays as the
+      // sync bookkeeping it is — the lastSyncedAt window reads it — but until Feature 26 the
+      // blob was the *only* copy, so no server-side report could see a synced sale at all.
+      if (change.tableName === SALES_TABLE) {
+        await adminStorage.createSale({ ...(change.data as Record<string, unknown>), id: change.recordId });
+        if (change.deletedAt != null) {
+          // createSale writes a live row; a sale the device voided must not come back to life.
+          await db.update(adminSales)
+            .set({ deletedAt: change.deletedAt, updatedAt: change.updatedAt })
+            .where(eq(adminSales.id, change.recordId));
+        }
+      }
 
       const getAdminRecord = adminLookups[change.tableName];
       if (getAdminRecord) {
