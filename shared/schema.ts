@@ -50,6 +50,12 @@ const isTenderList = (v: unknown): v is string[] =>
  * till, so it is rejected at the API rather than trusted to the UI that sent it.
  */
 export function validateSetting(key: string, value: unknown): string | null {
+  if (key === MENU_CATEGORIES_KEY) {
+    if (!Array.isArray(value)) return "menu.categories must be a list of category names";
+    if (value.some(c => typeof c !== "string" || !c.trim())) return "A category name cannot be blank";
+    if (new Set(value).size !== value.length) return "Category names must be unique";
+    return null;
+  }
   if (key === TAX_INCLUSIVE_KEY) {
     return typeof value === "boolean" ? null : "tax.inclusive must be true or false";
   }
@@ -72,6 +78,13 @@ export function tenderMethods(value: unknown): string[] {
 
 // The tax rate the operator set, in percent. One key, shared by the till and the server's
 // order path — if the two ever read different keys they charge different amounts.
+// The till's category bar, in the operator's order.
+//
+// A setting rather than a Set over products, deliberately: an order has to be chosen, an empty
+// category has to be able to exist so the operator can see where things should go, and renaming
+// one has to be a single write rather than an edit to every product that happens to mention it.
+export const MENU_CATEGORIES_KEY = "menu.categories";
+
 export const TAX_RATE_KEY = "tax.ratePct";
 
 /**
@@ -181,6 +194,12 @@ export type SyncRecord = {
 export type Product = {
   id: string;
   name: string;
+  /**
+   * Where this product sits on the till. Optional: a row written before Feature 25 T2 has
+   * none, and `categoryOf()` in shared/menu-grid.ts falls back to its first tag so nothing
+   * has to be re-tagged.
+   */
+  category?: string | null;
   type: "RETAIL" | "RESTAURANT";
   isComposite: boolean;
   availableAsIngredient: boolean;

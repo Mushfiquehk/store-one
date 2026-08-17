@@ -54,6 +54,7 @@ async function initSchema() {
     CREATE TABLE IF NOT EXISTS admin_products (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
+      category TEXT,
       type TEXT NOT NULL DEFAULT 'RETAIL',
       is_composite BOOLEAN NOT NULL DEFAULT false,
       available_as_ingredient BOOLEAN NOT NULL DEFAULT false,
@@ -123,6 +124,8 @@ async function initSchema() {
   `);
   // CREATE TABLE IF NOT EXISTS does nothing to a database that already has the table, so new
   // columns need their own statement. The DEFAULT backfills existing rows to today's behaviour.
+  // Feature 25 T2: products get a category of their own, seeded from their first tag.
+  await db.execute(sql`ALTER TABLE admin_products ADD COLUMN IF NOT EXISTS category TEXT`);
   await db.execute(sql`ALTER TABLE admin_inventory_items ADD COLUMN IF NOT EXISTS purchase_unit TEXT`);
   await db.execute(sql`ALTER TABLE admin_inventory_items ADD COLUMN IF NOT EXISTS units_per_purchase DOUBLE PRECISION NOT NULL DEFAULT 1`);
   await db.execute(sql`

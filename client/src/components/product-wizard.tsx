@@ -219,6 +219,8 @@ export default function ProductWizard({
           name: name.trim(),
           type: "RETAIL",
           isComposite: false,
+          // The category is its own field now; tags stay as tags.
+          category: tagList[0] ?? null,
           attributes: { tax_exempt: taxExempt, tags: tagList },
         });
 
@@ -267,6 +269,8 @@ export default function ProductWizard({
           type: "RESTAURANT",
           isComposite: true,
           availableAsIngredient,
+          // The category is its own field now; tags stay as tags.
+          category: tagList[0] ?? null,
           attributes: { tax_exempt: taxExempt, tags: tagList },
         });
 
