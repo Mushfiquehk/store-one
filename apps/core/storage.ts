@@ -4,7 +4,7 @@ import {
   adminProducts, adminVariants, adminModifierGroups,
   adminProductModifierGroups, adminModifiers, adminInventoryItems,
   adminBillOfMaterials, adminInvoices, adminInvoiceLineItems,
-  adminSales, scheduleShifts, storeSettings,
+  adminSales, scheduleShifts, storeSettings, channels,
 } from "./schema";
 import type { Client, Backup, SyncRecord } from "./schema";
 import type { StoreSetting } from "../../packages/domain/api-handlers";
@@ -1203,5 +1203,50 @@ export const scheduleStorage = {
     }));
     const rows = await db.insert(scheduleShifts).values(newShifts).returning();
     return rows;
+  },
+};
+/**
+ * Channels, on Postgres. The rules live in packages/domain/channels.ts and are
+ * applied by the shared handlers before anything reaches here — this is
+ * persistence and nothing else.
+ *
+ * Soft deletion, like every other admin row: a channel is withdrawn, not
+ * erased, because sales keep naming it long after an operator stops using it.
+ */
+export const channelStorage = {
+  async list() {
+    return db.select().from(channels).where(isNull(channels.deletedAt));
+  },
+
+  async get(key: string) {
+    const [row] = await db
+      .select()
+      .from(channels)
+      .where(and(eq(channels.key, key), isNull(channels.deletedAt)))
+      .limit(1);
+    return row ?? null;
+  },
+
+  async create(data: Record<string, unknown>) {
+    const [row] = await db.insert(channels).values(data as typeof channels.$inferInsert).returning();
+    return row;
+  },
+
+  async update(key: string, data: Record<string, unknown>) {
+    // The key is the primary key and the identity; a payload carrying one is
+    // ignored rather than trusted, so no edit can move a row out from under the
+    // sales pointing at it.
+    const { key: _ignored, ...rest } = data;
+    const [row] = await db
+      .update(channels)
+      .set({ ...rest, updatedAt: Date.now() } as Partial<typeof channels.$inferInsert>)
+      .where(and(eq(channels.key, key), isNull(channels.deletedAt)))
+      .returning();
+    return row ?? null;
+  },
+
+  async delete(key: string) {
+    const now = Date.now();
+    await db.update(channels).set({ deletedAt: now, updatedAt: now }).where(eq(channels.key, key));
   },
 };

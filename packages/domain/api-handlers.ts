@@ -4,6 +4,7 @@ import { ACTIONS, actionLogEntry, type ActionLogEntry, type ActionLogInput } fro
 import type { Modifier, ModifierGroup, Product, ProductModifierGroup, Variant } from "./schema";
 import { productMix, salesSeries, salesSummary, type Granularity, type ReportSale } from "./reports";
 import { menuMargins, type MarginData, type MarginVariant } from "./pricing";
+import { channelDeleteError, channelFromInput, validateChannel, type Channel } from "./channels";
 
 export interface ApiRequest {
   method: string;
@@ -91,6 +92,16 @@ export interface ApiAdminStorage {
    * API — the log is evidence, not a precondition for taking money.
    */
   appendActionLog?(entry: ActionLogEntry): Promise<unknown>;
+
+  /**
+   * Channels — the routes by which orders reach the business. Keyed by slug, not
+   * by a generated id; `key` is the identity everywhere below.
+   */
+  listChannels(): Promise<unknown[]>;
+  getChannel(key: string): Promise<unknown | null>;
+  createChannel(data: Record<string, unknown>): Promise<unknown>;
+  updateChannel(key: string, data: Record<string, unknown>): Promise<unknown | null>;
+  deleteChannel(key: string): Promise<void>;
 
   listSettings(): Promise<StoreSetting[]>;
   getSetting(key: string): Promise<StoreSetting | null>;
@@ -389,6 +400,89 @@ export function createApiHandlers(store: ApiAdminStorage) {
         const result = await store.createInvoiceWithLineItems(body.invoice, body.lineItems);
         return { status: 200, data: result };
       } catch { return { status: 500, data: { error: "Failed to create invoice with line items" } }; }
+    },
+  });
+
+  // Channels. Written out rather than run through buildCrudHandlers because the
+  // rules are the point: a key is immutable, the till cannot be deleted or
+  // deactivated, and every write is validated by packages/domain/channels.ts. A
+  // generic CRUD route would happily let a caller delete the channel every sale
+  // ever rung points at.
+  routes.push({
+    method: "GET",
+    pattern: "/api/admin/channels",
+    handler: async () => {
+      try { return { status: 200, data: await store.listChannels() }; }
+      catch { return { status: 500, data: { error: "Failed to list channels" } }; }
+    },
+  });
+
+  routes.push({
+    method: "GET",
+    pattern: "/api/admin/channels/:key",
+    handler: async (req) => {
+      try {
+        const row = await store.getChannel(req.params.key);
+        if (!row) return { status: 404, data: { error: "Not found" } };
+        return { status: 200, data: row };
+      } catch { return { status: 500, data: { error: "Failed to get channel" } }; }
+    },
+  });
+
+  routes.push({
+    method: "POST",
+    pattern: "/api/admin/channels",
+    handler: async (req) => {
+      const body = req.body as Record<string, unknown> | undefined;
+      if (!body || typeof body !== "object") {
+        return { status: 400, data: { error: "Request body must be a JSON object" } };
+      }
+      const invalid = validateChannel(body);
+      if (invalid) return { status: 400, data: { error: invalid } };
+      try {
+        // Creating over an existing key would silently rewrite a live channel —
+        // and its key is the thing sales point at.
+        if (await store.getChannel(String(body.key))) {
+          return { status: 409, data: { error: `A channel named ${String(body.key)} already exists` } };
+        }
+        return { status: 200, data: await store.createChannel(channelFromInput(body, Date.now()) as unknown as Record<string, unknown>) };
+      } catch { return { status: 500, data: { error: "Failed to create channel" } }; }
+    },
+  });
+
+  routes.push({
+    method: "PUT",
+    pattern: "/api/admin/channels/:key",
+    handler: async (req) => {
+      const body = req.body as Record<string, unknown> | undefined;
+      if (!body || typeof body !== "object") {
+        return { status: 400, data: { error: "Request body must be a JSON object" } };
+      }
+      try {
+        const existing = (await store.getChannel(req.params.key)) as Channel | null;
+        if (!existing) return { status: 404, data: { error: "Not found" } };
+        const invalid = validateChannel(body, existing);
+        if (invalid) return { status: 400, data: { error: invalid } };
+        const row = await store.updateChannel(req.params.key, { ...body, key: existing.key, updatedAt: Date.now() });
+        if (!row) return { status: 404, data: { error: "Not found" } };
+        return { status: 200, data: row };
+      } catch { return { status: 500, data: { error: "Failed to update channel" } }; }
+    },
+  });
+
+  routes.push({
+    method: "DELETE",
+    pattern: "/api/admin/channels/:key",
+    handler: async (req) => {
+      const refused = channelDeleteError(req.params.key);
+      if (refused) return { status: 409, data: { error: refused } };
+      try {
+        if (!(await store.getChannel(req.params.key))) {
+          return { status: 404, data: { error: "Not found" } };
+        }
+        await store.deleteChannel(req.params.key);
+        return { status: 200, data: { success: true } };
+      } catch { return { status: 500, data: { error: "Failed to delete channel" } }; }
     },
   });
 

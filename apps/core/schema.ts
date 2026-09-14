@@ -205,3 +205,41 @@ export type InsertBackup = z.infer<typeof insertBackupSchema>;
 export type Client = typeof clients.$inferSelect;
 export type Backup = typeof backups.$inferSelect;
 export type SyncRecord = typeof syncRecords.$inferSelect;
+
+/**
+ * A Channel is a named route by which orders reach the business — the till is
+ * one, each storefront deployment is one. The rules about what a channel may be
+ * called and which one cannot be deleted live in packages/domain/channels.ts,
+ * so the till's Dexie adapter enforces the same ones this does.
+ *
+ * Keyed by the slug rather than a generated id: it is what a storefront carries
+ * in its environment and what a sale records, and both are read by people more
+ * often than by code.
+ */
+export const channels = pgTable("channels", {
+  key: text("key").primaryKey(),
+  name: text("name").notNull(),
+  kind: text("kind").notNull().default("storefront"),
+  locationId: text("location_id"),
+  brandId: text("brand_id"),
+  active: pgBoolean("active").notNull().default(true),
+  updatedAt: bigint("updated_at", { mode: "number" }).notNull(),
+  deletedAt: bigint("deleted_at", { mode: "number" }),
+});
+
+/**
+ * How a storefront authenticates to the core. Hashed at rest and shown once at
+ * creation — the table holds no value anybody can read back and use.
+ *
+ * Feature 28 T1 creates it; T3 gives it the middleware that resolves a
+ * presented token to its channel.
+ */
+export const channelTokens = pgTable("channel_tokens", {
+  id: text("id").primaryKey(),
+  channelKey: text("channel_key").notNull(),
+  tokenHash: text("token_hash").notNull(),
+  label: text("label").notNull().default(""),
+  createdAt: bigint("created_at", { mode: "number" }).notNull(),
+  lastUsedAt: bigint("last_used_at", { mode: "number" }),
+  revokedAt: bigint("revoked_at", { mode: "number" }),
+});

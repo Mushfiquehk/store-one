@@ -227,6 +227,43 @@ async function initSchema() {
       updated_at BIGINT NOT NULL
     )
   `);
+  // Feature 28: a Channel is a named route by which orders reach the business.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS channels (
+      key TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'storefront',
+      location_id TEXT,
+      brand_id TEXT,
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      updated_at BIGINT NOT NULL,
+      deleted_at BIGINT
+    )
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS channel_tokens (
+      id TEXT PRIMARY KEY,
+      channel_key TEXT NOT NULL REFERENCES channels(key),
+      token_hash TEXT NOT NULL,
+      label TEXT NOT NULL DEFAULT '',
+      created_at BIGINT NOT NULL,
+      last_used_at BIGINT,
+      revoked_at BIGINT
+    )
+  `);
+  // A token is looked up by the hash of what was presented, on every storefront
+  // request. Unique, because two tokens hashing the same is one token.
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS channel_tokens_hash_idx ON channel_tokens(token_hash)`);
+  // The till is not a channel an operator added — it is the one that was already
+  // there. Seeded here rather than in the demo data because it is true of an
+  // empty database too, and ON CONFLICT DO NOTHING keeps a rename from being
+  // undone on the next boot.
+  await db.execute(sql`
+    INSERT INTO channels (key, name, kind, active, updated_at)
+    VALUES ('pos', 'Front counter', 'pos', TRUE, ${Date.now()})
+    ON CONFLICT (key) DO NOTHING
+  `);
+
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS schedule_shifts (
       id TEXT PRIMARY KEY,

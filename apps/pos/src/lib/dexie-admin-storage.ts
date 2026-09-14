@@ -1,3 +1,4 @@
+import type { Channel } from "@shared/channels";
 import { ledgerRows } from "@shared/ledger";
 import type { ActionLogEntry } from "@shared/action-log";
 import { db } from "./db";
@@ -509,6 +510,34 @@ export const dexieAdminStorage: ApiAdminStorage = {
     // put(), never update(): a new id every time, and nothing rewrites an existing row.
     await db.actionLog.put(entry);
     return entry;
+  },
+
+  async listChannels() {
+    return notDeleted(await db.channels.toArray());
+  },
+  async getChannel(key: string) {
+    const row = await db.channels.get(key);
+    return row && !row.deletedAt ? row : null;
+  },
+  async createChannel(data: Record<string, unknown>) {
+    const channel = data as unknown as Channel;
+    await db.channels.put(channel);
+    return channel;
+  },
+  async updateChannel(key: string, data: Record<string, unknown>) {
+    const existing = await db.channels.get(key);
+    if (!existing || existing.deletedAt) return null;
+    // The key is the identity — an incoming one is dropped rather than applied,
+    // so no edit can move a row out from under the sales pointing at it.
+    const { key: _ignored, ...rest } = data;
+    const next = { ...existing, ...rest, key, updatedAt: Date.now() } as Channel;
+    await db.channels.put(next);
+    return next;
+  },
+  async deleteChannel(key: string) {
+    const existing = await db.channels.get(key);
+    if (!existing) return;
+    await db.channels.put({ ...existing, deletedAt: Date.now(), updatedAt: Date.now() });
   },
 
   async listSettings() {

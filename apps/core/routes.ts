@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { storage, adminStorage, scheduleStorage, settingsStorage, type ListOptions } from "./storage";
+import { storage, adminStorage, scheduleStorage, settingsStorage, channelStorage, type ListOptions } from "./storage";
 import { z } from "zod";
 import { createInsertSchema } from "drizzle-zod";
 import { SYNC_CATEGORY_TABLES, type SyncCategory } from "../../packages/domain/schema";
@@ -647,6 +647,12 @@ const serverAdminAdapter: ApiAdminStorage = {
 
   async listTimePunches() { throw new Error(EMPLOYEES_NOT_ON_SERVER); },
 
+  listChannels: () => channelStorage.list(),
+  getChannel: (key) => channelStorage.get(key),
+  createChannel: (d) => channelStorage.create(d),
+  updateChannel: (key, d) => channelStorage.update(key, d),
+  deleteChannel: (key) => channelStorage.delete(key),
+
   listSettings: () => settingsStorage.list(),
   getSetting: (key) => settingsStorage.get(key),
   setSetting: (key, value) => settingsStorage.set(key, value),
@@ -1183,6 +1189,12 @@ router.post("/api/schedule/copy-week", async (req: Request, res: Response) => {
     res.status(500).json({ error: "Failed to copy week" });
   }
 });
+
+router.get("/api/admin/channels", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
+router.get("/api/admin/channels/:key", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
+router.post("/api/admin/channels", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
+router.put("/api/admin/channels/:key", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
+router.delete("/api/admin/channels/:key", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
 
 router.get("/api/settings", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
 router.get("/api/settings/:key", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
