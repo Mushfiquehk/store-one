@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { getDemoAdminData } from "./seed-data";
-import { computeInventoryDeductions } from "../shared/depletion";
+import { computeInventoryDeductions } from "../../packages/domain/depletion";
 
 // The proof the two copies of the depletion walk were equivalent before one of them was
 // deleted: a real seeded drink, rung the way the till rings it, with the deltas written

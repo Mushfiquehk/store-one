@@ -1,0 +1,8 @@
+{
+  "name": "@store-one/domain",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Pure domain logic — pricing, tax, depletion, reports, the API handler layer. No I/O, no database, no DOM. Imported by every app; imports none of them.",
+  "main": "./schema.ts"
+}

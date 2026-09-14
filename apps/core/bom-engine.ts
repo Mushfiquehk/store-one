@@ -5,7 +5,7 @@ import {
 } from "./schema";
 import { eq, isNull } from "drizzle-orm";
 // One depletion walk, shared with the till. This file kept its own copy until Feature 15 T1.
-import { computeInventoryDeductions } from "../shared/depletion";
+import { computeInventoryDeductions } from "../../packages/domain/depletion";
 import { buildSaleRow } from "./storage";
 
 export { computeInventoryDeductions };

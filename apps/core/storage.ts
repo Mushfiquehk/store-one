@@ -7,10 +7,10 @@ import {
   adminSales, scheduleShifts, storeSettings,
 } from "./schema";
 import type { Client, Backup, SyncRecord } from "./schema";
-import type { StoreSetting } from "../shared/api-handlers";
+import type { StoreSetting } from "../../packages/domain/api-handlers";
 import { eq, desc, sql, and, gt, inArray, isNull, count } from "drizzle-orm";
-import { costPerStockUnit } from "../shared/units";
-import { SALES_TABLE, resolveByRecency, resolveConflict } from "../shared/sync-compare";
+import { costPerStockUnit } from "../../packages/domain/units";
+import { SALES_TABLE, resolveByRecency, resolveConflict } from "../../packages/domain/sync-compare";
 
 export interface ListOptions {
   limit?: number;

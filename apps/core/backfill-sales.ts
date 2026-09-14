@@ -2,7 +2,7 @@ import { db } from "./db";
 import { adminSales, syncRecords } from "./schema";
 import { eq, inArray } from "drizzle-orm";
 import { adminStorage } from "./storage";
-import { SALES_TABLE } from "../shared/sync-compare";
+import { SALES_TABLE } from "../../packages/domain/sync-compare";
 
 /**
  * Promote sales that only ever existed as sync blobs into `admin_sales` rows.

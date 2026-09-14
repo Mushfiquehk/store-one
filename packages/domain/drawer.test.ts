@@ -238,7 +238,7 @@ test("the action-log summary reads on its own", () => {
 // thing this runner can hold — and what it pins is exactly the mistake that would undo the
 // feature (rendering expected in the counting step, or pre-filling the field from it).
 test("the drawer dialog cannot show the expected figure before the count", () => {
-  const shell = readFileSync(new URL("../client/src/components/app-shell.tsx", import.meta.url), "utf8");
+  const shell = readFileSync(new URL("../../client/src/components/app-shell.tsx", import.meta.url), "utf8");
 
   // The expected figure is rendered only inside the reveal branch, which exists after submit.
   const revealAt = shell.indexOf('data-testid="drawer-reveal"');

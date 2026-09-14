@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { getDemoAdminData } from "./seed-data";
-import { menuMargins, type MarginData } from "../shared/pricing";
+import { menuMargins, type MarginData } from "../../packages/domain/pricing";
 
 function seedMarginData(unpricedItemName?: string): MarginData {
   const data = getDemoAdminData();

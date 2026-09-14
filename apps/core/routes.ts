@@ -2,8 +2,8 @@ import { Router, type Request, type Response } from "express";
 import { storage, adminStorage, scheduleStorage, settingsStorage, type ListOptions } from "./storage";
 import { z } from "zod";
 import { createInsertSchema } from "drizzle-zod";
-import { SYNC_CATEGORY_TABLES, type SyncCategory } from "../shared/schema";
-import { createApiHandlers, type ApiAdminStorage, type ApiRequest } from "../shared/api-handlers";
+import { SYNC_CATEGORY_TABLES, type SyncCategory } from "../../packages/domain/schema";
+import { createApiHandlers, type ApiAdminStorage, type ApiRequest } from "../../packages/domain/api-handlers";
 import { getDemoSeedRecords, getDemoAdminData, DEMO_PREFIX_VALUE } from "./seed-data";
 import { db } from "./db";
 import {

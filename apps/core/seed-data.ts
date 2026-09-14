@@ -9,7 +9,7 @@ import type {
   Employee,
   Sale,
   SaleLine,
-} from "../shared/schema";
+} from "../../packages/domain/schema";
 
 const DEMO_PREFIX = "demo_";
 

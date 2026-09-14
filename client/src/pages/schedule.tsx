@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useStore, type Employee } from "@/lib/store";
 import { useToast } from "@/hooks/use-toast";
-import type { ScheduleShift } from "../../../shared/schema";
+import type { ScheduleShift } from "@shared/schema";
 
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const HOUR_HEIGHT = 60;
