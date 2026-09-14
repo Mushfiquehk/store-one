@@ -1,5 +1,6 @@
 import { db } from "./db";
 import { POS_CHANNEL_KEY } from "@shared/channels";
+import { normalisedPurchaseUnit, normalisedUnitsPerPurchase } from "@shared/migrations";
 import { costPerStockUnit, stockUnitsReceived } from "@shared/units";
 import { WASTE_REASONS, ledgerRows, type InventoryLedgerEntry, type LedgerContext, type LedgerReason, type WasteReason } from "@shared/ledger";
 import {
@@ -308,6 +309,14 @@ export const storage = {
       currentQuantity: data.currentQuantity ?? 0,
       lowStockThreshold: data.lowStockThreshold ?? null,
       lastPurchasePrice: data.lastPurchasePrice ?? null,
+      // These two were missing entirely until Feature 36 T2. The till's own copy
+      // of InventoryItem had them optional while packages/domain and the server
+      // column had them required, so this writer compiled without them and every
+      // item it created carried no purchase factor — the exact input Feature 11
+      // identified as making every cost wrong. dexie-admin-storage.ts, the other
+      // writer, has always set them.
+      purchaseUnit: normalisedPurchaseUnit(data.purchaseUnit),
+      unitsPerPurchase: normalisedUnitsPerPurchase(data.unitsPerPurchase),
       updatedAt: data.updatedAt ?? now,
       deletedAt: null,
     };

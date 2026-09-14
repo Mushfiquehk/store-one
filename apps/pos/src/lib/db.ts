@@ -12,205 +12,61 @@ import type {
   SaleLine,
   PricingStrategy,
   ComboItemType,
+  Product,
+  Variant,
+  ModifierGroup,
+  ProductModifierGroup,
+  Modifier,
+  InventoryItem,
+  Invoice,
+  InvoiceLineItem,
+  BomEntry,
+  Employee,
+  TimePunch,
+  Sale,
+  Combo,
+  ComboItem,
+  ProductGroup,
+  ProductGroupItem,
 } from "@shared/schema";
 
 export type { InventoryLedgerEntry };
 export type { ActionLogEntry };
 export type { CashMovement, DrawerSession };
-export type { ProductAttributes, ModifierScaleFactors, ScaleFactorMatrix, SaleLine, PricingStrategy, ComboItemType };
+/**
+ * The entity types are packages/domain's, re-exported so every `from "@/lib/db"`
+ * in the till keeps working.
+ *
+ * They used to be declared here as well — sixteen interfaces that shadowed the
+ * domain's sixteen and were kept equal by hand. Feature 28 T2 found out what that
+ * costs: a field added to the domain `Sale` produced no error here, because this
+ * file was never reading it, and the till would simply have stopped carrying the
+ * field. One of the sixteen had already drifted by then — see Feature 36.
+ *
+ * packages/domain/no-shadow.test.ts fails if a second declaration appears.
+ */
+export type {
+  ProductAttributes, ModifierScaleFactors, ScaleFactorMatrix, SaleLine, PricingStrategy, ComboItemType,
+  Product, Variant, ModifierGroup, ProductModifierGroup, Modifier, InventoryItem,
+  Invoice, InvoiceLineItem, BomEntry, Employee, TimePunch, Sale,
+  Combo, ComboItem, ProductGroup, ProductGroupItem,
+};
 
-export interface Product {
-  id: string;
-  name: string;
-  /** Till category. Absent on rows written before Feature 25 T2 — see categoryOf(). */
-  category?: string | null;
-  /** Position within its category. Absent on older rows — see sortProducts(). */
-  sortOrder?: number | null;
-  type: "RETAIL" | "RESTAURANT";
-  isComposite: boolean;
-  availableAsIngredient: boolean;
-  attributes: ProductAttributes | null;
-  createdAt: string | null;
-  updatedAt: number;
-  deletedAt: number | null;
-}
 
-export interface Variant {
-  id: string;
-  productId: string;
-  sku: string | null;
-  name: string;
-  basePrice: number;
-  directInventoryId: string | null;
-  updatedAt: number;
-  deletedAt: number | null;
-}
 
-export interface ModifierGroup {
-  id: string;
-  name: string;
-  minSelections: number;
-  maxSelections: number;
-  updatedAt: number;
-  deletedAt: number | null;
-}
 
-export interface ProductModifierGroup {
-  productId: string;
-  modifierGroupId: string;
-  scaleFactors: ModifierScaleFactors | null;
-  updatedAt: number;
-  deletedAt: number | null;
-}
 
-export interface Modifier {
-  id: string;
-  modifierGroupId: string;
-  name: string;
-  baseUpcharge: number;
-  inventoryItemId: string | null;
-  quantityPerUse: number | null;
-  updatedAt: number;
-  deletedAt: number | null;
-}
 
-export interface InventoryItem {
-  id: string;
-  name: string;
-  unitOfMeasure: string;
-  currentQuantity: number;
-  lowStockThreshold: number | null;
-  /** Cost of one *stocking* unit — the unit BOM quantities are in. */
-  lastPurchasePrice: number | null;
-  /** Label for the unit the item is bought in ("bag", "case"). Null when unknown. */
-  purchaseUnit?: string | null;
-  /**
-   * How many stocking units come in one purchase unit. 1 means bought and stocked the same way.
-   *
-   * Optional here but NOT NULL server-side: a row written before the v10 upgrade genuinely does
-   * not have the field yet, and rows can also arrive from a device that predates it. Read it as
-   * `?? 1` rather than assuming it is present.
-   */
-  unitsPerPurchase?: number;
-  updatedAt: number;
-  deletedAt: number | null;
-}
 
-export interface Invoice {
-  id: string;
-  supplierName: string;
-  invoiceNumber: string;
-  date: string;
-  status: string;
-  notes: string;
-  updatedAt: number;
-  deletedAt: number | null;
-}
 
-export interface InvoiceLineItem {
-  id: string;
-  invoiceId: string;
-  inventoryItemId: string;
-  description: string;
-  quantity: number;
-  unitPriceCents: number;
-  updatedAt: number;
-  deletedAt: number | null;
-}
 
-export interface BomEntry {
-  id: string;
-  sourceType: string;
-  sourceId: string;
-  inventoryItemId: string;
-  sourceProductId: string | null;
-  quantityDeducted: number;
-  scaleFactorMatrix: ScaleFactorMatrix | null;
-  overrideModifierGroupId: string | null;
-  updatedAt: number;
-  deletedAt: number | null;
-}
 
-export interface Employee {
-  id: string;
-  name: string;
-  role: string;
-  payRate: number;
-  pin: string;
-  email: string;
-  updatedAt: number;
-  deletedAt: number | null;
-}
 
-export interface TimePunch {
-  id: string;
-  employeeId: string;
-  timeIn: number;
-  timeOut: number | null;
-  updatedAt: number;
-  deletedAt: number | null;
-}
 
-export interface Sale {
-  id: string;
-  createdAt: number;
-  subtotalCents: number;
-  taxCents: number;
-  totalCents: number;
-  paymentMethod: string;
-  tenderedCents: number | null;
-  changeCents: number | null;
-  taxRatePct: number | null;
-  taxInclusive: boolean | null;
-  /** Who rang it, or null when nobody was on the till. */
-  employeeId: string | null;
-  /** Which channel it came in through — 'pos' for the till, a storefront's key online. */
-  channelKey: string;
-  status: string;
-  linesJson: SaleLine[];
-  customerName: string;
-  closedAt: number | null;
-  comboDiscountCents: number;
-  updatedAt: number;
-  deletedAt: number | null;
-}
 
-export interface Combo {
-  id: string;
-  name: string;
-  pricingStrategy: PricingStrategy;
-  fixedPriceCents: number | null;
-  discountValueCents: number | null;
-  discountPercent: number | null;
-  active: boolean;
-  updatedAt: number;
-  deletedAt: number | null;
-}
 
-export interface ComboItem {
-  id: string;
-  comboId: string;
-  itemType: ComboItemType;
-  itemId: string;
-  updatedAt: number;
-  deletedAt: number | null;
-}
 
-export interface ProductGroup {
-  id: string;
-  name: string;
-  updatedAt: number;
-  deletedAt: number | null;
-}
 
-export interface ProductGroupItem {
-  id: string;
-  productGroupId: string;
-  itemType: "PRODUCT" | "VARIANT";
-  itemId: string;
-  updatedAt: number;
-  deletedAt: number | null;
-}
 
 class PosDatabase extends Dexie {
   products!: Table<Product, string>;
