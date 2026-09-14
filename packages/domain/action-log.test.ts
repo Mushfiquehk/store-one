@@ -53,14 +53,14 @@ test("an unattributed action is SYSTEM with a null actor, not a blank employee",
 // The property that makes the log worth having, enforced rather than promised: nothing in the
 // codebase updates or deletes one of these rows.
 test("nothing in the codebase can rewrite the action log", () => {
-  const roots = ["client/src/lib", "client/src/pages", "shared", "server"];
+  const roots = ["client/src/lib", "client/src/pages", "packages/domain", "apps/core"];
   const offenders: string[] = [];
 
   const walk = (dir: string) => {
-    for (const entry of readdirSync(new URL(`../${dir}`, import.meta.url), { withFileTypes: true })) {
+    for (const entry of readdirSync(new URL(`../../${dir}`, import.meta.url), { withFileTypes: true })) {
       if (entry.isDirectory()) { walk(`${dir}/${entry.name}`); continue; }
       if (!/\.(ts|tsx)$/.test(entry.name) || entry.name.endsWith(".test.ts")) continue;
-      const source = readFileSync(new URL(`../${dir}/${entry.name}`, import.meta.url), "utf8");
+      const source = readFileSync(new URL(`../../${dir}/${entry.name}`, import.meta.url), "utf8");
       for (const forbidden of [
         /actionLog\.update/, /actionLog\.delete/, /actionLog\.clear/, /actionLog\.modify/,
         /update\((\s*)actionLog/, /delete\((\s*)actionLog/,

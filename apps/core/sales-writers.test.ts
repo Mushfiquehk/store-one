@@ -173,7 +173,7 @@ test("a test order is a visible sale and not revenue", async t => {
   const { adminStorage } = await import("./storage");
   const { adminSales } = await import("./schema");
   const { eq } = await import("drizzle-orm");
-  const { salesSummary } = await import("../shared/reports");
+  const { salesSummary } = await import("../../packages/domain/reports");
   await initDb();
 
   const TEST_ORDER = { ...SALE, id: "twow_test1", totalCents: 5_000, isTestOrder: true };

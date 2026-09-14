@@ -823,7 +823,11 @@ app.** Shared code moves to `packages/domain`.
 Root `package.json` with `workspaces: ["packages/*", "apps/*"]`. `shared/` → `packages/domain`,
 `server/` → `apps/core`. Update the `@shared` alias in `vite.config.ts` and the test glob. **No file
 contents change beyond import paths.**
-*Check:* `npm test` passes with the same test count as before the move, and `npm run check` is clean.
+*Check:* `npm test` passes with the same test count as before the move (197 tests, 192 passing, 5
+skipped), and `tsc` reports no *new* errors. **`npm run check` is not clean and was not clean before
+this plan** — it reports six pre-existing errors in `client/src` (a `StoreContextType` mismatch, two
+`downlevelIteration` iterations in `sync.ts` and two in `pos.tsx`, and a `PosDatabase` cast). Fixing
+them is not this task's job; pretending the check is green would be.
 
 **T2 — Move the till.**
 `client/` → `apps/pos`, with its own `package.json`, `vite.config.ts` and build target. The `@`
