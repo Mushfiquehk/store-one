@@ -715,7 +715,9 @@ with no colour written outside the token file.
 
 ## Feature 28 — Channels: every order knows where it came from
 
-**Status:** planned
+**Status:** done — T1–T4 complete. Channels are a registry with the till's own entry protected,
+every sale records the channel it came from, a storefront authenticates with a revocable token whose
+rejections give nothing away, and revenue splits by channel.
 **Vision pillar:** #5 — profitability over a period is meaningless if the revenue cannot be split by
 where it came from. #6 too: an autopsy of a decision needs to know which channel it affected.
 **Depends on:** Feature 27. **Supersedes the scope of Feature 4** — build the token with a channel
@@ -772,10 +774,17 @@ enumerate valid ones. This is Feature 4's substance with one more column.
 responses; a valid token resolves to its channel.
 
 **T4 — Reports learn the axis.**
-`channelKey` as an optional filter on the sales-summary and product-mix reports in
-`packages/domain/reports.ts`, and a channel column in the console's report view.
-*Check:* A report filtered to `pos` excludes a seeded non-POS sale, and the unfiltered total still
-equals the sum of the per-channel totals.
+`channelKey` as an optional filter on the sales-summary, series and product-mix reports in
+`packages/domain/reports.ts`, plus `revenueByChannel` — the split an operator actually asks for
+once there is a storefront ("how much of that was online?").
+
+The breakdown lands in **the till's report page**, not the console's: `apps/admin` is still the
+scaffold Feature 27 T3 stood up and has no report view to put a column in. It moves when the console
+grows one. The table renders only when there is more than one channel, or a store with no storefront
+gets a one-row table repeating the number on the card above it.
+*Check:* A report filtered to `pos` excludes a non-POS sale, and the unfiltered total still equals
+the sum of the per-channel totals — including sales that name no channel, which must land on the
+till rather than vanishing from the split.
 
 ### Non-goals
 

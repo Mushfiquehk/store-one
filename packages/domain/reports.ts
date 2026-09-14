@@ -26,7 +26,33 @@ export type ReportSale = {
   /** What this sale was charged at. Reports read the stamped tax, never a current rate. */
   taxRatePct?: number | null;
   taxInclusive?: boolean | null;
+  /**
+   * Which channel the sale came in through. Optional here, though not on the row:
+   * this type describes what a report *reads*, and a caller handing in rows from
+   * before Feature 28 should get a report rather than a crash.
+   */
+  channelKey?: string | null;
 };
+
+/**
+ * Sales are attributed to the till when they say nothing, which is what every row
+ * written before channels existed says. One definition, so a report and a split of
+ * that same report cannot disagree about where an unlabelled sale belongs.
+ */
+export const UNATTRIBUTED_CHANNEL = "pos";
+
+export function channelOf(sale: ReportSale): string {
+  return sale.channelKey || UNATTRIBUTED_CHANNEL;
+}
+
+/**
+ * Narrow to one channel. Applied *after* realSales everywhere, so a test order
+ * cannot reappear by being filtered for rather than filtered out.
+ */
+export function forChannel(sales: ReportSale[], channel?: string | null): ReportSale[] {
+  if (!channel) return sales;
+  return sales.filter(sale => channelOf(sale) === channel);
+}
 
 /** Real trade only. Every report here starts from this, so none of them can forget. */
 export function realSales(sales: ReportSale[]): ReportSale[] {
@@ -37,6 +63,8 @@ export type Granularity = "hourly" | "daily" | "monthly";
 
 export type SalesWindow = {
   granularity: Granularity;
+  /** Narrow to one channel. Absent means every channel, which is the total. */
+  channel?: string;
   since?: number;
   until?: number;
   /**
@@ -107,7 +135,7 @@ function bucketLabel(start: number, granularity: Granularity): string {
  * to draw.
  */
 export function salesSeries(allSales: ReportSale[], window: SalesWindow): SalesBucket[] {
-  const sales = realSales(allSales);
+  const sales = forChannel(realSales(allSales), window.channel);
   const { granularity, since, until, fill } = window;
   const buckets = new Map<number, SalesBucket>();
 
@@ -148,8 +176,11 @@ export function salesSeries(allSales: ReportSale[], window: SalesWindow): SalesB
 }
 
 /** The four scalars the sales-summary endpoint has always returned, over a window. */
-export function salesSummary(allSales: ReportSale[], window: { since?: number; until?: number } = {}) {
-  const inWindow = realSales(allSales).filter(s => {
+export function salesSummary(
+  allSales: ReportSale[],
+  window: { since?: number; until?: number; channel?: string } = {},
+) {
+  const inWindow = forChannel(realSales(allSales), window.channel).filter(s => {
     const at = s.createdAt;
     if (typeof at !== "number") return false;
     if (window.since != null && at < window.since) return false;
@@ -177,10 +208,13 @@ export function salesSummary(allSales: ReportSale[], window: { since?: number; u
  * Per-variant units and revenue, revenue-descending. Lifted from the product-mix handler,
  * including its guard against a sale with no lines.
  */
-export function productMix(allSales: ReportSale[], window: { since?: number; until?: number } = {}): ProductMixRow[] {
+export function productMix(
+  allSales: ReportSale[],
+  window: { since?: number; until?: number; channel?: string } = {},
+): ProductMixRow[] {
   const mix: Record<string, ProductMixRow> = {};
 
-  for (const sale of realSales(allSales)) {
+  for (const sale of forChannel(realSales(allSales), window.channel)) {
     const at = sale.createdAt;
     if (window.since != null && (typeof at !== "number" || at < window.since)) continue;
     if (window.until != null && (typeof at !== "number" || at > window.until)) continue;
@@ -203,4 +237,42 @@ export function productMix(allSales: ReportSale[], window: { since?: number; unt
   }
 
   return Object.values(mix).sort((a, b) => b.revenueCents - a.revenueCents);
+}
+
+export type ChannelRevenueRow = {
+  channelKey: string;
+  revenueCents: number;
+  transactions: number;
+};
+
+/**
+ * The day's takings split by where they came from — the report the channel axis
+ * exists for, and the one an operator actually asks for once there is a
+ * storefront ("how much of that was online?").
+ *
+ * Revenue-descending, with the busiest channel first. Channels with no sales in
+ * the window are absent rather than zero: this reports what happened, and a
+ * roster of every channel that exists is a different question.
+ */
+export function revenueByChannel(
+  allSales: ReportSale[],
+  window: { since?: number; until?: number } = {},
+): ChannelRevenueRow[] {
+  const rows: Record<string, ChannelRevenueRow> = {};
+
+  for (const sale of realSales(allSales)) {
+    const at = sale.createdAt;
+    if (typeof at !== "number") continue;
+    if (window.since != null && at < window.since) continue;
+    if (window.until != null && at > window.until) continue;
+
+    const key = channelOf(sale);
+    rows[key] ??= { channelKey: key, revenueCents: 0, transactions: 0 };
+    rows[key].revenueCents += sale.totalCents || 0;
+    rows[key].transactions += 1;
+  }
+
+  return Object.values(rows).sort(
+    (a, b) => b.revenueCents - a.revenueCents || a.channelKey.localeCompare(b.channelKey),
+  );
 }
