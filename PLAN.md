@@ -153,6 +153,707 @@ half-built than not started (Feature 3 T3 in particular).
 
 ---
 
+### Features 27–35 are one group, and they have their own architecture document
+
+Features 27 through 35 build the multi-channel platform: the POS, a central console, and any number
+of storefronts, deployed apart and agreeing about what a product costs. They are ordered as phases
+and each leaves the tree deployable. The reasoning that shapes them — why a Channel is a first-class
+record, why brand identity is a row rather than a stylesheet, why an online order becomes a Sale
+rather than living in its own table — is in **[docs/architecture/multi-channel.md](docs/architecture/multi-channel.md)**.
+Read that before starting Feature 27.
+
+**Feature 28 supersedes Feature 4.** Build the API token with a `channelKey`, not the location-only
+version — do not build Feature 4's narrower token and then widen it.
+
+---
+
+## Feature 35 — The second storefront: the seam, proven
+
+**Status:** planned
+**Vision pillar:** #1 — "the best foundation and easiest path to grow a business". A second
+storefront is the cheapest second location there is.
+**Depends on:** Features 27–34. This feature writes almost no code; it proves the eight before it
+were built right.
+**Added:** 2026-09-13
+
+### The finding
+
+Every architecture claims it is extensible, and the claim is worthless until somebody adds the second
+one. The failure mode is well known and specific: the first storefront's channel key ends up hard-coded
+in four places, its brand ends up baked into the bundle, and the second deployment needs a fork.
+
+This feature stands up channel two — a catering or pre-order storefront on its own brand and its own
+subset of the menu — and the only permitted diff is configuration. If a source file has to change,
+the change belongs back in Features 28–34 and the seam was not real.
+
+### The feature
+
+`apps/storefront` is not "the storefront". It is a storefront that reads its identity from the
+environment: `STOREONE_CHANNEL_KEY`, `STOREONE_CORE_URL`, `STOREONE_CHANNEL_TOKEN`. Everything else —
+which products, which brand, which copy — arrives over HTTP from the core.
+
+### Tasks
+
+**T1 — Prove the channel key is not baked in.**
+Grep `apps/storefront/src` for every literal occurrence of the first channel's key and for every
+hard-coded colour, brand name or wordmark. Each hit is a bug against the feature that introduced it;
+fix it there. Add `apps/storefront/src/config.ts` as the single place the environment is read, and a
+test that fails if `process.env` is read anywhere else in the app.
+*Check:* `grep -rn "process.env" apps/storefront/src` returns `config.ts` and nothing else.
+
+**T2 — Stand up channel two.**
+In the console, create a second channel (`catering`), a second brand in a different palette, and
+publish a different subset of products to it. Issue it a token. No code.
+*Check:* Two channels exist, each with its own brand and its own published catalogue, created
+entirely through the admin UI.
+
+**T3 — Deploy it.**
+A second container from the same `apps/storefront` image with different environment variables. Add
+the second service to `docker-compose.yml` beside the first, sharing one core.
+*Check:* `docker compose up` serves two storefronts on two ports, in two liveries, listing two
+different catalogues, against one core and one database.
+
+**T4 — Prove the orders separate.**
+Place an order on each. Confirm both arrive at the till, both deplete inventory, and the day's report
+can tell them apart.
+*Check:* A report filtered by `channelKey` returns each storefront's orders and only those; the
+drawer's cash expectation is unaffected by either, because neither was paid in cash.
+
+### Non-goals
+
+Per-channel pricing, per-channel tax rates, and channel-specific menus that diverge structurally
+rather than by publication. All three are real businesses eventually; none is needed to prove the
+seam, and each is cheaper to add once two channels exist than to design for while there is one.
+
+### Definition of done
+
+A second storefront serving a different brand and a different catalogue, deployed from the same image
+as the first, with zero source changes — and a report that separates their revenue.
+
+---
+
+## Feature 34 — Checkout: an online order that reaches the till
+
+**Status:** planned
+**Vision pillar:** #1 — "setup **and operate**". An order nobody in the kitchen sees is not an order.
+Also #5: online revenue that never reaches a Sale is revenue that never reaches profitability.
+**Depends on:** Features 28 (channels), 31 (published catalogue), 33 (the browse path). **Collides
+with Features 12 and 23** on `Sale.status` — see below.
+**Added:** 2026-09-13
+
+### The finding
+
+**`Sale.status` already has two claimants, and this would be the third.**
+
+PLAN Feature 23 documents the existing lifecycle in full: `order-receipts.tsx` filters
+`closedAt === null && customerName !== undefined && status === "completed"` and offers one action,
+Close Order. Feature 12 (voids and refunds) wants the same column. An online order has a lifecycle
+neither anticipated — placed, accepted, being prepared, ready, collected — and jamming it into
+`status` gives the column three meanings and no owner.
+
+Butterloom solved exactly this and the answer is in its schema: **two independent axes.** Where the
+goods are is one question; where the money is is another, and an order can be delivered and unpaid or
+paid and unsent. Its `fulfilmentState` enum and its `order_events` audit table are the parts worth
+absorbing verbatim.
+
+### The feature
+
+A new `fulfilmentState` column, independent of `status`, plus an events table that records every
+transition. `status` keeps whatever meaning Features 12 and 23 settle on; this feature does not touch
+it and does not read it.
+
+```
+fulfilment_state:  placed → accepted → preparing → ready → collected
+                        └──────────── cancelled ────────────┘
+```
+
+Placement is unpaid. The customer pays at the till when they collect, which is the existing tender
+path with nothing new in it, and is why this feature ships without a payment gateway.
+
+### Tasks
+
+**T1 — The columns and the events table.**
+Add to `admin_sales`: `fulfilmentState`, `fulfilmentType` ('pickup' | 'delivery'), `customerPhone`,
+`requestedFor`. Add `sale_events` (saleId, fromState, toState, actor, createdAt), modelled on
+Butterloom's `order_events`. Null `fulfilmentState` on every existing row and on every till sale —
+a walk-in has no fulfilment lifecycle and should not be given a fake one.
+*Check:* Migration applies; an existing sale reads back unchanged with a null `fulfilmentState`.
+
+**T2 — `POST /api/channel/orders`.**
+Authenticated by channel token (Feature 28). Takes the same line shape `/api/orders/simulate`
+takes, re-prices it server-side, and **ignores any price the client sent** — the client's number is
+compared against the server's and a mismatch is logged and rejected, because a mismatch means the
+menu changed under the customer or somebody is editing requests. Writes one Sale via Feature 26's
+single write path, with `channelKey`, `fulfilmentState: 'placed'`, and the customer's details.
+*Check:* A posted cart becomes one `admin_sales` row whose total equals what `/simulate` returned;
+a tampered price is rejected with the reason.
+
+**T3 — The transition endpoint and the console queue.**
+`POST /api/channel/orders/:id/state` writes a `sale_events` row and moves the state, refusing
+transitions the enum does not allow. Add an order queue to `apps/admin`: what is placed, what is
+preparing, what is ready, with the buttons that move them.
+*Check:* An illegal transition (`placed` → `collected`) is refused; a legal one appends exactly one
+event row.
+
+**T4 — Make it arrive.**
+The order reaches the till through the existing sync engine, and the storefront's `/order/:id` page
+reads its state so a customer can see it was accepted. Depletion runs on placement through
+`server/bom-engine.ts`, not on collection — the kitchen consumes the ingredients when it makes the
+food.
+*Check:* An order placed on the storefront appears on the till within one sync cycle, has depleted
+its ingredients, and shows as accepted on the customer's order page once staff accept it.
+
+### Non-goals
+
+Online card payment (Feature 16 owns it), delivery dispatch and courier integration, driver
+assignment, order editing after placement, and refunds (Feature 12). Scheduled pre-orders are
+modelled by `requestedFor` but nothing acts on it yet.
+
+### Definition of done
+
+A customer places an order on the storefront, staff see it in the console and on the till, the
+kitchen's ingredients are depleted, the customer sees it accepted, and the money is taken at
+collection through the tender path that already exists.
+
+---
+
+## Feature 33 — The storefront: a menu a customer can read
+
+**Status:** planned
+**Vision pillar:** #1 and #3 — the storefront is the first add-on service worth having, and the one
+that most directly grows a single location toward a second.
+**Depends on:** Features 27 (workspaces), 29 (design package), 30 (brand), 31 (merchandising).
+Composes with Feature 24 (86-ing) when that lands.
+**Added:** 2026-09-13
+
+### The finding
+
+**The server cannot price anything.** `/api/orders/simulate` is a `501` whose body explains that
+sales live "client-side in IndexedDB" (`server/routes.ts:701-706`). Every price a storefront shows
+has to come from somewhere, and the two wrong answers are: compute it in the browser (the storefront
+and the till then charge different numbers, and nobody finds out until the quarter closes) or
+hard-code it (the same, more slowly).
+
+The right answer is already in the repo and unwired. `server/bom-engine.ts` exports
+`validateLineItems` and `processTestOrder`, and `/api/admin/test-orders` already drives them against
+Postgres. The engine is there; the route points at a stub.
+
+### The feature
+
+A React storefront reading three public endpoints, wearing the operator's brand, that computes no
+prices of its own.
+
+```
+GET /api/public/menu?channel=web     categories, products, variants, modifier groups
+GET /api/public/product/:slug        one product, its variants, its modifiers
+POST /api/orders/simulate            the cart, priced by the core
+```
+
+The cart is client-side and re-priced by the core on every change. Modifier upcharges, combo
+allocation and tax all happen in `packages/domain`, on the server, once.
+
+### Tasks
+
+**T1 — Wire the simulator.**
+Replace the `501` at `server/routes.ts:701` with a handler that drives `validateLineItems` and the
+pricing half of `processTestOrder` against `adminStorage`. Returns priced lines, modifier upcharges,
+combo allocation, subtotal, tax and total. The stub's message was honest when written; it is now
+just wrong.
+*Check:* `POST /api/orders/simulate` with two items and a modifier returns the same total the till
+computes for the same cart. A test asserts the two agree.
+
+**T2 — The public menu endpoints.**
+`GET /api/public/menu` returns only what Feature 31 published to that channel, grouped by category
+in `sortOrder`, with variants, modifier groups and their min/max selections. No cost data, no BOM, no
+stock — a public endpoint that leaks recipe costs is a public endpoint that leaks the business.
+*Check:* The response contains no `lastPurchasePrice`, no BOM entry and no unpublished product; a
+test asserts each absence by name.
+
+**T3 — Catalogue and product pages.**
+`apps/storefront`: the front page (brand, category tiles, a rail of the newest), `/c/:slug` for a
+category, `/p/:slug` for a product. Built from `packages/design` primitives — `.grid`, `.card`,
+`.tiles`, `.rail`, `.hero` — with no new CSS. The product page renders modifier groups as the
+pickers they are, respecting `minSelections` and `maxSelections`.
+*Check:* A product with a required modifier group cannot be added to the cart until a choice is made;
+a group with `maxSelections: 2` refuses a third.
+
+**T4 — The cart.**
+Client-side lines, re-priced by `/api/orders/simulate` on every change, rendered with the design
+package's `.cart-*` vocabulary. Shows the server's numbers and never its own arithmetic.
+*Check:* Changing a quantity re-queries the core and displays the returned total; with the network
+stopped the cart shows its last known total and says it is stale rather than inventing one.
+
+### Non-goals
+
+Checkout and order placement (Feature 34), photographs (Feature 32 — the pages render the design
+package's `.placeholder` until then), search and facets, availability (Feature 24), and any form of
+customer account. Server-side rendering and prerendering, per the trade-off recorded in
+`docs/architecture/multi-channel.md`.
+
+### Definition of done
+
+A customer can browse the real menu in the operator's brand, build a cart with modifiers, and see a
+total that equals to the cent what the till would charge for the same order.
+
+---
+
+## Feature 32 — Photographs: the pipeline the menu has never had
+
+**Status:** planned
+**Vision pillar:** #3 — marketing as a platform service. A menu without photographs is a price list.
+**Depends on:** Features 27 and 31. Blocks nothing — Feature 33 ships without it and renders
+placeholders.
+**Added:** 2026-09-13
+
+### The finding
+
+**There is no image support anywhere in this repository.** `grep -n "imageUrl\|image_url\|photo"` over
+`server/schema.ts` and `shared/schema.ts` returns nothing at all. Not a URL column, not an upload
+route, not a storage driver.
+
+Butterloom has the whole thing solved, and its README is explicit about why the naive version fails:
+images are roughly 97% of page weight, encoding a ladder is seconds of CPU per photograph, and a
+bulk upload of twenty is minutes of it. Its answer — bytes land, a row goes on a queue, one worker
+drains it, derivatives are named by the sha256 of their own bytes so they are immutable and need no
+purge path — is worth absorbing rather than re-deriving.
+
+### The feature
+
+Butterloom's `src/images/` ported to `packages/core`, with its four tables: `product_images`,
+`image_derivatives`, `pending_images`, `site_images`.
+
+The one deliberate deviation: photographs live in a table joined to the product, **not** on the
+`Product` row itself. The till syncs whole rows, and a description and an image ladder are bytes
+every till would replicate and no till would render.
+
+### Tasks
+
+**T1 — The tables and the storage driver.**
+Port the four table definitions to Drizzle/Postgres, and `src/images/storage.ts` as a filesystem
+driver whose keys are exactly the ones an object store would hold — so production is a driver swap
+plus a base URL, as it is in Butterloom.
+*Check:* Migration applies; the driver round-trips bytes under a content-addressed key.
+
+**T2 — The encoder and the ladder.**
+Port `vips.ts`, `ladder.ts` and `pipeline.ts`. Probe the encoder's real formats at startup by
+attempting an encode rather than trusting a version string, and log what it can write — Butterloom's
+own machine cannot write AVIF, and silently producing a broken ladder is worse than saying so. Add
+libvips to the Dockerfile.
+*Check:* The server logs its available formats at boot; a JPEG in produces the ladder's widths out.
+
+**T3 — The queue and the worker.**
+Port `queue.ts`: the upload POST stores bytes and returns, one worker drains `pending_images`, a
+failed encode parks the row with its error rather than retrying forever, and a restart mid-bulk
+resumes. Enforce the two ceilings — pending-queue depth and request bytes — refusing an oversized
+bulk whole rather than half-applying it.
+*Check:* Twenty photographs submitted in one form return a response in well under a second; killing
+the process mid-drain and restarting finishes the remainder.
+
+**T4 — The admin screen and the `<picture>` primitive.**
+Upload and reorder a product's photographs in `apps/admin`, with failed encodes shown against the
+product where they can be discarded and re-uploaded. Port `views/picture.tsx` into
+`packages/design` as a React component: AVIF then WebP then JPEG, with `srcset`, `sizes` and
+intrinsic `width`/`height` so nothing shifts as bytes arrive.
+*Check:* A product page serves the narrow rung to a narrow viewport, and the page does not shift
+while images load.
+
+### Non-goals
+
+Cropping, editing, focal points, alt-text generation, and video. Re-cutting the ladder is possible
+because the original is kept, but no UI triggers it in this feature.
+
+### Definition of done
+
+An operator uploads photographs for twenty products in one submit without waiting, and the storefront
+serves each one at the right size, in the best format the encoder could write, with no layout shift.
+
+---
+
+## Feature 31 — Merchandising: what a channel sells, and what it says about it
+
+**Status:** planned
+**Vision pillar:** #2 — an agent that can "create products, combos, discounts, promotions" should be
+able to put one on the web without a human editing a template.
+**Depends on:** Features 27 and 28. Blocks Feature 33.
+**Added:** 2026-09-13
+
+### The finding
+
+Two gaps, one structural and one dangerous.
+
+**The catalogue has no customer-facing surface.** `Product` carries `name`, `category`, `sortOrder`
+and `attributes.tags` — everything a till button needs. A web page needs a stable URL, a sentence of
+prose, and a photograph, and the row has none of the three. A till button says "Lg Pep"; a menu page
+cannot.
+
+**Every product is on sale, always.** Feature 24 establishes this at length: beyond soft deletion
+there is no gate between a row existing and a customer being able to buy it. A storefront that
+inherits that rule publishes prep-only items, employee meals, open keys and the test product somebody
+made on Tuesday. This is the more urgent of the two, because the first one is an embarrassment and
+the second one takes money for things that are not food.
+
+### The feature
+
+Two tables, deliberately kept off the `Product` row so the till's sync payload does not grow.
+
+```
+product_content     productId, slug, headline, description, updatedAt
+product_channels    productId, channelKey, published, sortOrder
+```
+
+`product_content` is channel-agnostic: what the thing *is*. `product_channels` is the gate: whether
+this channel may sell it, and where it sits. A product with no `product_channels` row is on no
+storefront — **the default is unpublished**, which is the only safe default given finding two.
+
+Slugs follow Butterloom's rule, which is worth copying exactly: derived from the name, numbered on
+collision, and then *kept* — a rename changes the caption, not the address, because `/p/margherita`
+is a live URL somebody may have sent to somebody.
+
+### Tasks
+
+**T1 — The tables, and slug derivation.**
+Both tables, plus `packages/domain/slug.ts` ported from Butterloom's `src/lib/slug.ts`. Derivation
+and collision-numbering are pure functions with tests; nothing about them needs a database.
+*Check:* Two products named "House Salad" get `house-salad` and `house-salad-2`; renaming the first
+leaves its slug alone.
+
+**T2 — Publishing, and the default that protects you.**
+The `product_channels` write path, and the read helper every public endpoint must go through. One
+function, `publishedFor(channelKey)`, so there is exactly one definition of what a channel sells.
+*Check:* A newly created product appears on the till immediately and on no storefront; a test
+asserts a product with no `product_channels` row is absent from `publishedFor('web')`.
+
+**T3 — The console screen.**
+In `apps/admin`: per product, the description and headline, and a checkbox per channel. Bulk publish
+a whole category to a channel, because publishing forty items one at a time is how an operator
+decides the storefront is not worth it.
+*Check:* Publishing a category of twelve to a channel is one submit and twelve rows.
+
+**T4 — Teach the menu blueprint about it.**
+Feature 1's `apply_menu` builds an entire menu in one declarative call. Extend the blueprint schema
+with optional `description` and `channels` per product so an agent can stand up a storefront-ready
+menu in one call — the thing Vision pillar #2 actually promises.
+*Check:* A blueprint naming `channels: ["web"]` on three products publishes exactly those three, and
+a blueprint that omits the key changes no publication state.
+
+### Non-goals
+
+Per-channel pricing and per-channel names, rich text in descriptions, SEO metadata, and collections
+that cut across categories. Slug history with redirects — worth having, not worth it before there
+is traffic to redirect.
+
+### Definition of done
+
+An operator, or an agent in one call, can give a product a description and put it on one storefront
+and not another — and nothing reaches the public that was not explicitly published.
+
+---
+
+## Feature 30 — Brand identity: the livery an operator can change
+
+**Status:** planned
+**Vision pillar:** #1 — a business setting up for free should not need a developer to get its own
+colours, and #3: the storefront is a platform service, not a bespoke build.
+**Depends on:** Features 27, 28, 29. Blocks nothing; Feature 33 renders the default brand without it.
+**Added:** 2026-09-13
+
+### The finding
+
+The Butterloom stylesheet is built entirely on eight CSS custom properties — `--paper`, `--gridline`,
+`--ink`, `--secondary`, `--tertiary`, `--hairline`, `--dot`, `--shot` — with a
+`prefers-color-scheme: dark` block that redefines exactly those and nothing else. Four hundred lines
+of rules read through them and none hard-codes a colour.
+
+That is a seam sitting there unused. If the eight tokens are a row in a table, a second storefront in
+a different livery is a row and a deployment rather than a fork of the sheet.
+
+The sheet also records, in a comment, exactly the trap an operator will walk into: `--tertiary` is
+deliberately *not* the logo's own `#83827b`, because that colour is 3.33:1 on paper and fails the
+4.5:1 floor for small text. An operator picking colours in an admin panel will pick their logo
+colour. The editor has to catch it.
+
+### The feature
+
+```
+brands
+  key, name, wordmark, tagline
+  light  { paper, gridline, ink, secondary, tertiary, hairline, dot, shot }
+  dark   { …the same eight… }
+  type   { serifStack, labelStack, baseSize }
+  sealImageId → Feature 32
+```
+
+`channels.brandId` says which channel wears which. Served at `GET /api/public/brand?channel=<key>`,
+public and cacheable; the storefront applies the tokens to `:root` at boot.
+
+### Tasks
+
+**T1 — The table and the public endpoint.**
+The `brands` table, a seeded default brand carrying Butterloom's own palette as shipped defaults, and
+the public read endpoint. `channels.brandId` nullable — a channel with no brand gets the default
+rather than an unstyled page.
+*Check:* `GET /api/public/brand?channel=web` returns sixteen colour tokens and a type stack; a
+channel with no brand returns the default rather than a 404.
+
+**T2 — Contrast validation.**
+A pure `contrastRatio(a, b)` in `packages/domain` and a `validateBrand()` that refuses a palette
+where ink-on-paper or tertiary-on-paper falls under 4.5:1, in *either* theme. Rejection names the
+pair and the ratio it got, because "invalid palette" tells an operator nothing.
+*Check:* Butterloom's own `#83827b` on `#f2eee6` is rejected with "3.33:1, needs 4.5:1"; its
+corrected `#6c6b64` passes.
+
+**T3 — Both themes or neither.**
+A token defined in light and missing from dark renders a dark page that borrows half its palette from
+the wrong one. The editor edits the pair, and `validateBrand()` rejects a partial set.
+*Check:* Saving a brand with fifteen of sixteen tokens is refused, naming the missing one.
+
+**T4 — The editor.**
+In `apps/admin`: the sixteen swatches, the type stacks, the wordmark, and a live preview rendering
+real `packages/design` primitives — a card, a button, a label, a chip — in both themes side by side,
+so an operator sees the failure before the validator explains it.
+*Check:* Changing `--paper` in the editor repaints the preview in both themes; the storefront picks
+the change up on its next boot.
+
+### Non-goals
+
+Per-page theming, custom fonts uploaded by the operator (the type stack picks from web-safe families),
+custom CSS injection — which would make every future change to the design package a breaking change —
+and per-channel copy beyond the wordmark and tagline.
+
+### Definition of done
+
+An operator changes their storefront's colours and wordmark from the console, cannot save a palette
+that would be unreadable, and sees the change live without a deployment.
+
+---
+
+## Feature 29 — The design package: one system, every channel
+
+**Status:** planned
+**Vision pillar:** #3 — platform services that look like one product rather than four.
+**Depends on:** Feature 27. Blocks Features 30, 32 and 33.
+**Added:** 2026-09-13
+
+### The finding
+
+The till is Tailwind 4 and shadcn/ui: `client/src/index.css` opens `@import "tailwindcss"` and
+`client/src/components/ui/` holds fifty generated primitives. That is a reasonable system for a dense
+operator tool with forty buttons on screen, and it is the wrong system for a storefront, where the
+photograph should be the loudest thing on the page.
+
+Butterloom's is the right one for that job and it already exists: one weight of serif, tracked
+system-ui caps for labels, hairlines instead of borders, a 4/5 crop on every photograph so a grid of
+mixed shapes stops reading as a page that is still loading. It is four hundred lines of hand-written
+CSS with the reasoning in comments beside the rules.
+
+Two systems in one repository is a cost. The alternative — re-expressing that sheet as Tailwind
+utilities — is worse: the reasoning in those comments does not survive the translation, and the
+storefront ends up a Tailwind approximation of a design nobody can check it against.
+
+### The feature
+
+`packages/design`: the sheet, the token contract it reads through, and React components that own the
+class vocabulary so no app writes a class name by hand.
+
+```
+tokens.css      the sixteen custom properties, with defaults
+storefront.css  the vocabulary: .grid .card .rail .tiles .hero .btn .chip
+                .panel .cart-* .form-* .gallery .pages .placeholder
+components/     Layout Header Footer Card Grid Rail Tiles Hero Btn Chip
+                Panel Field Price Seal Placeholder
+```
+
+Ported, not reinterpreted — including the comments, which are the only record of why
+`.card img` needs `height: auto` (the `<picture>` width/height attributes are a definite height that
+`aspect-ratio` loses to, and without it a tall photograph runs three screens down the page).
+
+### Tasks
+
+**T1 — The stylesheet and the token contract.**
+Port the sheet from `butterloom/src/views/storefront.tsx` verbatim, with its comments, splitting the
+`:root` and dark blocks into `tokens.css`. Every colour reads through a token; a test greps the sheet
+for a hex literal outside `tokens.css` and fails on one.
+*Check:* No hex colour appears in `storefront.css`; the dark block redefines exactly the tokens the
+light block defines.
+
+**T2 — The primitives.**
+React components wrapping the vocabulary, typed, with no app-level class strings. `Layout` carries
+the sticky header, the seal footer and the `theme-color` meta pair.
+*Check:* A page composed only of primitives renders the card grid, and `grep -rn 'className="'`
+across an app returns only primitive names.
+
+**T3 — Dark mode and the accessibility floor.**
+Verify the ported sheet keeps what the original was careful about: `:focus-visible` outlines,
+`prefers-reduced-motion`, the 16px form-input minimum that stops iOS zooming on focus, and
+`[hidden]` overrides on the two classes whose own `display` beats it.
+*Check:* Keyboard focus is visible on every interactive primitive in both themes; a text input
+renders at 16px or larger.
+
+**T4 — The styleguide.**
+A route in `apps/admin` rendering every primitive in both themes against the current brand. This is
+what Feature 30's editor previews into, and what makes a regression in the sheet visible.
+*Check:* The styleguide renders every exported primitive; adding a primitive without adding it to the
+styleguide fails a test.
+
+### Non-goals
+
+Migrating the till to this system — the two systems serve different jobs and the till is not broken.
+Animation beyond what the sheet has, and a component library beyond what the storefront uses.
+
+### Definition of done
+
+Both the storefront and the console's styleguide render from one package, in the operator's brand,
+with no colour written outside the token file.
+
+---
+
+## Feature 28 — Channels: every order knows where it came from
+
+**Status:** planned
+**Vision pillar:** #5 — profitability over a period is meaningless if the revenue cannot be split by
+where it came from. #6 too: an autopsy of a decision needs to know which channel it affected.
+**Depends on:** Feature 27. **Supersedes the scope of Feature 4** — build the token with a channel
+column, not a location-only one, and do not build Feature 4's narrower version first.
+**Added:** 2026-09-13
+
+### The finding
+
+A `Sale` records its tax rate, its tender, its lines and — since Feature 19 — who rang it. It does not
+record how it arrived, because there has only ever been one way. `grep -rn "channel"` over `server/`
+and `shared/` returns hits in `sync-compare.ts` only, and those are sync categories, an unrelated
+word.
+
+The moment a storefront exists there are two ways, and three things break at once: reports cannot
+separate web revenue from counter revenue, the close-of-day drawer cannot tell which sales should
+have produced cash, and there is no way to authenticate a storefront to the core at all.
+
+### The feature
+
+```
+channels        key, name, kind ('pos'|'storefront'), locationId, brandId, active
+channel_tokens  channelKey, tokenHash, label, createdAt, lastUsedAt, revokedAt
+```
+
+Plus `channelKey` on `admin_sales`.
+
+**This one is backfilled, and the reasoning matters** because the codebase's own precedent runs the
+other way. `employeeId` and `taxRatePct` are deliberately left null on old rows: guessing who rang a
+sale last week, or what rate it charged, is worse than an honest gap. `channelKey` is not a guess. Before
+channels existed there was exactly one code path that could create a sale, and it was the till. An
+honest gap is for facts nobody recorded — not for facts the schema made inevitable.
+
+### Tasks
+
+**T1 — The tables and the registry.**
+Both tables, a seeded `pos` channel, and CRUD through `shared/api-handlers.ts` so the till's Dexie
+adapter and the server implement it once each.
+*Check:* A fresh database has exactly one channel, `pos`, and it cannot be deleted.
+
+**T2 — `channelKey` on sales, backfilled.**
+The column, the backfill to `'pos'`, and the write path setting it. Follow Feature 26's single write
+path — if a second writer appears here, that feature was undone.
+*Check:* Every pre-existing sale reads back as `pos`; a new till sale is written as `pos` without the
+caller passing it.
+
+**T3 — Tokens and the auth middleware.**
+Hashed at rest, shown once at creation, revocable. Middleware resolving a token to its channel and
+location, rejecting revoked and unknown tokens identically so the response cannot be used to
+enumerate valid ones. This is Feature 4's substance with one more column.
+*Check:* A request with a revoked token and one with a fabricated token return byte-identical
+responses; a valid token resolves to its channel.
+
+**T4 — Reports learn the axis.**
+`channelKey` as an optional filter on the sales-summary and product-mix reports in
+`packages/domain/reports.ts`, and a channel column in the console's report view.
+*Check:* A report filtered to `pos` excludes a seeded non-POS sale, and the unfiltered total still
+equals the sum of the per-channel totals.
+
+### Non-goals
+
+Per-channel pricing, tax or menus (Feature 31 does publication, which is not the same thing), token
+scopes finer than a channel, and rate limiting — worth having before a storefront is public, not
+before it exists.
+
+### Definition of done
+
+Every sale says which channel it came from, a storefront can authenticate to the core with a
+revocable token, and the day's revenue can be split by channel.
+
+---
+
+## Feature 27 — Four deployables out of one tree
+
+**Status:** planned
+**Vision pillar:** #7 — "the cloud enterprise experience becomes the main dashboard" is a separate
+deployable or it is a page in the till that pretends.
+**Depends on:** nothing. **Blocks everything else in this group.**
+**Added:** 2026-09-13
+
+### The finding
+
+One `package.json` builds a Vite client and esbuilds an Express server, and `npm run dev` runs both
+with `concurrently`. That is the right shape for one application and the wrong one for four: there is
+no way to deploy the console without shipping the till, no way to scale the storefront without
+scaling the database server, and nothing preventing a storefront from importing
+`client/src/lib/local-storage.ts` and quietly taking the till's IndexedDB along with it.
+
+The seam already exists and holds. `shared/api-handlers.ts` defines `ApiAdminStorage` and
+`createApiHandlers(store)`, implemented twice — Postgres in `server/storage.ts`, Dexie in
+`client/src/lib/dexie-admin-storage.ts`. The same pricing, tax, depletion and report code already
+runs on both sides of it. This feature is mostly recognising that boundary in the directory layout,
+which is why it can be done without changing behaviour.
+
+### The feature
+
+```
+packages/domain   ← shared/      pure logic, no I/O. The contract.
+packages/design   ← Feature 29
+apps/core         ← server/      Express + Postgres. The only writer.
+apps/pos          ← client/      the till, unchanged
+apps/admin        ← new          the console
+apps/storefront   ← new          one per channel
+```
+
+One rule, enforced by the workspace graph rather than by memory: **an app may not import another
+app.** Shared code moves to `packages/domain`.
+
+### Tasks
+
+**T1 — Workspaces, and move `shared/` and `server/`.**
+Root `package.json` with `workspaces: ["packages/*", "apps/*"]`. `shared/` → `packages/domain`,
+`server/` → `apps/core`. Update the `@shared` alias in `vite.config.ts` and the test glob. **No file
+contents change beyond import paths.**
+*Check:* `npm test` passes with the same test count as before the move, and `npm run check` is clean.
+
+**T2 — Move the till.**
+`client/` → `apps/pos`, with its own `package.json`, `vite.config.ts` and build target. The `@`
+alias stays so no component import changes.
+*Check:* `npm run dev -w apps/pos` serves the till and it behaves identically — seed, sell, sync.
+
+**T3 — Scaffold the two new apps.**
+`apps/admin` and `apps/storefront`, each with its own `package.json`, Vite config and a page that
+renders. Neither has routes yet; this task proves the build targets exist and that nothing in them
+can import from `apps/pos`.
+*Check:* All four build with one `npm run build` at the root; a deliberate import from `apps/pos`
+into `apps/storefront` fails the build.
+
+**T4 — Four containers.**
+Split the Dockerfile into per-app targets and extend `docker-compose.yml` so core, pos, admin and
+storefront come up as four services against one Postgres.
+*Check:* `docker compose up` serves all four; stopping the storefront leaves the till taking money.
+
+### Non-goals
+
+Changing any behaviour, splitting the database, extracting a shared UI package for the till, and
+publishing `packages/domain` to a registry. The Capacitor iOS build keeps pointing at `apps/pos`
+and is not restructured.
+
+### Definition of done
+
+Four things build and deploy separately out of one tree, the till behaves exactly as it did, and the
+workspace graph makes an app-to-app import a build failure rather than a code review note.
+
+---
 ## Feature 26 — Sales have two writers and no owner
 
 **Status:** done — T1–T4 complete. One owner (`admin_sales`), synced sales landed as rows, history
