@@ -789,7 +789,9 @@ revocable token, and the day's revenue can be split by channel.
 
 ## Feature 27 — Four deployables out of one tree
 
-**Status:** planned
+**Status:** done — T1–T4 complete. `shared/` is `packages/domain`, `server/` is `apps/core`,
+`client/` is `apps/pos`, and `apps/admin` and `apps/storefront` are real build targets. Four images
+come up against one Postgres, and an app importing another app fails a test.
 **Vision pillar:** #7 — "the cloud enterprise experience becomes the main dashboard" is a separate
 deployable or it is a page in the till that pretends.
 **Depends on:** nothing. **Blocks everything else in this group.**
@@ -854,6 +856,15 @@ action-log walk: read the directories by name, and fail on what should not be th
 Split the Dockerfile into per-app targets and extend `docker-compose.yml` so core, pos, admin and
 storefront come up as four services against one Postgres.
 *Check:* `docker compose up` serves all four; stopping the storefront leaves the till taking money.
+
+**What this task actually taught:** nginx resolves an upstream hostname *once, at startup*, and
+refuses to start at all if it does not answer. With a literal `proxy_pass http://core:5000` all three
+static containers died on a cold boot, and the obvious fix — `depends_on: core` — is exactly the
+coupling this feature exists to remove. A till that will not boot without the core is not an
+independent deployable. Resolving through a variable instead (`set $core_upstream`, plus Docker's
+embedded resolver at `127.0.0.11`) defers it to request time: the page serves, and only the API call
+fails. Verified by stopping the core — the till still returns 200 and `/api` returns 502, which is
+the failure the till is already built to survive.
 
 ### Non-goals
 

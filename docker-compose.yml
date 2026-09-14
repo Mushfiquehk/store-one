@@ -12,8 +12,10 @@ services:
       timeout: 3s
       retries: 20
 
-  app:
-    build: .
+  core:
+    build:
+      context: .
+      target: core
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/cornerpos
       PORT: "5000"
@@ -22,6 +24,30 @@ services:
     depends_on:
       db:
         condition: service_healthy
+
+  # The till. It depends on the core for sync, not for service: it holds its own
+  # data in IndexedDB and keeps taking money when the core is down, which is the
+  # whole reason it is a separate container rather than a route on one.
+  pos:
+    build:
+      context: .
+      target: pos
+    ports:
+      - "5100:80"
+
+  admin:
+    build:
+      context: .
+      target: admin
+    ports:
+      - "5101:80"
+
+  storefront:
+    build:
+      context: .
+      target: storefront
+    ports:
+      - "5102:80"
 
 volumes:
   pgdata:
