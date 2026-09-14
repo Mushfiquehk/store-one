@@ -175,7 +175,9 @@ version — do not build Feature 4's narrower token and then widen it.
 
 ## Feature 36 — One Sale, and fifteen others: the till's private copy of the data model
 
-**Status:** planned
+**Status:** done — T1–T3 complete. The rows are migrated, the sixteen duplicate declarations are
+gone, and `packages/domain/no-shadow.test.ts` fails if one comes back. T2 turned up a live bug on
+the way: `local-storage.ts` had been creating inventory items with no purchase factor at all.
 **Vision pillar:** #4 — the product model is "the most accurate in the industry" only if there is
 one of it. Also #6: an autopsy cannot reason about a record whose shape depends on which half of the
 codebase is reading it.
@@ -240,7 +242,9 @@ A test asserting `db.ts` declares no entity type that `packages/domain/schema.ts
 which is the general form of the `sale-shape.test.ts` tripwire, so that one is deleted rather than
 left to rot beside it.
 *Check:* Re-adding an `export interface Sale` to `db.ts` fails the test, naming the type and the
-file it should live in.
+file it should live in. Verified by doing exactly that — `apps/pos/src/lib/db.ts declares Sale`.
+The test has a second half, because the rule is not "declare nothing" but "declare it once and pass
+it on": `db.ts` must still re-export the entities, or every `from "@/lib/db"` in the till breaks.
 
 ### Non-goals
 
