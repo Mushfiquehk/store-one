@@ -3,6 +3,7 @@ import type { StoreSetting } from "@shared/api-handlers";
 import type { InventoryLedgerEntry } from "@shared/ledger";
 import type { ActionLogEntry } from "@shared/action-log";
 import type { CashMovement, DrawerSession } from "@shared/drawer";
+import { DEFAULT_POS_CHANNEL, type Channel } from "@shared/channels";
 import type {
   ProductAttributes,
   ModifierScaleFactors,
@@ -234,6 +235,7 @@ class PosDatabase extends Dexie {
   drawerSessions!: Table<DrawerSession, string>;
   // Cash that moved without a sale, each row carrying why.
   cashMovements!: Table<CashMovement, string>;
+  channels!: Table<Channel, string>;
 
   constructor() {
     super("cornerpos");
@@ -540,6 +542,16 @@ class PosDatabase extends Dexie {
     // Feature 22 T2: paid in / paid out.
     this.version(19).stores({
       cashMovements: "id, sessionId, at, kind",
+    });
+
+    // Feature 28: the channel registry, so the till's local admin server answers
+    // the same /api/admin/channels the core does. Seeded with the till's own
+    // channel on upgrade, because a database that has never seen one still has a
+    // front counter.
+    this.version(20).stores({
+      channels: "key, kind, updatedAt",
+    }).upgrade(async tx => {
+      await tx.table("channels").put({ ...DEFAULT_POS_CHANNEL, updatedAt: Date.now() });
     });
   }
 }

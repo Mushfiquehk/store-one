@@ -742,11 +742,14 @@ channel_tokens  channelKey, tokenHash, label, createdAt, lastUsedAt, revokedAt
 
 Plus `channelKey` on `admin_sales`.
 
-**This one is backfilled, and the reasoning matters** because the codebase's own precedent runs the
-other way. `employeeId` and `taxRatePct` are deliberately left null on old rows: guessing who rang a
-sale last week, or what rate it charged, is worse than an honest gap. `channelKey` is not a guess. Before
-channels existed there was exactly one code path that could create a sale, and it was the till. An
-honest gap is for facts nobody recorded — not for facts the schema made inevitable.
+**There is no backfill, because there is nothing to back-fill.** Every row in the database today is
+generated seed data. The column is added, the demo data is regenerated, and the migration machinery
+that would have rescued old rows is not written.
+
+The *column* is still designed honestly — `channelKey` is `notNull` with a `'pos'` default, because
+once channels exist every sale genuinely does come from one and a null would mean nothing. That is a
+different question from what to do with yesterday's demo rows, and conflating the two is how a
+one-line migration becomes an argument.
 
 ### Tasks
 
@@ -755,11 +758,11 @@ Both tables, a seeded `pos` channel, and CRUD through `shared/api-handlers.ts` s
 adapter and the server implement it once each.
 *Check:* A fresh database has exactly one channel, `pos`, and it cannot be deleted.
 
-**T2 — `channelKey` on sales, backfilled.**
-The column, the backfill to `'pos'`, and the write path setting it. Follow Feature 26's single write
-path — if a second writer appears here, that feature was undone.
-*Check:* Every pre-existing sale reads back as `pos`; a new till sale is written as `pos` without the
-caller passing it.
+**T2 — `channelKey` on sales.**
+The column and the write path setting it. Follow Feature 26's single write path — if a second writer
+appears here, that feature was undone. Regenerate the demo data rather than backfilling it.
+*Check:* A new till sale is written as `pos` without the caller passing it, and a reseeded database
+has no sale with a null or empty channel.
 
 **T3 — Tokens and the auth middleware.**
 Hashed at rest, shown once at creation, revocable. Middleware resolving a token to its channel and
