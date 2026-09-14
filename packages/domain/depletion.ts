@@ -1,6 +1,6 @@
 /**
  * The one depletion walk. It was written twice — `server/bom-engine.ts` for test orders
- * and `client/src/pages/pos.tsx` for real sales — and the two had already drifted, with
+ * and `apps/pos/src/pages/pos.tsx` for real sales — and the two had already drifted, with
  * only the copy nobody tested running on actual money.
  *
  * Pure: it takes preloaded data and returns the deltas. Applying them (and recording

@@ -1,0 +1,11 @@
+{
+  "name": "@store-one/pos",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The till. Offline-first, Dexie-backed, syncs to the core. The only app that may take money without a network.",
+  "scripts": {
+    "dev": "vite dev --host 0.0.0.0 --port 5000",
+    "build": "vite build"
+  }
+}

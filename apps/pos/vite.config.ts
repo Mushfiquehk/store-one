@@ -4,6 +4,12 @@ import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 
+// The till's own config, living beside the till. Paths that leave this app go up
+// two levels on purpose — an app reaching sideways into another app is the one
+// thing the workspace layout exists to prevent, and a "../../apps/" in here would
+// be the first sign it had started.
+const repoRoot = path.resolve(import.meta.dirname, "..", "..");
+
 export default defineConfig({
   plugins: [
     react(),
@@ -23,9 +29,9 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      "@": path.resolve(import.meta.dirname, "client", "src"),
-      "@shared": path.resolve(import.meta.dirname, "packages", "domain"),
-      "@assets": path.resolve(import.meta.dirname, "attached_assets"),
+      "@": path.resolve(import.meta.dirname, "src"),
+      "@shared": path.resolve(repoRoot, "packages", "domain"),
+      "@assets": path.resolve(repoRoot, "attached_assets"),
     },
   },
   css: {
@@ -33,9 +39,11 @@ export default defineConfig({
       plugins: [],
     },
   },
-  root: path.resolve(import.meta.dirname, "client"),
+  root: import.meta.dirname,
   build: {
-    outDir: path.resolve(import.meta.dirname, "dist/public"),
+    // Capacitor's webDir still points here (capacitor.config.ts), so the iOS
+    // build is untouched by the move.
+    outDir: path.resolve(repoRoot, "dist/public"),
     emptyOutDir: true,
   },
   server: {
@@ -49,6 +57,9 @@ export default defineConfig({
     },
     fs: {
       strict: true,
+      // The app root is apps/pos, but the alias targets above resolve outside
+      // it — Vite must be allowed to read the workspace, or @shared 404s.
+      allow: [repoRoot],
       deny: ["**/.*"],
     },
   },
