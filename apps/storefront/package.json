@@ -1,0 +1,11 @@
+{
+  "name": "@store-one/storefront",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A customer-facing storefront. One deployment per channel: its identity comes from the environment, its catalogue and brand from the core.",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build"
+  }
+}

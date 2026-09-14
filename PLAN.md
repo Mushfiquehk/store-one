@@ -845,7 +845,10 @@ alias stays so no component import changes.
 renders. Neither has routes yet; this task proves the build targets exist and that nothing in them
 can import from `apps/pos`.
 *Check:* All four build with one `npm run build` at the root; a deliberate import from `apps/pos`
-into `apps/storefront` fails the build.
+into `apps/storefront` is caught. **Not by the build** — Vite resolves a relative path from one app
+into another perfectly happily and says nothing, so "fails the build" was wishful. The rule is
+asserted by `packages/domain/workspace-boundaries.test.ts`, in the same shape as the append-only
+action-log walk: read the directories by name, and fail on what should not be there.
 
 **T4 — Four containers.**
 Split the Dockerfile into per-app targets and extend `docker-compose.yml` so core, pos, admin and

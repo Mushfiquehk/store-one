@@ -10,9 +10,9 @@
   ],
   "scripts": {
     "dev": "concurrently \"npm run dev -w @store-one/pos\" \"npx tsx --env-file=.env apps/core/index.ts\"",
-    "build": "npm run build -w @store-one/pos && npx esbuild apps/core/index.ts --bundle --platform=node --format=esm --outfile=dist/server.mjs --external:pg --packages=external",
+    "build": "npm run build --workspaces --if-present && npx esbuild apps/core/index.ts --bundle --platform=node --format=esm --outfile=dist/server.mjs --external:pg --packages=external",
     "check": "tsc",
-    "test": "npx tsx --test \"{packages/domain,apps/core}/**/*.test.ts\"",
+    "test": "npx tsx --test \"{packages,apps}/*/**/*.test.ts\"",
     "start": "NODE_ENV=production node dist/server.mjs"
   },
   "dependencies": {
