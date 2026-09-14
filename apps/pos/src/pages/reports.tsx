@@ -30,7 +30,7 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Switch } from "@/components/ui/switch";
 import { useStore } from "@/lib/store";
-import { productMix, salesSeries, salesSummary, type Granularity } from "@shared/reports";
+import { productMix, revenueByChannel, salesSeries, salesSummary, type Granularity } from "@shared/reports";
 import { menuMargins } from "@shared/pricing";
 import { laborCost, laborPct, scheduledVsActual, type ScheduleShift } from "@shared/labor";
 import { Link } from "wouter";
@@ -159,6 +159,14 @@ export default function ReportsPage() {
 
   const revenueCents = Math.round(totals.sales * 100);
 
+  // Where the takings came from. Rendered only once there is more than one answer:
+  // a store with a till and no storefront would otherwise get a table with one row
+  // saying the same number as the card above it.
+  const byChannel = useMemo(
+    () => revenueByChannel(sales, { since: range.since }),
+    [sales, range.since],
+  );
+
   // Tax collected, for the return an operator files monthly or quarterly. A sum of the
   // taxCents each sale actually recorded — never a rate applied to revenue, which would
   // silently restate history the day the rate changes.
@@ -261,6 +269,34 @@ export default function ReportsPage() {
                 <KpiCard title={`Avg Ticket (${range.label})`} value={hasSales ? formatMoney(totals.avgCheck * 100) : "\u2014"} icon={<TrendingUp className="h-4 w-4" />} />
                 <KpiCard title={`Transactions (${range.label})`} value={hasSales ? totals.txns.toString() : "\u2014"} icon={<Users className="h-4 w-4" />} />
               </div>
+              {byChannel.length > 1 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Revenue by channel ({range.label})</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-muted-foreground text-left">
+                          <th className="font-normal pb-2">Channel</th>
+                          <th className="font-normal pb-2 text-right">Transactions</th>
+                          <th className="font-normal pb-2 text-right">Revenue</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {byChannel.map(row => (
+                          <tr key={row.channelKey} className="border-t">
+                            <td className="py-2">{row.channelKey}</td>
+                            <td className="py-2 text-right tabular-nums">{row.transactions}</td>
+                            <td className="py-2 text-right tabular-nums">{formatMoney(row.revenueCents)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </CardContent>
+                </Card>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <KpiCard
                   title={`Labour Cost (${range.label})`}

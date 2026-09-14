@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { productMix, realSales, salesSeries, salesSummary, type ReportSale } from "./reports";
+import { channelOf, productMix, realSales, revenueByChannel, salesSeries, salesSummary, type ReportSale } from "./reports";
 
 // Local time on purpose — the functions bucket by the operator's trading day, so the
 // fixtures have to be built the same way or the test asserts the timezone, not the logic.
@@ -183,4 +183,93 @@ test("a sale keeps the rate it was charged at, whatever the store charges now", 
   const sale: ReportSale = { createdAt: at(2026, 3, 1), totalCents: 1083, taxCents: 83, taxRatePct: 8.25, taxInclusive: false };
   assert.equal(sale.taxRatePct, 8.25);
   assert.equal(salesSummary([sale]).totalTaxCents, 83, "and the report reads the stamped tax");
+});
+
+// ---------------------------------------------------------------------------
+// Feature 28 T4: the channel axis.
+
+const chanSale = (over: Partial<ReportSale> = {}): ReportSale => ({
+  createdAt: 1_000,
+  totalCents: 1_000,
+  taxCents: 0,
+  linesJson: [],
+  ...over,
+});
+
+test("a sale that names no channel is the till's", () => {
+  assert.equal(channelOf(chanSale()), "pos");
+  assert.equal(channelOf(chanSale({ channelKey: null })), "pos");
+  assert.equal(channelOf(chanSale({ channelKey: "" })), "pos");
+  assert.equal(channelOf(chanSale({ channelKey: "web" })), "web");
+});
+
+test("the unfiltered total equals the sum of the per-channel totals", () => {
+  const sales = [
+    chanSale({ totalCents: 500, channelKey: "pos" }),
+    chanSale({ totalCents: 250, channelKey: "web" }),
+    chanSale({ totalCents: 125, channelKey: "web" }),
+    // Says nothing, so it belongs to the till — and must not go missing in the split.
+    chanSale({ totalCents: 75 }),
+  ];
+
+  const all = salesSummary(sales);
+  const split = revenueByChannel(sales);
+
+  assert.equal(all.totalRevenueCents, 950);
+  assert.equal(
+    split.reduce((n, r) => n + r.revenueCents, 0),
+    all.totalRevenueCents,
+    "the split loses or invents revenue",
+  );
+  assert.equal(
+    split.reduce((n, r) => n + r.transactions, 0),
+    all.totalSales,
+  );
+
+  // Revenue-descending: the till's 500 + 75 beats the web's 375.
+  assert.deepEqual(split, [
+    { channelKey: "pos", revenueCents: 575, transactions: 2 },
+    { channelKey: "web", revenueCents: 375, transactions: 2 },
+  ]);
+});
+
+test("a report filtered to one channel excludes the others", () => {
+  const sales = [
+    chanSale({ totalCents: 500, channelKey: "pos" }),
+    chanSale({ totalCents: 250, channelKey: "web" }),
+  ];
+
+  assert.equal(salesSummary(sales, { channel: "pos" }).totalRevenueCents, 500);
+  assert.equal(salesSummary(sales, { channel: "web" }).totalRevenueCents, 250);
+  assert.equal(salesSummary(sales, { channel: "nonexistent" }).totalRevenueCents, 0);
+  assert.equal(salesSummary(sales).totalRevenueCents, 750, "no channel means every channel");
+});
+
+test("a test order stays out of the channel split, and out of a channel filter", () => {
+  const sales = [
+    chanSale({ totalCents: 500, channelKey: "web" }),
+    chanSale({ totalCents: 9_999, channelKey: "web", isTestOrder: true }),
+  ];
+  assert.deepEqual(revenueByChannel(sales), [{ channelKey: "web", revenueCents: 500, transactions: 1 }]);
+  assert.equal(salesSummary(sales, { channel: "web" }).totalRevenueCents, 500);
+});
+
+test("product mix and the series narrow by channel too", () => {
+  const line = [{ variantId: "v1", productId: "p1", productName: "Latte", variantName: "L", qty: 1, unitPrice: 500 }];
+  const sales = [
+    chanSale({ totalCents: 500, channelKey: "pos", linesJson: line }),
+    chanSale({ totalCents: 500, channelKey: "web", linesJson: line }),
+  ];
+
+  assert.equal(productMix(sales).length, 1, "one variant across both channels");
+  assert.equal(productMix(sales)[0].quantity, 2);
+  assert.equal(productMix(sales, { channel: "web" })[0].quantity, 1);
+
+  const series = salesSeries(sales, { granularity: "daily", channel: "web" });
+  assert.equal(series.reduce((n, b) => n + b.revenueCents, 0), 500);
+});
+
+test("channels with no sales in the window are absent, not zero", () => {
+  const sales = [chanSale({ createdAt: 5_000, totalCents: 100, channelKey: "web" })];
+  assert.deepEqual(revenueByChannel(sales, { since: 10_000 }), []);
 });

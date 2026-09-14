@@ -2,7 +2,7 @@ import { parseMenuBlueprint, planMenuApply, type ExistingMenu, type FieldDiff, t
 import { MENU_CATEGORIES_KEY, SECRET_SETTING_FIELDS, mergeSettingSecrets, redactSetting, validateSetting } from "./schema";
 import { ACTIONS, actionLogEntry, type ActionLogEntry, type ActionLogInput } from "./action-log";
 import type { Modifier, ModifierGroup, Product, ProductModifierGroup, Variant } from "./schema";
-import { productMix, salesSeries, salesSummary, type Granularity, type ReportSale } from "./reports";
+import { productMix, revenueByChannel, salesSeries, salesSummary, type Granularity, type ReportSale } from "./reports";
 import { menuMargins, type MarginData, type MarginVariant } from "./pricing";
 import { channelDeleteError, channelFromInput, validateChannel, type Channel } from "./channels";
 
@@ -304,12 +304,15 @@ async function applyMenuPlan(store: ApiAdminStorage, plan: MenuPlan, existing: E
 
 // `?since=`/`?until=` are epoch millis. A value that is not a number is ignored rather than
 // silently windowing everything out — an unparseable filter must not read as "no sales".
-function parseWindow(req: ApiRequest): { since?: number; until?: number } {
+function parseWindow(req: ApiRequest): { since?: number; until?: number; channel?: string } {
   const num = (raw: string | undefined) => {
     const n = Number(raw);
     return raw != null && raw !== "" && Number.isFinite(n) ? n : undefined;
   };
-  return { since: num(req.query?.since), until: num(req.query?.until) };
+  // A repeated ?channel= arrives as an array; narrowing to two channels at once is
+  // not a thing this asks, so anything that is not one string is no filter at all.
+  const channel = typeof req.query?.channel === "string" && req.query.channel !== "" ? req.query.channel : undefined;
+  return { since: num(req.query?.since), until: num(req.query?.until), channel };
 }
 
 /**
@@ -859,7 +862,17 @@ export function createApiHandlers(store: ApiAdminStorage) {
         const summary = salesSummary(sales, window);
         // The series the page draws, from the same rows as the scalars above it.
         const granularity = (req.query?.granularity as Granularity) || "daily";
-        return { status: 200, data: { ...summary, series: salesSeries(sales, { granularity, ...window }) } };
+        return {
+          status: 200,
+          data: {
+            ...summary,
+            series: salesSeries(sales, { granularity, ...window }),
+            // The split of the same window, always unfiltered by channel — asking
+            // "how much was online" and "what is the total" in one request is the
+            // only way the two can be guaranteed to agree.
+            byChannel: revenueByChannel(sales, { since: window.since, until: window.until }),
+          },
+        };
       } catch {
         return { status: 500, data: { error: "Failed to generate sales summary" } };
       }
