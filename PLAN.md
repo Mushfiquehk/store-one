@@ -173,6 +173,89 @@ version — do not build Feature 4's narrower token and then widen it.
 
 ---
 
+## Feature 36 — One Sale, and fifteen others: the till's private copy of the data model
+
+**Status:** planned
+**Vision pillar:** #4 — the product model is "the most accurate in the industry" only if there is
+one of it. Also #6: an autopsy cannot reason about a record whose shape depends on which half of the
+codebase is reading it.
+**Depends on:** Feature 27 (the workspace layout that makes `packages/domain` the obvious home).
+**Added:** 2026-09-14
+
+### The finding
+
+**`apps/pos/src/lib/db.ts` declares its own copy of sixteen entity types**, and
+`packages/domain/schema.ts` declares the same sixteen. Nothing connects them.
+
+Feature 28 T2 found this by accident. Adding `channelKey` to the domain `Sale` produced no type
+error anywhere in the till — because the till was never reading that type. The field would simply
+not have arrived, and the first symptom would have been a storefront order syncing up with no
+channel on it. A `sale-shape.test.ts` was left behind as a tripwire; this feature removes the need
+for it.
+
+The same file already imports six types from `packages/domain` — `SaleLine`, `ProductAttributes`,
+`PricingStrategy` and three more — and re-exports them. So the pattern is there and was simply never
+finished for the entities themselves.
+
+**One of the sixteen has already drifted.** `InventoryItem`:
+
+| field | till | domain | the database |
+|---|---|---|---|
+| `purchaseUnit` | `string \| null` *optional* | `string \| null` | `purchase_unit TEXT` |
+| `unitsPerPurchase` | `number` *optional* | `number` | `units_per_purchase DOUBLE PRECISION NOT NULL DEFAULT 1` |
+
+The domain type is the one that matches the database. The till's is a fossil of the state before
+Feature 11 added purchase units, and Feature 11 is the feature whose own finding was "the bug that
+makes every cost wrong". A till row where `unitsPerPurchase` is absent rather than `1` is precisely
+the input that made it wrong.
+
+The other fifteen are field-identical today. That is not reassurance — it is the same position the
+`Sale` types were in right up until somebody added a field to one of them.
+
+### The feature
+
+Delete the till's sixteen declarations and re-export the domain's, which is what the file already
+does for the other six. The types are erased at build time, so the work that is *not* free is making
+the stored rows true: an optional field becoming required is a promise about data that is currently
+in an IndexedDB somewhere.
+
+### Tasks
+
+**T1 — Migrate the rows, before anything depends on their shape.**
+A Dexie upgrade that fills `unitsPerPurchase` (`1` — bought and stocked the same way) and
+`purchaseUnit` (`null` — unknown) on every inventory item that lacks them, and normalises
+`linesJson` on sales, which `db.ts`'s own version 3 upgrade shows could historically be a JSON
+string rather than an array. Data first, declarations second: a type that promises a field the rows
+do not have is worse than the duplication it replaces.
+*Check:* A database seeded at an old version upgrades with every inventory item carrying a numeric
+`unitsPerPurchase` and every sale carrying an array `linesJson`.
+
+**T2 — Delete the sixteen duplicates.**
+Replace them with `export type { … } from "@shared/schema"`, matching the six the file already
+re-exports. Every importer keeps importing from `@/lib/db`, so no call site changes.
+*Check:* `npm run check` reports no new errors, and `grep -c "^export interface" db.ts` returns 0.
+
+**T3 — Make it impossible to come back.**
+A test asserting `db.ts` declares no entity type that `packages/domain/schema.ts` also declares —
+which is the general form of the `sale-shape.test.ts` tripwire, so that one is deleted rather than
+left to rot beside it.
+*Check:* Re-adding an `export interface Sale` to `db.ts` fails the test, naming the type and the
+file it should live in.
+
+### Non-goals
+
+Merging the Dexie schema into the domain, moving `Channel` or the drawer types (already shared),
+and unifying the two *storage adapters* — `dexie-admin-storage.ts` and `local-storage.ts` both write
+sales and that is Feature 26's territory on the client side, not this feature's. Three tasks rather
+than four: the work does not divide into a fourth without inventing one.
+
+### Definition of done
+
+One declaration per entity, the till's rows migrated to match it, and a test that fails if a second
+declaration ever appears.
+
+---
+
 ## Feature 35 — The second storefront: the seam, proven
 
 **Status:** planned

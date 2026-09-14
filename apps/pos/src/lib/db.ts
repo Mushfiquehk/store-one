@@ -4,6 +4,7 @@ import type { InventoryLedgerEntry } from "@shared/ledger";
 import type { ActionLogEntry } from "@shared/action-log";
 import type { CashMovement, DrawerSession } from "@shared/drawer";
 import { DEFAULT_POS_CHANNEL, POS_CHANNEL_KEY, type Channel } from "@shared/channels";
+import { normalisedPurchaseUnit, normalisedSaleLines, normalisedUnitsPerPurchase } from "@shared/migrations";
 import type {
   ProductAttributes,
   ModifierScaleFactors,
@@ -563,6 +564,35 @@ class PosDatabase extends Dexie {
     this.version(21).stores({ sales: "id, createdAt, updatedAt, employeeId, channelKey" }).upgrade(async tx => {
       await tx.table("sales").toCollection().modify(sale => {
         if (!sale.channelKey) sale.channelKey = POS_CHANNEL_KEY;
+      });
+    });
+
+    /**
+     * Feature 36 T1. The till kept its own copy of sixteen entity types and one of
+     * them had already drifted: InventoryItem's purchaseUnit and unitsPerPurchase
+     * were optional here and required in packages/domain, which is the shape the
+     * server's columns actually have (units_per_purchase is NOT NULL DEFAULT 1).
+     *
+     * T2 deletes the duplicate declarations. This runs first, because an optional
+     * field becoming required is a promise about rows that already exist — and a
+     * type that promises a field the data does not carry is worse than the
+     * duplication it replaces.
+     *
+     * A missing unitsPerPurchase is exactly the input Feature 11 was written
+     * about: costPerStockUnit passes the price through unconverted when the factor
+     * is absent, so an item bought by the case has been costed as though it were
+     * bought by the unit.
+     */
+    this.version(22).stores({}).upgrade(async tx => {
+      await tx.table("inventoryItems").toCollection().modify(item => {
+        item.unitsPerPurchase = normalisedUnitsPerPurchase(item.unitsPerPurchase);
+        item.purchaseUnit = normalisedPurchaseUnit(item.purchaseUnit);
+      });
+      // Version 3 normalised these once already, which is the evidence that a sale
+      // can carry linesJson as a string. Anything arriving since — a restore, a
+      // sync from an older device — would have slipped past it.
+      await tx.table("sales").toCollection().modify(sale => {
+        sale.linesJson = normalisedSaleLines(sale.linesJson);
       });
     });
   }
