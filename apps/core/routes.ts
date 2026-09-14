@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from "express";
 import { storage, adminStorage, scheduleStorage, settingsStorage, channelStorage, type ListOptions } from "./storage";
+import { issueChannelToken, listChannelTokens, requireChannel, revokeChannelToken } from "./channel-auth";
 import { z } from "zod";
 import { createInsertSchema } from "drizzle-zod";
 import { SYNC_CATEGORY_TABLES, type SyncCategory } from "../../packages/domain/schema";
@@ -1188,6 +1189,39 @@ router.post("/api/schedule/copy-week", async (req: Request, res: Response) => {
   } catch (err) {
     res.status(500).json({ error: "Failed to copy week" });
   }
+});
+
+// Channel tokens live here rather than in the shared handlers, deliberately: issuing
+// one needs a CSPRNG and a hash, and packages/domain is imported by the till's browser
+// bundle. A token the till could mint is a token in an IndexedDB somebody can open.
+router.post("/api/admin/channels/:key/tokens", async (req: Request, res: Response) => {
+  const channel = await channelStorage.get(req.params.key);
+  if (!channel) { res.status(404).json({ error: "Not found" }); return; }
+  const label = typeof req.body?.label === "string" ? req.body.label.trim() : "";
+  const issued = await issueChannelToken(req.params.key, label);
+  // The only time the plaintext exists outside the caller's deployment. There is no
+  // route that returns it again, because there is nowhere it was kept.
+  res.status(201).json({ ...issued, notice: "Copy this token now — it cannot be shown again." });
+});
+
+router.get("/api/admin/channels/:key/tokens", async (req: Request, res: Response) => {
+  res.json(await listChannelTokens(req.params.key));
+});
+
+router.delete("/api/admin/channels/:key/tokens/:id", async (req: Request, res: Response) => {
+  const revoked = await revokeChannelToken(req.params.key, req.params.id);
+  if (!revoked) { res.status(404).json({ error: "Not found" }); return; }
+  res.json({ success: true });
+});
+
+// Everything a storefront calls hangs off /api/channel and goes through the gate.
+// Feature 33 adds the menu here and Feature 34 the orders.
+router.use("/api/channel", requireChannel);
+
+// What a deployment asks to find out whether its token works and what it is. The
+// storefront calls it at boot; an operator calls it when a deployment is silent.
+router.get("/api/channel/whoami", (req: Request, res: Response) => {
+  res.json({ channelKey: req.channel!.channelKey, locationId: req.channel!.locationId });
 });
 
 router.get("/api/admin/channels", async (req: Request, res: Response) => { await handleViaSharedHandlers(req, res); });
