@@ -126,7 +126,7 @@ test("both servers forward the query string to the shared handlers", () => {
   const express = readFileSync(new URL("../../apps/core/routes.ts", import.meta.url), "utf8");
   assert.match(express, /query: req\.query/, "server/routes.ts stopped forwarding req.query");
 
-  const local = readFileSync(new URL("../../client/src/lib/local-server.ts", import.meta.url), "utf8");
+  const local = readFileSync(new URL("../../apps/pos/src/lib/local-server.ts", import.meta.url), "utf8");
   assert.match(local, /URLSearchParams/, "local-server.ts stopped parsing the query string");
   assert.match(local, /^\s*query,$/m, "local-server.ts stopped passing query into ApiRequest");
 });
@@ -135,7 +135,7 @@ test("both servers forward the query string to the shared handlers", () => {
 // look good in a screenshot. The Reports page fabricated two of its three tabs for as long
 // as it existed, and nothing on screen said so.
 test("the Reports page contains no random numbers", () => {
-  const page = readFileSync(new URL("../../client/src/pages/reports.tsx", import.meta.url), "utf8");
+  const page = readFileSync(new URL("../../apps/pos/src/pages/reports.tsx", import.meta.url), "utf8");
   assert.ok(!page.includes("Math.random"), "Math.random is back in reports.tsx");
   // Labour percent divides by revenue, so it is the figure most likely to be quietly
   // re-derived on the page instead of coming from the tested function.

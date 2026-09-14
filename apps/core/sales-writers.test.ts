@@ -58,7 +58,7 @@ test("a synced POS sale lands as a row, so server reporting can see it", async t
       and(eq(syncRecords.clientId, client.id), eq(syncRecords.tableName, "sales")),
     );
 
-    // The device syncs the sale, exactly as client/src/lib/sync.ts pushes it.
+    // The device syncs the sale, exactly as apps/pos/src/lib/sync.ts pushes it.
     await syncSale(client);
 
     const visible = (await adminStorage.listSales()) as Array<{ id: string; totalCents: number }>;

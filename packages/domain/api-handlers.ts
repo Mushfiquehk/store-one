@@ -501,7 +501,7 @@ export function createApiHandlers(store: ApiAdminStorage) {
   });
 
   // Settings were Express-only; they live here so the local server serves them too.
-  // Response shapes are the ones client/src/pages/settings.tsx already consumes.
+  // Response shapes are the ones apps/pos/src/pages/settings.tsx already consumes.
   routes.push({
     method: "GET",
     pattern: "/api/settings",

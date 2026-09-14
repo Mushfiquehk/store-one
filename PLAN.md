@@ -99,29 +99,35 @@ Feature 5 (pricing + discounts) — independent, can go first or last
 
 ### Features collide in these files — do not run them in parallel blind
 
-`shared/api-handlers.ts` is touched by **all five features**. Parallel worktrees will conflict
+**Paths in this table are post-Feature-27.** The move to workspaces renamed `packages/domain/` to
+`packages/domain`, `apps/core/` to `apps/core` and `client/` to `apps/pos`. The findings written into
+Features 1–26 below still cite the old paths, because that is where the code was when each finding
+was made; this table is the live index and tracks the tree as it stands.
+
+
+`packages/domain/api-handlers.ts` is touched by **all five features**. Parallel worktrees will conflict
 there. Either land features serially, or expect to resolve that file on every merge.
 
 | File | Features that modify it |
 |---|---|
-| `shared/api-handlers.ts` | 1, 2, 3, 4, 5, 6 — every feature |
-| `server/schema.ts` | 3 (locationId on ten tables), 4 (apiTokens table), 11 (two columns on `inventoryItems`) |
-| `server/storage.ts` | 3 (~40 methods), 11 (the invoice-receive path) |
-| `server/routes.ts` | 3, 4, 6 (moves the demo-clear handler out), 7 (the adapter stubs) |
-| `server/bom-engine.ts` | 5 (pricing, `:295-335`), 15 (depletion, `:203-293`) — different regions |
-| `client/src/pages/pos.tsx` | 15 (deletes the duplicated depletion walk), 16 (payment dialog, `:900-960`) |
-| `client/src/lib/store.tsx` | 16 (deletes the `integrations` state and its toggle) |
-| `client/src/lib/db.ts` | 9 (backup list), 11 (two columns), 12 (reversal fields), 15 (ledger table) |
-| `client/src/lib/local-storage.ts` | 11 (two copies of the same receive path) |
-| `client/src/components/product-wizard.tsx` | 11 (deletes the duplicated cost arithmetic) |
-| `shared/pricing.ts` | 5 creates it, 10 adds costing functions. ~~11~~ **(done)** — its conversion lives in `shared/units.ts` |
-| `client/src/pages/reports.tsx` | 10 (adds a margins table), ~~13~~ **(done)**, 14 (adds labour) |
-| `client/src/pages/employees.tsx` | 14 (adds the pay-rate field) |
-| `shared/api-handlers.ts` (reports) | 12 moves the two report handler bodies into `shared/reports.ts` |
-| `client/src/pages/onboarding.tsx` | 6 |
-| `client/src/lib/sync.ts` | 8 |
-| `server/storage.ts` (sync engine) | 8 — a different region from Feature 3's ~40 CRUD methods |
-| New files, no conflict | `shared/menu-blueprint.ts` (1), `shared/mcp.ts` (2), `server/auth.ts` (4), `shared/pricing.ts` (5) |
+| `packages/domain/api-handlers.ts` | 1, 2, 3, 4, 5, 6 — every feature |
+| `apps/core/schema.ts` | 3 (locationId on ten tables), 4 (apiTokens table), 11 (two columns on `inventoryItems`) |
+| `apps/core/storage.ts` | 3 (~40 methods), 11 (the invoice-receive path) |
+| `apps/core/routes.ts` | 3, 4, 6 (moves the demo-clear handler out), 7 (the adapter stubs) |
+| `apps/core/bom-engine.ts` | 5 (pricing, `:295-335`), 15 (depletion, `:203-293`) — different regions |
+| `apps/pos/src/pages/pos.tsx` | 15 (deletes the duplicated depletion walk), 16 (payment dialog, `:900-960`) |
+| `apps/pos/src/lib/store.tsx` | 16 (deletes the `integrations` state and its toggle) |
+| `apps/pos/src/lib/db.ts` | 9 (backup list), 11 (two columns), 12 (reversal fields), 15 (ledger table) |
+| `apps/pos/src/lib/local-storage.ts` | 11 (two copies of the same receive path) |
+| `apps/pos/src/components/product-wizard.tsx` | 11 (deletes the duplicated cost arithmetic) |
+| `packages/domain/pricing.ts` | 5 creates it, 10 adds costing functions. ~~11~~ **(done)** — its conversion lives in `packages/domain/units.ts` |
+| `apps/pos/src/pages/reports.tsx` | 10 (adds a margins table), ~~13~~ **(done)**, 14 (adds labour) |
+| `apps/pos/src/pages/employees.tsx` | 14 (adds the pay-rate field) |
+| `packages/domain/api-handlers.ts` (reports) | 12 moves the two report handler bodies into `packages/domain/reports.ts` |
+| `apps/pos/src/pages/onboarding.tsx` | 6 |
+| `apps/pos/src/lib/sync.ts` | 8 |
+| `apps/core/storage.ts` (sync engine) | 8 — a different region from Feature 3's ~40 CRUD methods |
+| New files, no conflict | `packages/domain/menu-blueprint.ts` (1), `packages/domain/mcp.ts` (2), `apps/core/auth.ts` (4), `packages/domain/pricing.ts` (5) |
 
 Features 1 and 5 are the safest pair to run concurrently: both touch `api-handlers.ts`, but in
 different regions (a new route versus the `/api/orders/simulate` body).

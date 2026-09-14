@@ -53,7 +53,7 @@ test("an unattributed action is SYSTEM with a null actor, not a blank employee",
 // The property that makes the log worth having, enforced rather than promised: nothing in the
 // codebase updates or deletes one of these rows.
 test("nothing in the codebase can rewrite the action log", () => {
-  const roots = ["client/src/lib", "client/src/pages", "packages/domain", "apps/core"];
+  const roots = ["apps/pos/src/lib", "apps/pos/src/pages", "packages/domain", "apps/core"];
   const offenders: string[] = [];
 
   const walk = (dir: string) => {
