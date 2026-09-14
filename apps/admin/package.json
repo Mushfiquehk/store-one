@@ -1,0 +1,11 @@
+{
+  "name": "@store-one/admin",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The central console. Catalogue, merchandising, brand identity and the order queue — the operator's desk, not the till.",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build"
+  }
+}
