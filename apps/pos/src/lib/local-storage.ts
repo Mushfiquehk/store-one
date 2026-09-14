@@ -1,4 +1,5 @@
 import { db } from "./db";
+import { POS_CHANNEL_KEY } from "@shared/channels";
 import { costPerStockUnit, stockUnitsReceived } from "@shared/units";
 import { WASTE_REASONS, ledgerRows, type InventoryLedgerEntry, type LedgerContext, type LedgerReason, type WasteReason } from "@shared/ledger";
 import {
@@ -624,6 +625,7 @@ export const storage = {
       taxRatePct: data.taxRatePct ?? null,
       taxInclusive: data.taxInclusive ?? null,
       employeeId: data.employeeId ?? null,
+      channelKey: data.channelKey || POS_CHANNEL_KEY,
       status: data.status!,
       linesJson: data.linesJson!,
       customerName: data.customerName ?? "",

@@ -1,4 +1,4 @@
-import type { Channel } from "@shared/channels";
+import { POS_CHANNEL_KEY, type Channel } from "@shared/channels";
 import { ledgerRows } from "@shared/ledger";
 import type { ActionLogEntry } from "@shared/action-log";
 import { db } from "./db";
@@ -441,6 +441,8 @@ export const dexieAdminStorage: ApiAdminStorage = {
       taxRatePct: (data.taxRatePct as number) ?? null,
       taxInclusive: (data.taxInclusive as boolean) ?? null,
       employeeId: (data.employeeId as string) ?? null,
+      // A caller that does not say is the till. Mirrors buildSaleRow in apps/core.
+      channelKey: (data.channelKey as string) || POS_CHANNEL_KEY,
       status: (data.status as string) ?? "completed",
       linesJson: (data.linesJson as Sale["linesJson"]) ?? [],
       customerName: (data.customerName as string) ?? "",

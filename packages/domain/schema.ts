@@ -360,6 +360,15 @@ export type Sale = {
   taxRatePct: number | null;
   taxInclusive: boolean | null;
   /**
+   * Which channel it came in through — 'pos' for the till, a storefront's key for an
+   * online order. Not null and not optional: once channels exist every sale genuinely
+   * does come from one, and a null here would mean nothing rather than meaning unknown.
+   *
+   * That is a different question from what to do with rows written before the column
+   * existed, which is answered by regenerating them — there is no real data yet.
+   */
+  channelKey: string;
+  /**
    * Who rang it. Null when nobody was on the till — an honest answer that reports render as
    * "unattributed", not a reason to drop the sale. Existing rows stay null: guessing who rang
    * a sale from last week is worse than admitting nobody recorded it.

@@ -205,6 +205,9 @@ async function initSchema() {
   await db.execute(sql`ALTER TABLE admin_sales ADD COLUMN IF NOT EXISTS tax_inclusive BOOLEAN`);
   // Feature 19 T2: the cashier. Null on existing rows, never guessed.
   await db.execute(sql`ALTER TABLE admin_sales ADD COLUMN IF NOT EXISTS employee_id TEXT`);
+  await db.execute(sql`ALTER TABLE admin_sales ADD COLUMN IF NOT EXISTS channel_key TEXT NOT NULL DEFAULT 'pos'`);
+  // Every report that splits revenue by channel walks this.
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS admin_sales_channel_idx ON admin_sales(channel_key)`);
   // Feature 19 T3: the action log. Deliberately without updated_at or deleted_at — the table
   // has nowhere to record an edit because nothing may edit it.
   await db.execute(sql`
