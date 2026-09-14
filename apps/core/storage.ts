@@ -11,6 +11,7 @@ import type { StoreSetting } from "../../packages/domain/api-handlers";
 import { eq, desc, sql, and, gt, inArray, isNull, count } from "drizzle-orm";
 import { costPerStockUnit } from "../../packages/domain/units";
 import { SALES_TABLE, resolveByRecency, resolveConflict } from "../../packages/domain/sync-compare";
+import { POS_CHANNEL_KEY } from "../../packages/domain/channels";
 
 export interface ListOptions {
   limit?: number;
@@ -172,6 +173,10 @@ export function buildSaleRow(data: Record<string, unknown>, now: number) {
     taxRatePct: (data.taxRatePct as number) ?? null,
     taxInclusive: (data.taxInclusive as boolean) ?? null,
     employeeId: (data.employeeId as string) ?? null,
+    // The one place a sale's channel is decided. A caller that does not say is the
+    // till: it is the only writer that predates channels, and Feature 26 made this
+    // the single write path precisely so a new field lands here once.
+    channelKey: (data.channelKey as string) || POS_CHANNEL_KEY,
     updatedAt: now,
     deletedAt: null as number | null,
   };
@@ -939,6 +944,8 @@ export const adminStorage: IAdminStorage = {
     if (data.customerName !== undefined) set.customerName = data.customerName;
     if (data.linesJson !== undefined) set.linesJson = data.linesJson;
     if (data.closedAt !== undefined) set.closedAt = data.closedAt;
+    // channelKey is deliberately absent: where a sale came from is a fact about the
+    // moment it happened, and no later edit gets to move it to another channel.
     const [r] = await db.update(adminSales).set(set).where(eq(adminSales.id, id)).returning();
     return r || null;
   },

@@ -114,3 +114,45 @@ test("a storefront channel can be added, edited, and withdrawn", async t => {
     );
   }
 });
+
+test("a sale written without a channel is the till's, and no sale ends up with none", async t => {
+  if (!DATABASE_URL) {
+    t.skip("set DATABASE_URL to a throwaway Postgres to run the channel-on-sales test");
+    return;
+  }
+  const { initDb } = await import("./init-db");
+  const { pool, db } = await import("./db");
+  const { adminStorage } = await import("./storage");
+  const { adminSales } = await import("./schema");
+  const { isNull, or, eq } = await import("drizzle-orm");
+  openPool = pool;
+  await initDb();
+
+  const id = `chan_sale_${Date.now().toString(36)}`;
+  // Deliberately says nothing about a channel — this is the till's shape of call.
+  const created = (await adminStorage.createSale({
+    id,
+    createdAt: Date.now(),
+    totalCents: 500,
+    linesJson: [],
+  })) as { channelKey: string };
+  assert.equal(created.channelKey, "pos", "a sale written with no channel did not land on the till's");
+
+  // A storefront's order says so, and is taken at its word.
+  const webId = `${id}_web`;
+  const web = (await adminStorage.createSale({
+    id: webId,
+    createdAt: Date.now(),
+    totalCents: 500,
+    linesJson: [],
+    channelKey: "web",
+  })) as { channelKey: string };
+  assert.equal(web.channelKey, "web");
+
+  // The property that matters across the whole table, not just the row just written.
+  const orphans = await db
+    .select({ id: adminSales.id })
+    .from(adminSales)
+    .where(or(isNull(adminSales.channelKey), eq(adminSales.channelKey, "")));
+  assert.deepEqual(orphans, [], "some sales carry no channel");
+});

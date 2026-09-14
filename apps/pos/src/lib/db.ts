@@ -3,7 +3,7 @@ import type { StoreSetting } from "@shared/api-handlers";
 import type { InventoryLedgerEntry } from "@shared/ledger";
 import type { ActionLogEntry } from "@shared/action-log";
 import type { CashMovement, DrawerSession } from "@shared/drawer";
-import { DEFAULT_POS_CHANNEL, type Channel } from "@shared/channels";
+import { DEFAULT_POS_CHANNEL, POS_CHANNEL_KEY, type Channel } from "@shared/channels";
 import type {
   ProductAttributes,
   ModifierScaleFactors,
@@ -163,6 +163,8 @@ export interface Sale {
   taxInclusive: boolean | null;
   /** Who rang it, or null when nobody was on the till. */
   employeeId: string | null;
+  /** Which channel it came in through — 'pos' for the till, a storefront's key online. */
+  channelKey: string;
   status: string;
   linesJson: SaleLine[];
   customerName: string;
@@ -552,6 +554,16 @@ class PosDatabase extends Dexie {
       channels: "key, kind, updatedAt",
     }).upgrade(async tx => {
       await tx.table("channels").put({ ...DEFAULT_POS_CHANNEL, updatedAt: Date.now() });
+    });
+
+    // Every sale in a till's IndexedDB was rung on the till, by construction —
+    // there was no other way for one to exist. Stamped rather than left undefined
+    // because a browser's database has no reseed path short of clearing it, and
+    // three lines here costs less than every reader guarding for a missing field.
+    this.version(21).stores({ sales: "id, createdAt, updatedAt, employeeId, channelKey" }).upgrade(async tx => {
+      await tx.table("sales").toCollection().modify(sale => {
+        if (!sale.channelKey) sale.channelKey = POS_CHANNEL_KEY;
+      });
     });
   }
 }

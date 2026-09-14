@@ -1,3 +1,4 @@
+import { POS_CHANNEL_KEY } from "@shared/channels";
 import { db } from "./db";
 import type {
   Product,
@@ -421,6 +422,8 @@ function generateSales(): Sale[] {
         taxInclusive: false,
         // Demo sales are unattributed: inventing a cashier would put a name on takings nobody rang.
         employeeId: null,
+        // Rung at the counter, which is the only channel the demo store has.
+        channelKey: POS_CHANNEL_KEY,
         status: "completed",
         linesJson: lines,
         customerName: "",

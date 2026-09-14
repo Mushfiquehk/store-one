@@ -158,6 +158,11 @@ export const adminSales = pgTable("admin_sales", {
   // Who rang it. Nullable, and not a foreign key: employees are client-owned by Feature 7 T4,
   // so the server holds the id without being able to resolve it.
   employeeId: text("employee_id"),
+  // Which channel it came in through. Defaulted rather than nullable: a sale that
+  // names no channel is a sale from the till, which is the only writer that existed
+  // before there were any. Not a foreign key — a channel is withdrawn by soft
+  // deletion and the sales that named it must still read back.
+  channelKey: text("channel_key").notNull().default("pos"),
   status: text("status").notNull().default("completed"),
   customerName: text("customer_name").notNull().default(""),
   linesJson: jsonb("lines_json").notNull(),
